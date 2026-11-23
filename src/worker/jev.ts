@@ -27,6 +27,33 @@ export class JevError extends Error {
 
 export type DecideResult = { answers: JevAnswers; model: string; ms: number; usage: JevUsage };
 
+export const WARM_TIMEOUT_MS = 1500;
+
+/**
+ * Cheapest authenticated request (GET /v1/models) so TLS + keep-alive are open before the
+ * first route call: cold costs ~0.8–1.1 s, over the 800 ms router budget. Never throws;
+ * returns the elapsed ms (failures are logged, the number is still a measured duration).
+ */
+export async function warmJev(env: JevEnv): Promise<number> {
+  const t0 = Date.now();
+  const ctrl = new AbortController();
+  const timer = setTimeout(() => ctrl.abort(), WARM_TIMEOUT_MS);
+  try {
+    const res = await fetch(new URL("/v1/models", env.JEV_URL).toString(), {
+      headers: { authorization: "Bearer " + env.JEV_API_KEY },
+      signal: ctrl.signal,
+    });
+    // Drain the body so the connection goes back to the pool.
+    await res.arrayBuffer();
+    if (!res.ok) console.warn("warmJev: HTTP " + res.status);
+  } catch (err) {
+    console.warn("warmJev failed:", ctrl.signal.aborted ? "timeout (>" + WARM_TIMEOUT_MS + " ms)" : err instanceof Error ? err.message : String(err));
+  } finally {
+    clearTimeout(timer);
+  }
+  return Date.now() - t0;
+}
+
 export async function decide(
   env: JevEnv,
   state: JsonObject,

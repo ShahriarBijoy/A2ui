@@ -111,7 +111,7 @@ describe("deriveKnobs", () => {
     expect(k).toMatchObject({ type: "bool", current: false, label: "Return flight", path: "/trip/return" });
   });
 
-  test("time-only input: half-hour slots within ±6 h, labelled relative to now, current excluded", () => {
+  test("time-only input: half-hour slots within ±6 h, labelled relative to the current value, current excluded", () => {
     const [k] = deriveKnobs(
       [{ id: "t", component: "DateTimeInput", label: "Time", enableTime: true, enableDate: false, value: { "@path": "/t" } }],
       { t: "19:00" },
@@ -173,6 +173,77 @@ describe("deriveKnobs", () => {
     expect(c.options.find((o) => o.key === "1D")?.label).toBe("Row 1, seat D (window)");
     expect(c.options.find((o) => o.key === "1B")?.label).toBe("Row 1, seat B (aisle)");
     expect(c.options.find((o) => o.key === "12C")).toBeUndefined();
+  });
+
+  test("huge LLM-written ranges stay O(cap): 60 nearest numbers, 254 nearest seats, fast", () => {
+    const t0 = performance.now();
+    const [slider] = deriveKnobs(
+      [{ id: "s", component: "Slider", label: "Budget", min: 0, max: 5_000_000_000, value: { "@path": "/b" } }],
+      { b: 2_500_000 },
+      NOW,
+    );
+    const [stepper] = deriveKnobs([{ id: "n", component: "Stepper", label: "N", min: 1, max: 1e12, value: { "@path": "/n" } }], { n: 7 }, NOW);
+    const [seat] = deriveKnobs(
+      [{ id: "seat", component: "SeatMap", rows: 10_000_000, layout: "ABC DEF", value: { "@path": "/seat" } }],
+      { seat: "5000000C" },
+      NOW,
+    );
+    const took = performance.now() - t0;
+    const sv = choice(slider).options.map((o) => o.value as number);
+    expect(sv).toHaveLength(60);
+    expect(Math.min(...sv)).toBe(2_499_970);
+    expect(Math.max(...sv)).toBe(2_500_030);
+    expect(sv).not.toContain(2_500_000);
+    const nv = choice(stepper).options.map((o) => o.value as number);
+    expect(nv).toHaveLength(60);
+    expect(nv[0]).toBe(1);
+    expect(nv).not.toContain(7);
+    const keys = choice(seat).options.map((o) => o.key);
+    expect(keys).toHaveLength(254);
+    expect(keys).toContain("5000000D");
+    expect(keys).not.toContain("5000000C");
+    expect(took).toBeLessThan(50);
+  });
+
+  test("a float current value is excluded even when it is not exactly on the grid", () => {
+    const [k] = deriveKnobs(
+      [{ id: "o", component: "Slider", min: 0, max: 1, steps: 10, value: { "@path": "/o" } }],
+      { o: 0.1 + 0.2 },
+      NOW,
+    );
+    expect(choice(k).options.map((o) => o.value)).not.toContain(0.3);
+  });
+
+  test("time-only input with no current value offers all 48 slots", () => {
+    const [k] = deriveKnobs(
+      [{ id: "t", component: "DateTimeInput", label: "Time", enableTime: true, enableDate: false, value: { "@path": "/t" } }],
+      {},
+      NOW,
+    );
+    const c = choice(k);
+    expect(c.options).toHaveLength(48);
+    expect(c.currentLabel).toBe("not set");
+  });
+
+  test("an option whose value is 'unchanged' (or a prototype key) is handled", () => {
+    const [k] = deriveKnobs(
+      [
+        {
+          id: "p",
+          component: "ChoicePicker",
+          label: "Pick",
+          options: ["unchanged", "constructor", "toString", "a"].map((v) => ({ label: v, value: v })),
+          value: { "@path": "/p" },
+        },
+      ],
+      { p: ["a"] },
+      NOW,
+    );
+    expect(choice(k).options.map((o) => o.key)).toEqual(["constructor", "toString"]);
+    const { questions } = buildRouteRequest("x", [k]);
+    const q = questions.k0;
+    if (q.type !== "choice") throw new Error("k0 should be a choice");
+    expect(Object.keys(q.criteria)).toEqual(["unchanged", "constructor", "toString"]);
   });
 
   test("seat map with a bound taken list and more than 254 free seats is capped", () => {
@@ -237,6 +308,18 @@ describe("buildRouteRequest", () => {
     expect(guests.instructions).toStartWith("What should 'Guests' be after this request? Current value: 4.");
     expect(guests.instructions).toContain("A couple means two.");
     expect(Object.keys(guests.criteria)).toHaveLength(12);
+  });
+
+  test("date knobs get the date relative-word hint", () => {
+    const knobs = deriveKnobs(
+      [{ id: "d", component: "DateTimeInput", label: "Date", enableDate: true, value: { "@path": "/d" } }],
+      { d: "2026-11-24" },
+      NOW,
+    );
+    const q = buildRouteRequest("the day after", knobs).questions.k0;
+    expect(q.instructions).toEndWith(
+      "If the speaker only says later, earlier or the day after without a date, pick one day after or before the current value.",
+    );
   });
 
   test("multi knob → one noul per option; bool → one noul; duplicate labels get distinct screen keys", () => {
@@ -351,6 +434,11 @@ describe("answersToRoute", () => {
     expect(r.reason).toBe("edit, but no knob changed");
   });
 
+  test("kind 'other' → compose", () => {
+    const r = answersToRoute({ kind: kind(0.01, 0.02, 0.97), k0: pick({ unchanged: 1 }), k1: pick({ unchanged: 1 }) }, knobs, 1, "jev");
+    expect(r).toMatchObject({ decision: "compose", kind: "other", kindConfidence: 0.97, reason: "not an edit (other 0.97)" });
+  });
+
   test("missing kind answer → compose", () => {
     expect(answersToRoute({}, knobs, 1, "jev").decision).toBe("compose");
   });
@@ -388,35 +476,7 @@ describe("answersToRoute", () => {
   });
 
   test("multi: adding an option keeps the existing selection; bool alongside", () => {
-    const k: Knob[] = [
-      {
-        id: "/diet",
-        componentId: "d",
-        component: "ChoicePicker",
-        path: "/diet",
-        label: "Diet",
-        type: "multi",
-        current: ["gf"],
-        options: [
-          { key: "vegan", label: "Vegan", value: "vegan" },
-          { key: "gf", label: "Gluten free", value: "gf" },
-          { key: "halal", label: "Halal", value: "halal" },
-        ],
-      },
-      { id: "/ret", componentId: "r", component: "CheckBox", path: "/ret", label: "Return", type: "bool", current: false },
-    ];
-    const r = answersToRoute(
-      {
-        kind: kind(0.9, 0.1),
-        k0_0: { type: "noul", noul: 0.8 },
-        k0_1: { type: "noul", noul: 0.1 },
-        k0_2: { type: "noul", noul: 0.05 },
-        k1: { type: "noul", noul: 0.7 },
-      },
-      k,
-      1,
-      "jev",
-    );
+    const r = answersToRoute({ kind: kind(0.9, 0.1), k0_0: n(0.8), k0_1: n(0.1), k0_2: n(0.05), k1: n(0.7) }, dietKnobs, 1, "jev");
     expect(r.decision).toBe("patch");
     expect(r.patches).toEqual([
       { knobId: "/diet", path: "/diet", value: ["vegan", "gf"], confidence: 0.8 },

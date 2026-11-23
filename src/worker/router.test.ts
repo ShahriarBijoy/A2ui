@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, mock, test } from "bun:test";
 import { deriveKnobs } from "@shared/knobs";
 import type { CatalogComponent } from "@shared/a2ui";
 import type { TurnRequest } from "@shared/protocol";
+import { warmJev } from "./jev";
 import { route } from "./router";
 
 const env = { JEV_URL: "https://jev.test/v1/systemone", JEV_API_KEY: "test-key", JEV_MODEL: "jev-latest" };
@@ -119,5 +120,28 @@ describe("route", () => {
     setTimeout(() => ctrl.abort(), 20);
     const r = await route(request("six"), env, ctrl.signal);
     expect(r).toMatchObject({ decision: "compose", reason: "router aborted" });
+  });
+});
+
+describe("warmJev", () => {
+  test("GET /v1/models with the bearer key, drains the body, returns ms", async () => {
+    mockFetch(async () => Response.json({ models: [] }));
+    const ms = await warmJev(env);
+    expect(typeof ms).toBe("number");
+    expect(calls).toHaveLength(1);
+    expect(calls[0].url).toBe("https://jev.test/v1/models");
+    expect(calls[0].init.method ?? "GET").toBe("GET");
+    expect(new Headers(calls[0].init.headers).get("authorization")).toBe("Bearer test-key");
+  });
+
+  test("never throws: HTTP error, network error, hang (1500 ms timeout)", async () => {
+    mockFetch(async () => new Response("no", { status: 401 }));
+    expect(await warmJev(env)).toBeGreaterThanOrEqual(0);
+    mockFetch(() => Promise.reject(new TypeError("fetch failed")));
+    expect(await warmJev(env)).toBeGreaterThanOrEqual(0);
+    mockFetch(hang);
+    const ms = await warmJev(env);
+    expect(ms).toBeGreaterThanOrEqual(1490);
+    expect(ms).toBeLessThan(2500);
   });
 });

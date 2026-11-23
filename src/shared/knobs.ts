@@ -51,9 +51,9 @@ export function deriveKnobs(components: CatalogComponent[], data: JsonValue, now
     let knob: Knob | null = null;
     try {
       knob = componentKnob(c, path, data, now);
-    } catch {
-      // A malformed component must not take the whole turn down; it simply is not a knob.
-      knob = null;
+    } catch (err) {
+      // One malformed component must not take the turn down: skip it, but leave a trace for rehearsal.
+      console.warn("deriveKnobs: skipped component", c.id, c.component, err instanceof Error ? err.message : String(err));
     }
     if (knob) {
       seen.add(path);
@@ -120,22 +120,21 @@ type ChoiceKnob = Extract<Knob, { type: "choice" }>;
 function numberKnob(base: BaseFields, current: JsonValue | undefined, min: number, max: number, step: number): ChoiceKnob | null {
   if (!(step > 0) || max < min) return null;
   const cur = typeof current === "number" && Number.isFinite(current) ? current : null;
-  const values: number[] = [];
+  const curGrid = cur === null ? null : round10(cur);
   // Index-based so float steps (0.1) do not accumulate error.
   const count = Math.floor((max - min) / step + 1e-9);
-  for (let i = 0; i <= count; i++) {
-    const v = round10(min + i * step);
-    if (v !== cur) values.push(v);
+  const at = (i: number) => round10(min + i * step);
+  // Walk outward from the current value (ties: lower first). O(cap) even for LLM-written ranges like 0..5,000,000.
+  const anchor = cur ?? min;
+  let lo = Math.min(count, Math.max(0, Math.floor((anchor - min) / step)));
+  let hi = lo + 1;
+  const kept: number[] = [];
+  while (kept.length < NUMBER_OPTION_CAP && (lo >= 0 || hi <= count)) {
+    const takeLo = lo >= 0 && (hi > count || Math.abs(at(lo) - anchor) <= Math.abs(at(hi) - anchor));
+    const v = takeLo ? at(lo--) : at(hi++);
+    if (v !== curGrid) kept.push(v);
   }
-  let kept = values;
-  if (values.length > NUMBER_OPTION_CAP) {
-    const anchor = cur ?? min;
-    kept = values
-      .slice()
-      .sort((a, b) => Math.abs(a - anchor) - Math.abs(b - anchor) || a - b)
-      .slice(0, NUMBER_OPTION_CAP)
-      .sort((a, b) => a - b);
-  }
+  kept.sort((a, b) => a - b);
   if (kept.length === 0) return null;
   return {
     ...base,
@@ -243,26 +242,24 @@ function seatKnob(
   const takenSet = new Set(resolveStringList(taken, data));
   const cur = typeof current === "string" ? current : null;
   const letters = layout.split("").filter((ch) => ch.trim() !== "");
+  if (letters.length === 0) return null;
   const positions = seatPositions(layout);
+  const rowCount = Math.floor(rows);
   const curRow = cur ? Number.parseInt(cur, 10) : NaN;
-  const seats: { key: string; row: number; label: string }[] = [];
-  for (let r = 1; r <= Math.floor(rows); r++) {
-    for (const letter of letters) {
-      const key = String(r) + letter;
-      if (key === cur || takenSet.has(key)) continue;
-      seats.push({ key, row: r, label: "Row " + r + ", seat " + letter + " (" + (positions.get(letter) ?? "seat") + ")" });
+  const start = Number.isFinite(curRow) ? Math.min(rowCount, Math.max(1, curRow)) : 1;
+  const kept: { key: string; row: number; col: number; label: string }[] = [];
+  // Walk rows outward from the current seat (or from row 1), nearer rows first: O(cap) for any row count.
+  for (let d = 0; kept.length < MAX_CHOICE_OPTIONS && (start - d >= 1 || start + d <= rowCount); d++) {
+    for (const r of d === 0 ? [start] : [start - d, start + d]) {
+      if (r < 1 || r > rowCount) continue;
+      letters.forEach((letter, col) => {
+        const key = String(r) + letter;
+        if (kept.length >= MAX_CHOICE_OPTIONS || key === cur || takenSet.has(key)) return;
+        kept.push({ key, row: r, col, label: "Row " + r + ", seat " + letter + " (" + (positions.get(letter) ?? "seat") + ")" });
+      });
     }
   }
-  let kept = seats;
-  if (seats.length > MAX_CHOICE_OPTIONS && Number.isFinite(curRow)) {
-    kept = seats
-      .map((s, i) => ({ s, i }))
-      .sort((a, b) => Math.abs(a.s.row - curRow) - Math.abs(b.s.row - curRow) || a.i - b.i)
-      .slice(0, MAX_CHOICE_OPTIONS)
-      .sort((a, b) => a.i - b.i)
-      .map((x) => x.s);
-  }
-  kept = kept.slice(0, MAX_CHOICE_OPTIONS);
+  kept.sort((a, b) => a.row - b.row || a.col - b.col);
   if (kept.length === 0) return null;
   return {
     ...base,
@@ -335,7 +332,7 @@ export function buildRouteRequest(utterance: string, knobs: Knob[]): RouteReques
     if (knob.type === "choice") {
       const criteria: Record<string, string> = { [UNCHANGED]: "No change asked for " + knob.label };
       for (const o of knob.options) {
-        if (o.key !== UNCHANGED && !(o.key in criteria)) criteria[o.key] = o.label;
+        if (o.key !== UNCHANGED && !Object.hasOwn(criteria, o.key)) criteria[o.key] = o.label;
       }
       if (Object.keys(criteria).length < 2) return;
       const flavour = knobFlavour(knob);
@@ -392,8 +389,8 @@ function knobCurrentLabel(knob: Knob): string {
 }
 
 function uniqueKey(obj: JsonObject, key: string): string {
-  if (!(key in obj)) return key;
-  for (let n = 2; ; n++) if (!(key + " (" + n + ")" in obj)) return key + " (" + n + ")";
+  if (!Object.hasOwn(obj, key)) return key;
+  for (let n = 2; ; n++) if (!Object.hasOwn(obj, key + " (" + n + ")")) return key + " (" + n + ")";
 }
 
 // ── answersToRoute ───────────────────────────────────────────────────────────
