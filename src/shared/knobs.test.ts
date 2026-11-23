@@ -120,7 +120,9 @@ describe("deriveKnobs", () => {
     const c = choice(k);
     const keys = c.options.map((o) => o.key);
     expect(keys[0]).toBe("13:00");
-    expect(keys[keys.length - 1]).toBe("23:30");
+    // ±6 h wraps past midnight: 19:00 + 6 h = 01:00.
+    expect(keys[keys.length - 1]).toBe("01:00");
+    expect(keys).toHaveLength(24);
     expect(keys).not.toContain("19:00");
     expect(c.options.find((o) => o.key === "20:00")?.label).toBe("20:00 (1 h later)");
     expect(c.options.find((o) => o.key === "18:30")?.label).toBe("18:30 (30 min earlier)");
@@ -214,6 +216,22 @@ describe("deriveKnobs", () => {
     expect(choice(k).options.map((o) => o.value)).not.toContain(0.3);
   });
 
+  test("time-only input at 23:00: 'later' can reach 00:00 (wrap), and the hint names it", () => {
+    const [k] = deriveKnobs(
+      [{ id: "t", component: "DateTimeInput", label: "Time", enableTime: true, enableDate: false, value: { "@path": "/t" } }],
+      { t: "23:00" },
+      NOW,
+    );
+    const c = choice(k);
+    expect(c.options.find((o) => o.key === "00:00")).toEqual({ key: "00:00", label: "00:00 (1 h later)", value: "00:00" });
+    expect(c.options[0].key).toBe("17:00");
+    expect(c.options[c.options.length - 1].key).toBe("05:00");
+    const q = buildRouteRequest("we're six, and later", [k]).questions.k0;
+    expect(q.instructions).toBe(
+      "What should 'Time' be after this request? Current value: 23:00. If the speaker only says later or earlier without a time, pick 00:00 (one hour later) or 22:00 (one hour earlier). A count of people, such as 'we're six', is not a time.",
+    );
+  });
+
   test("time-only input with no current value offers all 48 slots", () => {
     const [k] = deriveKnobs(
       [{ id: "t", component: "DateTimeInput", label: "Time", enableTime: true, enableDate: false, value: { "@path": "/t" } }],
@@ -289,7 +307,7 @@ describe("buildRouteRequest", () => {
     const knobs = deriveKnobs(dinner, dinnerData, NOW);
     const { state, questions } = buildRouteRequest("we're six, and later", knobs);
     expect(state).toEqual({ utterance: "we're six, and later", screen: { Time: "19:00", Guests: "4" } });
-    expect(Object.keys(questions)).toEqual(["kind", "k0", "k1"]);
+    expect(Object.keys(questions)).toEqual(["kind", "k0", "k1", "guard"]);
     const kind = questions.kind;
     expect(kind.type).toBe("choice");
     if (kind.type !== "choice") return;
@@ -299,8 +317,18 @@ describe("buildRouteRequest", () => {
     const time = questions.k0;
     if (time.type !== "choice") throw new Error("k0 should be a choice");
     expect(time.instructions).toBe(
-      "What should 'Time' be after this request? Current value: 19:00. If the speaker only says later or earlier without a time, pick one hour later or earlier.",
+      "What should 'Time' be after this request? Current value: 19:00. If the speaker only says later or earlier without a time, pick 20:00 (one hour later) or 18:00 (one hour earlier). A count of people, such as 'we're six', is not a time.",
     );
+    expect(kind.instructions).toContain("Short follow-ups such as 'later'");
+    expect(questions.guard).toEqual({
+      type: "noul",
+      instructions:
+        "The only values that can change on this screen are: Time, Guests. Does the speaker also ask for something that is not one of these?",
+      criteria: {
+        true: "Part of the request is about something other than Time, Guests, such as a place, an extra item or another detail",
+        false: "The whole request is about Time, Guests, or it changes nothing",
+      },
+    });
     expect(time.criteria.unchanged).toBe("No change asked for Time");
     expect(Object.keys(time.criteria)).not.toContain("19:00");
     const guests = questions.k1;
@@ -308,6 +336,12 @@ describe("buildRouteRequest", () => {
     expect(guests.instructions).toStartWith("What should 'Guests' be after this request? Current value: 4.");
     expect(guests.instructions).toContain("A couple means two.");
     expect(Object.keys(guests.criteria)).toHaveLength(12);
+  });
+
+  test("time chips at the edge name only the target that exists; no knobs → no guard", () => {
+    const knobs = deriveKnobs(dinner, { booking: { time: ["21:00"], guests: 4 } }, NOW);
+    expect(buildRouteRequest("later", knobs).questions.k0.instructions).toContain("pick 20:00 (one hour earlier).");
+    expect(Object.keys(buildRouteRequest("hello", []).questions)).toEqual(["kind"]);
   });
 
   test("date knobs get the date relative-word hint", () => {
@@ -341,7 +375,7 @@ describe("buildRouteRequest", () => {
     ];
     const { state, questions } = buildRouteRequest("vegan please", knobs);
     expect(state.screen).toEqual({ Diet: "Gluten free (options: Vegan, Gluten free)", "Diet (2)": "checked" });
-    expect(Object.keys(questions)).toEqual(["kind", "k0_0", "k0_1", "k1"]);
+    expect(Object.keys(questions)).toEqual(["kind", "k0_0", "k0_1", "k1", "guard"]);
     expect(questions.k0_0).toEqual({
       type: "noul",
       instructions: "Does the speaker ask to select 'Vegan'? It is currently not selected.",
@@ -432,6 +466,15 @@ describe("answersToRoute", () => {
     const r = answersToRoute({ kind: kind(0.9, 0.1), k0: pick({ unchanged: 0.9, "20:00": 0.1 }), k1: pick({ unchanged: 0.8, "6": 0.2 }) }, knobs, 1, "jev");
     expect(r.decision).toBe("compose");
     expect(r.reason).toBe("edit, but no knob changed");
+  });
+
+  test("guard ≥ 0.5 → compose 'asks for something not on screen' even when a knob would patch; below → patch", () => {
+    const answers = { kind: kind(0.93, 0.07), k0: pick({ unchanged: 1 }), k1: pick({ unchanged: 0.01, "6": 0.99 }) };
+    const blocked = answersToRoute({ ...answers, guard: { type: "noul", noul: 0.91 } }, knobs, 1, "jev");
+    expect(blocked).toMatchObject({ decision: "compose", kind: "edit", patches: [], reason: "asks for something not on screen" });
+    const fine = answersToRoute({ ...answers, guard: { type: "noul", noul: 0.29 } }, knobs, 1, "jev");
+    expect(fine.decision).toBe("patch");
+    expect(fine.patches).toEqual([{ knobId: "/booking/guests", path: "/booking/guests", value: 6, confidence: 0.99 }]);
   });
 
   test("kind 'other' → compose", () => {

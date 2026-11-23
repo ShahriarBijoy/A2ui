@@ -71,6 +71,7 @@ describe("route", () => {
         answers: {
           kind: { type: "choice", choice: "edit", confidence: 1, probabilities: { edit: 1, new: 0, other: 0 } },
           k0: { type: "choice", choice: "8", confidence: 1, probabilities: { unchanged: 0, "8": 1 } },
+          guard: { type: "noul", noul: 0.03 },
         },
         usage: { input_tokens: 512, output_tokens: 20 },
       }),
@@ -86,7 +87,7 @@ describe("route", () => {
     const body = JSON.parse(String(init.body));
     expect(body.model).toBe("jev-latest");
     expect(body.state.utterance).toBe("make it eight people");
-    expect(Object.keys(body.questions)).toEqual(["kind", "k0"]);
+    expect(Object.keys(body.questions)).toEqual(["kind", "k0", "guard"]);
   });
 
   test("timeout → compose with the timeout reason, never throws", async () => {

@@ -101,6 +101,8 @@ function detail(knobs: Knob[], answers: JevAnswers | undefined): string {
       });
     }
   });
+  const guard = answers.guard;
+  if (guard?.type === "noul") parts.push("guard " + guard.noul.toFixed(2));
   return parts.join(" | ");
 }
 function top(p: Record<string, number>): string {
@@ -319,6 +321,56 @@ const seatLines: [string, Expect][] = [
   ["book it", { compose: true }],
 ];
 for (const [text, exp] of seatLines) await runLine(seatMap, { seat: "" }, text, exp);
+
+// ── 7. Time-only DateTimeInput (what the composer built in the smoke run) ─────
+const timeOnly: CatalogComponent[] = [
+  { id: "time", component: "DateTimeInput", label: "Time", enableTime: true, enableDate: false, value: { "@path": "/booking/time" } },
+  { id: "guests", component: "Stepper", label: "Guests", min: 1, max: 12, value: { "@path": "/booking/guests" } },
+];
+const timeLines: [string, string, Expect][] = [
+  ["19:00", "We're six, and later.", { patches: { [G]: [6], [T]: ["20:00"] } }],
+  ["19:00", "later please", { patches: { [T]: ["20:00"] } }],
+  ["19:00", "a bit later", { patches: { [T]: ["20:00"] } }],
+  ["19:00", "half an hour later", { patches: { [T]: ["19:30"] } }],
+  ["19:00", "at nine", { patches: { [T]: ["21:00"] } }],
+  ["19:00", "book it", { compose: true }],
+  // Late clock (the smoke run was at 22:36): "later" must be able to cross midnight.
+  ["22:30", "We're six, and later.", { patches: { [G]: [6], [T]: ["23:30"] } }],
+  ["23:00", "We're six, and later.", { patches: { [G]: [6], [T]: ["00:00"] } }],
+  ["23:00", "at nine", { patches: { [T]: ["21:00"] } }],
+];
+console.log("\n7. Time-only DateTimeInput + Guests stepper 4");
+for (const [cur, text, exp] of timeLines) {
+  process.stdout.write("[" + cur + "] ");
+  await runLine(timeOnly, { booking: { time: cur, guests: 4 } }, text, exp);
+}
+
+// ── 8. Date-only DateTimeInput ────────────────────────────────────────────────
+const dateOnly: CatalogComponent[] = [
+  { id: "date", component: "DateTimeInput", label: "Date", enableDate: true, enableTime: false, value: { "@path": "/trip/date" } },
+  { id: "guests", component: "Stepper", label: "Guests", min: 1, max: 12, value: { "@path": "/trip/guests" } },
+];
+const dateLines: [string, Expect][] = [
+  ["the day after", { patches: { "/trip/date": [day(2)] } }],
+  ["make it the day after", { patches: { "/trip/date": [day(2)] } }],
+  ["on Friday", { patches: { "/trip/date": [nextWeekday(5)] } }],
+  ["book it", { compose: true }],
+];
+console.log("\n8. Date-only DateTimeInput (tomorrow " + day(1) + ") + Guests stepper 2");
+for (const [text, exp] of dateLines) await runLine(dateOnly, { trip: { date: day(1), guests: 2 } }, text, exp);
+
+// ── 9. Guests only: nothing else on screen must not be silently dropped ──────
+const guestsOnly: CatalogComponent[] = [
+  { id: "guests", component: "Stepper", label: "Guests", min: 1, max: 12, value: { "@path": "/booking/guests" } },
+];
+const guestLines: [string, Expect][] = [
+  ["We're six, and later.", { compose: true }],
+  ["make it six and add a dessert option", { compose: true }],
+  ["make it six", { patches: { [G]: [6] } }],
+  ["two more people", { patches: { [G]: [6] } }],
+];
+console.log("\n9. Guests stepper only (4)");
+for (const [text, exp] of guestLines) await runLine(guestsOnly, { booking: { guests: 4 } }, text, exp);
 
 globalThis.fetch = realFetch;
 console.log("\nroute failures (all sections): " + fails);

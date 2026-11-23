@@ -26,6 +26,9 @@ export type RouteRequest = { state: JsonObject; questions: JevQuestions };
 /** Criteria key for "leave this knob alone". Option keys equal to it are dropped. */
 export const UNCHANGED = "unchanged";
 export const KIND_QUESTION = "kind";
+export const GUARD_QUESTION = "guard";
+/** P(the request also asks for something no knob can express) at or above this → compose. */
+export const GUARD_THRESHOLD = 0.5;
 
 const STEPPER_DEFAULT_MIN = 1;
 const STEPPER_DEFAULT_MAX = 20;
@@ -193,13 +196,19 @@ function dateTimeKnob(
 }
 
 function timeKnob(base: BaseFields, curMin: number | null): ChoiceKnob | null {
-  const options: KnobOption[] = [];
+  const slots: { m: number; diff: number }[] = [];
   for (let m = 0; m < 24 * 60; m += 30) {
     if (m === curMin) continue;
-    if (curMin !== null && Math.abs(m - curMin) > TIME_WINDOW_MIN) continue;
-    const key = hhmm(m);
-    options.push({ key, label: curMin === null ? key : key + " (" + relativeMinutes(m - curMin) + ")", value: key });
+    // Circular distance: from 23:00, "later" must reach 00:00 (measured: without wrap it composed).
+    const diff = curMin === null ? m : ((m - curMin + 720 + 1440) % 1440) - 720;
+    if (curMin !== null && Math.abs(diff) > TIME_WINDOW_MIN) continue;
+    slots.push({ m, diff });
   }
+  slots.sort((a, b) => a.diff - b.diff);
+  const options: KnobOption[] = slots.map(({ m, diff }) => {
+    const key = hhmm(m);
+    return { key, label: curMin === null ? key : key + " (" + relativeMinutes(diff) + ")", value: key };
+  });
   if (options.length === 0) return null;
   return {
     ...base,
@@ -293,15 +302,37 @@ function seatPositions(layout: string): Map<string, string> {
 // ── buildRouteRequest ────────────────────────────────────────────────────────
 
 /**
- * "edit" must mean ONLY knob values: "to New York on friday" or "somewhere closer, and later"
- * would otherwise patch the date/time and silently drop the rest (measured in scripts/jev-eval.ts:
- * this wording routes all 17 eval lines right; the looser one let 4 mixed lines patch).
+ * "edit" must mean ONLY knob values: "to New York on friday" would otherwise patch the date and
+ * silently drop the rest. The follow-up sentence keeps terse edits ("later please", "the day after")
+ * from reading as new tasks (measured: P(edit) 0.26 → 0.86–0.95). Mixed lines the kind question
+ * still calls edits are caught by the guard Noul below.
  */
+const KIND_INSTRUCTIONS =
+  "The speaker is looking at a screen that shows the values in screen. What does the speaker want with this request?" +
+  " Short follow-ups such as 'later', 'earlier', 'the day after' or 'two more' change the values in screen.";
 const KIND_CRITERIA: Record<string, string> = {
   edit: "Only change values that are in screen",
-  new: "Anything else: a value that is not in screen (such as a destination or a name), confirming, booking, the next step, a new question, or a different task",
+  new: "Anything else: a value that is not in screen (such as a place, a destination or a name), confirming, booking, the next step, a new question, or a different task",
   other: "Small talk, thinking aloud, or unclear",
 };
+
+/**
+ * Catches the silent drop: on a Guests-only screen "We're six, and later." patched Guests and lost
+ * "later". Naming the changeable values matters: the generic "something NOT among the values in
+ * screen" fired at 0.46–0.86 on plain edits; this one stays ≤ 0.29 on them (measured, 49 lines).
+ */
+function guardQuestion(knobs: Knob[]): JevNoulQuestion {
+  const labels = uniqueBy(knobs.map((k) => k.label), (l) => l).join(", ");
+  return {
+    type: "noul",
+    instructions:
+      "The only values that can change on this screen are: " + labels + ". Does the speaker also ask for something that is not one of these?",
+    criteria: {
+      true: "Part of the request is about something other than " + labels + ", such as a place, an extra item or another detail",
+      false: "The whole request is about " + labels + ", or it changes nothing",
+    },
+  };
+}
 
 /** Change framing ("does the speaker ask to select X?"): a final-state question drifts to ~0.5 for unmentioned options. */
 function changeNoul(verb: string, name: string, state: string): JevNoulQuestion {
@@ -320,12 +351,7 @@ export function knobQuestionId(index: number, option?: number): string {
 export function buildRouteRequest(utterance: string, knobs: Knob[]): RouteRequest {
   const screen: JsonObject = {};
   const questions: JevQuestions = {
-    [KIND_QUESTION]: {
-      type: "choice",
-      instructions:
-        "The speaker is looking at a screen that shows the values in screen. What does the speaker want with this request?",
-      criteria: KIND_CRITERIA,
-    },
+    [KIND_QUESTION]: { type: "choice", instructions: KIND_INSTRUCTIONS, criteria: KIND_CRITERIA },
   };
   knobs.forEach((knob, i) => {
     screen[uniqueKey(screen, knob.label)] = knobCurrentLabel(knob);
@@ -339,7 +365,7 @@ export function buildRouteRequest(utterance: string, knobs: Knob[]): RouteReques
       questions[knobQuestionId(i)] = {
         type: "choice",
         instructions:
-          "What should '" + knob.label + "' be after this request? Current value: " + knob.currentLabel + "." + RELATIVE_HINT[flavour],
+          "What should '" + knob.label + "' be after this request? Current value: " + knob.currentLabel + "." + relativeHint(knob, flavour),
         criteria,
       };
     } else if (knob.type === "multi") {
@@ -355,6 +381,7 @@ export function buildRouteRequest(utterance: string, knobs: Knob[]): RouteReques
       );
     }
   });
+  if (knobs.length > 0) questions[GUARD_QUESTION] = guardQuestion(knobs);
   return { state: { utterance, screen }, questions };
 }
 
@@ -366,6 +393,32 @@ const RELATIVE_HINT: Record<Flavour, string> = {
   number: " If the speaker only says more or fewer without a number, pick one more or one fewer. A couple means two.",
   plain: "",
 };
+
+/**
+ * Time knobs name the concrete answer for a bare "later" (code does the arithmetic), and say that a
+ * count is not a time: "We're six, and later." put 13–28 % of the Time mass on 18:00 without it.
+ */
+function relativeHint(knob: ChoiceKnob, flavour: Flavour): string {
+  if (flavour !== "time") return RELATIVE_HINT[flavour];
+  const cur = minutesOf(knob.current);
+  const keys = new Set(knob.options.map((o) => o.key));
+  const parts: string[] = [];
+  if (cur !== null) {
+    const later = hhmm((cur + 60) % 1440);
+    const earlier = hhmm((cur + 1380) % 1440);
+    if (keys.has(later)) parts.push(later + " (one hour later)");
+    if (keys.has(earlier)) parts.push(earlier + " (one hour earlier)");
+  }
+  const pick = parts.length ? "pick " + parts.join(" or ") : "pick one hour later or earlier";
+  return " If the speaker only says later or earlier without a time, " + pick + ". A count of people, such as 'we're six', is not a time.";
+}
+
+function minutesOf(v: JsonValue): number | null {
+  const s = Array.isArray(v) ? v[0] : v;
+  if (typeof s !== "string") return null;
+  const m = /^(\d{1,2}):(\d{2})$/.exec(s);
+  return m ? Number(m[1]) * 60 + Number(m[2]) : null;
+}
 
 /** The contract Knob has no "scale" field, so infer it: the dinner Time is a ChoicePicker of "HH:mm" chips. */
 function knobFlavour(knob: ChoiceKnob): Flavour {
@@ -418,6 +471,8 @@ export function answersToRoute(answers: JevAnswers, knobs: Knob[], ms: number, e
   const kindConfidence = routeKind === "edit" ? (kindAns.probabilities.edit ?? 0) : kindP;
   if (routeKind !== "edit") return compose(routeKind, kindConfidence, "not an edit (" + routeKind + " " + fmt(kindP) + ")");
   if (kindConfidence < LIMITS.routeKindThreshold) return compose("edit", kindConfidence, "unsure it is an edit (" + fmt(kindConfidence) + ")");
+  const guard = noul(answers[GUARD_QUESTION]);
+  if (guard !== null && guard >= GUARD_THRESHOLD) return compose("edit", kindConfidence, "asks for something not on screen");
 
   const patches: RoutePatch[] = [];
   const shown: string[] = [];
