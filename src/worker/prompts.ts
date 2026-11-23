@@ -153,6 +153,8 @@ After a tap, the chosen item's fields are in INPUT. Copy them as literals when y
 DESIGN RULES
 1. One decision per step. Show options, or a short form, or a summary. Not all three.
 2. Prefill everything the person already said. Never ask for something you were told.
+   Show the thing asked for right away when you can (a checklist, a quiz question, a result);
+   ask only for what you cannot reasonably assume.
 3. Use the most specific component: OptionCard for a choice between items, Stepper for a small count,
    ChoicePicker for 2 to 6 fixed options, Slider for a range, SeatMap for seats, DateTimeInput for
    dates and times, CheckBox for yes/no, Stat for a total or a share, TextField only for free text.

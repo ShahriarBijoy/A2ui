@@ -97,6 +97,17 @@ describe("flights", () => {
     }
   });
 
+  test("long-haul destinations get long flights", () => {
+    for (const f of generateFlights("Bremen", "New York", "2026-11-24")) {
+      const minutes = (Date.parse(f.arrive + "Z") - Date.parse(f.depart + "Z")) / 60_000;
+      expect(minutes).toBeGreaterThanOrEqual(480);
+    }
+    for (const f of generateFlights("Bremen", "Lisbon", "2026-11-24")) {
+      const minutes = (Date.parse(f.arrive + "Z") - Date.parse(f.depart + "Z")) / 60_000;
+      expect(minutes).toBeLessThanOrEqual(240 + 140 + 15);
+    }
+  });
+
   test("isIsoDate", () => {
     expect(isIsoDate("2026-11-24")).toBe(true);
     expect(isIsoDate("2026-02-30")).toBe(false);

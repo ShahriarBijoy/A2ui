@@ -12,6 +12,23 @@ const WINDOWS: readonly [number, number][] = [
   [14, 3],
   [18, 3],
 ];
+/**
+ * Rough nonstop minutes from northern Germany for destinations a speaker is likely to name on stage,
+ * so "Bremen → New York" does not show a 3-hour flight. Anything else is treated as a European hop.
+ */
+const LONG_HAUL_MINUTES: Record<string, number> = {
+  "new york": 525,
+  nyc: 525,
+  jfk: 525,
+  boston: 500,
+  chicago: 570,
+  toronto: 510,
+  "san francisco": 690,
+  "los angeles": 700,
+  dubai: 390,
+  singapore: 750,
+  tokyo: 780,
+};
 const PRICE_MIN = 89;
 const PRICE_MAX = 640;
 const DATE_RE = /^(\d{4})-(\d{2})-(\d{2})$/;
@@ -30,7 +47,8 @@ export function generateFlights(from: string, to: string, date: string): Flight[
   const destination = to.trim();
   const rand = mulberry32(hash32(`${origin.toLowerCase()}|${destination.toLowerCase()}|${date}`));
   // Route length is a property of the pair, so all four options share a base duration.
-  const baseMinutes = 55 + Math.floor(rand() * 120) * 5;
+  const longHaul = LONG_HAUL_MINUTES[destination.toLowerCase()] ?? LONG_HAUL_MINUTES[origin.toLowerCase()];
+  const baseMinutes = longHaul ?? 65 + Math.floor(rand() * 35) * 5;
   const carriers = shuffle([...CARRIERS], rand);
   const flights = WINDOWS.map(([startHour, windowHours], i): Flight => {
     const departMin = startHour * 60 + Math.floor(rand() * windowHours * 12) * 5;
