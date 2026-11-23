@@ -1,0 +1,377 @@
+import { describe, expect, test } from "bun:test";
+import type { Knob, RouteResult, TurnEvent, TurnRequest } from "@shared/protocol";
+import type { Llm, LlmUsage, Prompt, TextStream, WidgetsReply } from "./claude";
+import { encodeEvent, parseTurnRequest, patchCaption, runTurn, SSE_HEADERS, sseResponse, widgetEvent, type TurnDeps } from "./turn";
+import { generateFlights } from "./data/flights";
+
+const usage: LlmUsage = { model: "fake-model", input_tokens: 10, output_tokens: 20, cache_read_tokens: 5, cache_write_tokens: 0 };
+const ctx = {
+  date: "2026-11-23",
+  weekday: "Monday",
+  time: "19:30",
+  tomorrow: "2026-11-24",
+  tomorrowWeekday: "Tuesday",
+  venue: "Venue",
+  city: "Bremen",
+  catalogId: "http://test/catalog/brick-box/v1",
+};
+
+function fakeStream(chunks: string[], opts: { failAfter?: number; hang?: boolean } = {}): TextStream {
+  let aborted = false;
+  return {
+    async *[Symbol.asyncIterator]() {
+      for (let i = 0; i < chunks.length; i++) {
+        if (opts.failAfter === i) throw new Error("stream broke");
+        await Promise.resolve();
+        yield chunks[i];
+      }
+      if (opts.hang) await new Promise(() => {});
+    },
+    async usage() {
+      return usage;
+    },
+    abort() {
+      aborted = true;
+      void aborted;
+    },
+  };
+}
+
+function fakeLlm(chunks: string[], opts: Parameters<typeof fakeStream>[1] = {}, reply?: WidgetsReply): Llm & { prompts: Prompt[] } {
+  const prompts: Prompt[] = [];
+  return {
+    prompts,
+    streamText(prompt) {
+      prompts.push(prompt);
+      return fakeStream(chunks, opts);
+    },
+    async callTools(prompt) {
+      prompts.push(prompt);
+      if (!reply) throw new Error("no reply");
+      return reply;
+    },
+  };
+}
+
+function deps(over: Partial<TurnDeps> = {}): TurnDeps {
+  let t = 0;
+  return {
+    route: async () => {
+      throw new Error("route must not be called");
+    },
+    llm: fakeLlm([]),
+    context: ctx,
+    now: () => (t += 10),
+    composeTimeoutMs: 1000,
+    routeGuardMs: 500,
+    ...over,
+  };
+}
+
+const guestsKnob: Knob = {
+  type: "choice",
+  id: "/booking/guests",
+  componentId: "guests",
+  component: "Stepper",
+  path: "/booking/guests",
+  label: "Guests",
+  current: 4,
+  currentLabel: "4",
+  options: [5, 6, 7].map((n) => ({ key: String(n), label: String(n), value: n })),
+};
+const timeKnob: Knob = {
+  type: "choice",
+  id: "/booking/time",
+  componentId: "time",
+  component: "ChoicePicker",
+  path: "/booking/time",
+  label: "Time",
+  current: ["19:00"],
+  currentLabel: "19:00",
+  options: ["19:30", "20:00"].map((t) => ({ key: t, label: t, value: [t] })),
+};
+
+function request(over: Partial<TurnRequest> = {}): TurnRequest {
+  return {
+    mode: "a2ui",
+    decision: true,
+    input: { type: "utterance", text: "We're six, and later." },
+    thread: [],
+    surface: { id: "s2", components: [{ id: "root", component: "Card" }], data: { booking: { guests: 4, time: ["19:00"] } }, knobs: [guestsKnob, timeKnob] },
+    nextSurfaceId: "s3",
+    ...over,
+  };
+}
+
+async function collect(req: TurnRequest, d: TurnDeps, signal?: AbortSignal): Promise<TurnEvent[]> {
+  const events: TurnEvent[] = [];
+  await runTurn(req, d, (ev) => void events.push(ev), signal);
+  return events;
+}
+
+const patchRoute = (ms = 180): RouteResult => ({
+  kind: "edit",
+  kindConfidence: 0.97,
+  decision: "patch",
+  patches: [
+    { knobId: "/booking/guests", path: "/booking/guests", value: 6, confidence: 0.98 },
+    { knobId: "/booking/time", path: "/booking/time", value: ["20:00"], confidence: 0.91 },
+  ],
+  ms,
+  engine: "jev-1.14.0",
+  reason: "edit",
+});
+
+describe("SSE encoding", () => {
+  test("one data: line per event, blank line after", () => {
+    const s = encodeEvent({ type: "caption", text: "line\nbreak" });
+    expect(s).toBe('data: {"type":"caption","text":"line\\nbreak"}\n\n');
+    expect(s.trimEnd().split("\n")).toHaveLength(1);
+  });
+
+  test("sseResponse streams events with the SSE headers and closes", async () => {
+    const res = sseResponse(async (emit) => {
+      emit({ type: "caption", text: "a" });
+      await Promise.resolve();
+      emit({ type: "done" });
+    });
+    for (const [k, v] of Object.entries(SSE_HEADERS)) expect(res.headers.get(k)).toBe(v);
+    expect(await res.text()).toBe('data: {"type":"caption","text":"a"}\n\ndata: {"type":"done"}\n\n');
+  });
+
+  test("cancelling the body aborts the run", async () => {
+    let seen: AbortSignal | null = null;
+    const res = sseResponse(async (emit, signal) => {
+      seen = signal;
+      emit({ type: "caption", text: "a" });
+      await new Promise((r) => signal.addEventListener("abort", r));
+    });
+    const reader = res.body!.getReader();
+    await reader.read();
+    await reader.cancel();
+    expect(seen!.aborted).toBe(true);
+  });
+});
+
+describe("runTurn: patch path", () => {
+  test("route + knob updateDataModel events + code-written caption + done, no LLM, no usage", async () => {
+    const llm = fakeLlm(['{"caption":"should not run"}\n']);
+    const events = await collect(request(), deps({ route: async () => patchRoute(), llm }));
+    expect(events.map((e) => e.type)).toEqual(["route", "a2ui", "a2ui", "caption", "done"]);
+    expect(events[0]).toEqual({ type: "route", kind: "edit", decision: "patch", ms: 180, engine: "jev-1.14.0", reason: "edit", patches: 2 });
+    expect(events[1]).toEqual({
+      type: "a2ui",
+      origin: "knob",
+      msg: { version: "1.0", updateDataModel: { surfaceId: "s2", path: "/booking/guests", value: 6 } },
+    });
+    expect(events[2]).toMatchObject({ origin: "knob", msg: { updateDataModel: { path: "/booking/time", value: ["20:00"] } } });
+    expect(events[3]).toEqual({ type: "caption", text: "Guests 6 · Time 20:00" });
+    expect(events.some((e) => e.type === "usage")).toBe(false);
+    expect(llm.prompts).toHaveLength(0);
+  });
+
+  test("route says compose → route event, then the composer runs", async () => {
+    const compose: RouteResult = { ...patchRoute(), kind: "new", decision: "compose", patches: [], reason: "kind new" };
+    const events = await collect(request(), deps({ route: async () => compose, llm: fakeLlm(['{"caption":"x"}\n']) }));
+    expect(events.map((e) => e.type)).toEqual(["route", "caption", "usage", "done"]);
+  });
+
+  test("patch decision with zero patches composes", async () => {
+    const odd: RouteResult = { ...patchRoute(), patches: [] };
+    const events = await collect(request(), deps({ route: async () => odd, llm: fakeLlm(['{"caption":"x"}\n']) }));
+    expect(events.map((e) => e.type)).toEqual(["route", "caption", "usage", "done"]);
+  });
+
+  test("a throwing router falls through to compose", async () => {
+    const events = await collect(
+      request(),
+      deps({
+        route: async () => {
+          throw new Error("jev down");
+        },
+        llm: fakeLlm(['{"caption":"x"}\n']),
+      }),
+    );
+    expect(events[0]).toMatchObject({ type: "route", decision: "compose", reason: "router threw: jev down" });
+    expect(events.at(-1)).toEqual({ type: "done" });
+  });
+
+  test("a hanging router is cut off by the guard", async () => {
+    const events = await collect(request(), deps({ route: () => new Promise(() => {}), routeGuardMs: 20, llm: fakeLlm(['{"caption":"x"}\n']) }));
+    expect(events[0]).toMatchObject({ type: "route", decision: "compose" });
+    expect(events.map((e) => e.type)).toEqual(["route", "caption", "usage", "done"]);
+  });
+
+  test("no route when decision is off, there are no knobs, or the input is a tap", async () => {
+    const llm = () => fakeLlm(['{"caption":"x"}\n']);
+    for (const req of [
+      request({ decision: false }),
+      request({ surface: { ...request().surface!, knobs: [] } }),
+      request({ input: { type: "action", action: { name: "pick_place", surfaceId: "s1", sourceComponentId: "place", timestamp: "t", context: { id: "p1" } } } }),
+    ]) {
+      const events = await collect(req, deps({ llm: llm() }));
+      expect(events.map((e) => e.type)).toEqual(["caption", "usage", "done"]);
+    }
+  });
+
+  test("patchCaption falls back to the path and raw values", () => {
+    expect(patchCaption([{ knobId: "?", path: "/trip/return", value: true, confidence: 1 }], [])).toBe("return on");
+  });
+});
+
+describe("runTurn: compose path (a2ui)", () => {
+  const lines = [
+    '{"a2ui":{"version":"1.0","createSurface":{"surfaceId":"s3","catalogId":"brick-box/v1"}}}',
+    '{"data":{"source":"places","args":{"max_walk_min":15},"into":"/places"}}',
+    "Sure! Here is your screen:",
+    '{"a2ui":{"version":"1.0","updateComponents":{"surfaceId":"s3","components":[{"id":"root","component":"Card","child":"list"}]}}}',
+    "```",
+    '{"data":{"source":"hotels","args":{},"into":"/hotels"}}',
+    '{"caption":"Places nearby"}',
+  ];
+  const text = lines.join("\n");
+  // Split mid-line on purpose.
+  const chunks = [text.slice(0, 37), text.slice(37, 150), text.slice(150, 151), text.slice(151)];
+
+  test("emits a2ui/data/caption/usage/done in order; counts skipped lines; measures timings", async () => {
+    const llm = fakeLlm(chunks);
+    const events = await collect(request({ decision: false, surface: null }), deps({ llm }));
+    expect(events.map((e) => e.type)).toEqual(["a2ui", "a2ui", "a2ui", "caption", "usage", "done"]);
+    const [create, data, comps] = events as Extract<TurnEvent, { type: "a2ui" }>[];
+    expect(create.origin).toBe("llm");
+    // A mangled catalog id is replaced with the real one.
+    expect(create.msg).toEqual({ version: "1.0", createSurface: { surfaceId: "s3", catalogId: ctx.catalogId } });
+    expect(data.origin).toBe("data");
+    expect(data.msg).toMatchObject({ updateDataModel: { surfaceId: "s3", path: "/places" } });
+    const records = (data.msg as unknown as { updateDataModel: { value: { walk_min: number }[] } }).updateDataModel.value;
+    expect(records.length).toBeGreaterThanOrEqual(2);
+    expect(comps.origin).toBe("llm");
+    const u = events[4] as Extract<TurnEvent, { type: "usage" }>;
+    expect(u).toMatchObject({ model: "fake-model", input_tokens: 10, output_tokens: 20, cache_read_tokens: 5, skipped_lines: 2 });
+    expect(u.first_ui_ms).toBeGreaterThan(0);
+    expect(u.compose_ms).toBeGreaterThanOrEqual(u.first_ui_ms!);
+    // STATE goes to the user message, the cached system prompt is static.
+    expect(llm.prompts[0].cacheSystem).toBe(true);
+    expect(llm.prompts[0].user).toContain('"next_surface_id":"s3"');
+  });
+
+  test("data lines target the request surface when no createSurface came first, else nextSurfaceId", async () => {
+    const line = '{"data":{"source":"flights","args":{"to":"New York","from":{"@path":"/trip/from"}},"into":"/flights"}}\n';
+    const withSurface = request({ decision: false, surface: { id: "s2", components: [], data: { trip: { from: "Hamburg" } }, knobs: [] } });
+    const a = await collect(withSurface, deps({ llm: fakeLlm([line]) }));
+    expect(a[0]).toMatchObject({ origin: "data", msg: { updateDataModel: { surfaceId: "s2", path: "/flights" } } });
+    // The @path arg was read from the surface data; date defaulted to tomorrow.
+    expect((a[0] as { msg: { updateDataModel: { value: unknown } } }).msg.updateDataModel.value).toEqual(generateFlights("Hamburg", "New York", "2026-11-24"));
+    const b = await collect(request({ decision: false, surface: null }), deps({ llm: fakeLlm([line]) }));
+    expect(b[0]).toMatchObject({ msg: { updateDataModel: { surfaceId: "s3" } } });
+  });
+
+  test("a trailing line without newline is still handled", async () => {
+    const events = await collect(request({ decision: false }), deps({ llm: fakeLlm(['{"caption":"no newline"}']) }));
+    expect(events.map((e) => e.type)).toEqual(["caption", "usage", "done"]);
+  });
+});
+
+describe("runTurn: errors and timeouts", () => {
+  test("LLM error → error + done, no usage", async () => {
+    const events = await collect(request({ decision: false }), deps({ llm: fakeLlm(['{"caption":"x"}\n', "more"], { failAfter: 1 }) }));
+    expect(events.map((e) => e.type)).toEqual(["caption", "error", "done"]);
+    expect(events[1]).toEqual({ type: "error", message: "Composer failed: stream broke" });
+  });
+
+  test("LLM that throws on start → error + done", async () => {
+    const llm: Llm = {
+      streamText() {
+        throw new Error("no client");
+      },
+      async callTools() {
+        throw new Error("no client");
+      },
+    };
+    for (const mode of ["a2ui", "widgets", "html"] as const) {
+      const events = await collect(request({ mode, decision: false }), deps({ llm }));
+      expect(events.map((e) => e.type)).toEqual(["error", "done"]);
+    }
+  });
+
+  test("compose timeout → 'The composer took too long' + done", async () => {
+    const events = await collect(request({ decision: false }), deps({ llm: fakeLlm(['{"caption":"x"}\n'], { hang: true }), composeTimeoutMs: 30 }));
+    expect(events.map((e) => e.type)).toEqual(["caption", "error", "done"]);
+    expect(events[1]).toEqual({ type: "error", message: "The composer took too long" });
+  });
+
+  test("client abort ends quietly with done", async () => {
+    const ctl = new AbortController();
+    const p = collect(request({ decision: false }), deps({ llm: fakeLlm([], { hang: true }) }), ctl.signal);
+    setTimeout(() => ctl.abort(), 10);
+    const events = await p;
+    expect(events).toEqual([{ type: "done" }]);
+  });
+});
+
+describe("runTurn: widgets and html modes", () => {
+  test("widgets: tool call → widget with resolved places, then usage + done", async () => {
+    const reply: WidgetsReply = { tool: { name: "show_restaurants", input: { kind: "vegan" } }, text: "", usage };
+    const events = await collect(request({ mode: "widgets", decision: false }), deps({ llm: fakeLlm([], {}, reply) }));
+    expect(events.map((e) => e.type)).toEqual(["widget", "usage", "done"]);
+    expect(events[0]).toMatchObject({ type: "widget", name: "RestaurantWidget", props: { kind: "vegan" } });
+    const u = events[1] as Extract<TurnEvent, { type: "usage" }>;
+    expect(u.first_ui_ms).toBe(u.compose_ms);
+  });
+
+  test("widgets: no tool → text", async () => {
+    const reply: WidgetsReply = { tool: null, text: "Each pays 30 euro.", usage };
+    const events = await collect(request({ mode: "widgets", decision: false }), deps({ llm: fakeLlm([], {}, reply) }));
+    expect(events.slice(0, 1)).toEqual([{ type: "text", delta: "Each pays 30 euro." }]);
+  });
+
+  test("widgetEvent: flights only when from and to are known", () => {
+    const d = { from: "Bremen", date: "2026-11-24" };
+    expect(widgetEvent({ name: "show_flight_search", input: { date: "2026-11-24" } }, d)).toEqual({
+      type: "widget",
+      name: "FlightSearchWidget",
+      props: { flights: [], date: "2026-11-24" },
+    });
+    const full = widgetEvent({ name: "show_flight_search", input: { from: "Bremen", to: "New York" } }, d);
+    expect(full?.props.flights).toEqual(generateFlights("Bremen", "New York", "2026-11-24"));
+    expect(widgetEvent({ name: "unknown_tool", input: {} }, d)).toBeNull();
+  });
+
+  test("html: deltas forwarded with fences stripped, then usage + done", async () => {
+    const events = await collect(request({ mode: "html", decision: false }), deps({ llm: fakeLlm(["```ht", "ml\n<p>pink", "</p>\n```"]) }));
+    const html = events.filter((e) => e.type === "html").map((e) => (e as { delta: string }).delta).join("");
+    expect(html).toBe("<p>pink</p>\n");
+    expect(events.slice(-2).map((e) => e.type)).toEqual(["usage", "done"]);
+  });
+});
+
+describe("parseTurnRequest", () => {
+  const ok = { mode: "a2ui", decision: true, input: { type: "utterance", text: " hi " }, thread: [], surface: null, nextSurfaceId: "s1" };
+
+  test("accepts a valid request and trims the utterance", () => {
+    const r = parseTurnRequest(ok);
+    expect(r.ok && r.req.input).toEqual({ type: "utterance", text: "hi" });
+  });
+
+  test("keeps only the last 6 thread entries", () => {
+    const thread = Array.from({ length: 9 }, (_, i) => ({ role: "user", text: String(i) }));
+    const r = parseTurnRequest({ ...ok, thread });
+    expect(r.ok && r.req.thread.map((t) => t.text)).toEqual(["3", "4", "5", "6", "7", "8"]);
+  });
+
+  test("rejects bad shapes with a message", () => {
+    const bad: [unknown, string][] = [
+      [null, "body must be a JSON object"],
+      [{ ...ok, mode: "voice" }, "mode must be one of a2ui, widgets, html"],
+      [{ ...ok, decision: "yes" }, "decision must be a boolean"],
+      [{ ...ok, input: { type: "utterance", text: "   " } }, "utterance is empty"],
+      [{ ...ok, input: { type: "utterance", text: "x".repeat(401) } }, "utterance is longer than 400 characters"],
+      [{ ...ok, input: { type: "typing" } }, 'input.type must be "utterance" or "action"'],
+      [{ ...ok, input: { type: "action", action: { name: "x" } } }, "input.action must have name, surfaceId, sourceComponentId, timestamp and context"],
+      [{ ...ok, thread: [{ role: "system", text: "x" }] }, "thread entries must be {role: user|agent|tap, text}"],
+      [{ ...ok, surface: { id: "s1", components: "x", data: {}, knobs: [] } }, "surface.components must be [{id, component}]"],
+      [{ ...ok, nextSurfaceId: "" }, "nextSurfaceId must be a non-empty string"],
+    ];
+    for (const [body, message] of bad) expect(parseTurnRequest(body)).toEqual({ ok: false, message });
+  });
+});
