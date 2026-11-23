@@ -78,6 +78,36 @@ export type RouteResult = {
 };
 
 export type A2uiOrigin = "llm" | "data" | "knob";
+
+// ── Demo data records (resolved server-side from "data" lines; the model never invents them) ──
+export type Place = {
+  id: string;
+  name: string;
+  kind: string;
+  walk_min: number;
+  /** 1..4 */
+  price_level: number;
+  tags: string[];
+  /** "HH:mm" */
+  opens_until: string;
+};
+export type Flight = {
+  id: string;
+  carrier: string;
+  from: string;
+  to: string;
+  /** ISO local date-time "YYYY-MM-DDTHH:mm" */
+  depart: string;
+  arrive: string;
+  stops: number;
+  price_eur: number;
+  demo: true;
+};
+export type DataSource = "places" | "flights";
+
+/** Props of the two hand-built widgets in "widgets" mode. */
+export type RestaurantWidgetProps = { places: Place[]; kind?: string; max_walk_min?: number };
+export type FlightSearchWidgetProps = { from?: string; to?: string; date?: string; flights: Flight[] };
 export type WidgetName = "RestaurantWidget" | "FlightSearchWidget";
 
 /** One JSON object per SSE `data:` line. */
