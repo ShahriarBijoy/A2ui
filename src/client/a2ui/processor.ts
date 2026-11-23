@@ -140,6 +140,12 @@ function createSurface(
   if (typeof catalogId !== "string" || !catalogId.endsWith(CATALOG_PATH)) {
     return reject(surfaceId, "/createSurface/catalogId", "catalogId must end with " + CATALOG_PATH);
   }
+  const prev = surfaces[surfaceId];
+  if (prev && prev.catalogId === "" && prev.turnId === opts.turnId) {
+    // The model wrote to the new id before creating it (lenient auto-create in this same turn):
+    // adopt that surface instead of wiping what already arrived.
+    return done({ ...surfaces, [surfaceId]: { ...prev, catalogId } }, "createSurface", surfaceId);
+  }
   // Re-creating an existing id starts it over, per A2UI.
   const next = { ...surfaces, [surfaceId]: emptySurface(surfaceId, catalogId, opts.turnId) };
   return done(next, "createSurface", surfaceId, { created: true });

@@ -59,6 +59,21 @@ describe("createSurface", () => {
     expect(surfaces.s1.data).toEqual({});
     expect(surfaces.s1.turnId).toBe("t1");
   });
+  test("a late createSurface adopts the surface auto-created earlier in the same turn", () => {
+    const { surfaces, results } = run([
+      { version: v, updateComponents: { surfaceId: "s3", components: [{ id: "root", component: "Divider" }] } },
+      { version: v, updateDataModel: { surfaceId: "s3", path: "/a", value: 1 } },
+      { version: v, createSurface: { surfaceId: "s3", catalogId: CAT } },
+    ]);
+    expect(results[0].created).toBe(true);
+    expect(results[2].created).toBe(false);
+    expect(surfaces.s3.catalogId).toBe(CAT);
+    expect(surfaces.s3.data).toEqual({ a: 1 });
+    expect(surfaces.s3.components.root.status).toBe("ok");
+    // From another turn, re-creating still resets.
+    const reset = applyMessage(surfaces, { version: v, createSurface: { surfaceId: "s3", catalogId: CAT } }, { now: 9, turnId: "t2" });
+    expect(reset.surfaces.s3.components).toEqual({});
+  });
 });
 
 describe("updateComponents", () => {
