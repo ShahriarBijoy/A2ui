@@ -36,14 +36,17 @@ export type LlmUsage = {
   cache_write_tokens: number;
 };
 
-/** Text deltas of one streamed answer; usage() resolves after the stream ended. */
+/** Usage plus why the model stopped ("end_turn", "max_tokens", "refusal", ...; null if not reported). */
+export type LlmResult = { usage: LlmUsage; stopReason: string | null };
+
+/** Text deltas of one streamed answer; result() resolves after the stream ended. */
 export interface TextStream extends AsyncIterable<string> {
-  usage(): Promise<LlmUsage>;
+  result(): Promise<LlmResult>;
   abort(): void;
 }
 
 export type ToolCall = { name: string; input: JsonObject };
-export type WidgetsReply = { tool: ToolCall | null; text: string; usage: LlmUsage };
+export type WidgetsReply = { tool: ToolCall | null; text: string; usage: LlmUsage; stopReason: string | null };
 
 export interface Llm {
   streamText(prompt: Prompt, signal: AbortSignal): TextStream;
@@ -124,8 +127,9 @@ export function anthropicLlm(env: ClaudeEnv, thinking: ThinkingSetting = COMPOSE
             }
           }
         },
-        async usage() {
-          return toUsage(await stream.finalMessage());
+        async result() {
+          const msg = await stream.finalMessage();
+          return { usage: toUsage(msg), stopReason: msg.stop_reason ?? null };
         },
         abort() {
           stream.abort();
@@ -156,7 +160,7 @@ export function anthropicLlm(env: ClaudeEnv, thinking: ThinkingSetting = COMPOSE
           text += block.text;
         }
       }
-      return { tool, text: text.trim(), usage: toUsage(msg) };
+      return { tool, text: text.trim(), usage: toUsage(msg), stopReason: msg.stop_reason ?? null };
     },
   };
 }
@@ -208,19 +212,24 @@ function stripCr(line: string): string {
 
 // ── Line classification ───────────────────────────────────────────────────────
 
+/** `repaired`: the line only parsed after repairBrackets (counted in usage.repaired_lines). */
 export type ComposerLine =
   /** Blank line or a markdown fence the model added by accident: dropped, not counted. */
   | { kind: "ignore" }
-  | { kind: "a2ui"; msg: A2uiMessage }
-  | { kind: "data"; source: string; args: JsonObject; into: string }
-  | { kind: "caption"; text: string }
+  | { kind: "a2ui"; msg: A2uiMessage; repaired?: true }
+  | { kind: "data"; source: string; args: JsonObject; into: string; repaired?: true }
+  | { kind: "caption"; text: string; repaired?: true }
   /** Counted in usage.skipped_lines. */
   | { kind: "invalid"; reason: string };
 
 const FENCE_ONLY = /^```[\w-]*$/;
 const KINDS = new Set<string>(A2UI_MESSAGE_KINDS);
 
-export function classifyLine(raw: string): ComposerLine {
+/**
+ * `repair: false` for a line that may have been cut off (the unterminated last line after a
+ * max_tokens stop): such a line must parse as written or it is skipped.
+ */
+export function classifyLine(raw: string, opts: { repair?: boolean } = {}): ComposerLine {
   let line = raw.trim();
   if (!line || FENCE_ONLY.test(line)) return { kind: "ignore" };
   // A fence glued to the object: ```json{"a2ui":...} or {...}```
@@ -228,15 +237,24 @@ export function classifyLine(raw: string): ComposerLine {
   if (!line) return { kind: "ignore" };
   if (!line.startsWith("{")) return { kind: "invalid", reason: "not a JSON object" };
   let obj: unknown;
+  let repaired = false;
   try {
     obj = JSON.parse(line);
   } catch {
+    const fixed = opts.repair === false ? null : repairBrackets(line);
+    if (fixed === null) return { kind: "invalid", reason: "invalid JSON" };
     try {
-      obj = JSON.parse(repairBrackets(line));
+      obj = JSON.parse(fixed);
+      repaired = true;
     } catch {
       return { kind: "invalid", reason: "invalid JSON" };
     }
   }
+  const c = classifyObject(obj);
+  return repaired && c.kind !== "invalid" && c.kind !== "ignore" ? { ...c, repaired: true } : c;
+}
+
+function classifyObject(obj: unknown): ComposerLine {
   if (!isPlainObject(obj)) return { kind: "invalid", reason: "not a JSON object" };
 
   if ("a2ui" in obj) {
@@ -265,34 +283,36 @@ export function classifyLine(raw: string): ComposerLine {
 
 /**
  * Fixes the one mistake the composer makes on long lines without thinking: a miscounted run of
- * closing brackets at the end of a deeply nested component. A closer that does not match the open
- * bracket is dropped, and missing closers are appended. Strings are left untouched.
+ * closing brackets at the very end of a deeply nested line (one too many, or a "]" left out).
+ * Only that final run is rebuilt, and only when it is off by at most two characters; anything
+ * else (a mismatch earlier in the line, a line cut off mid-structure) returns null and stays invalid.
  */
-export function repairBrackets(line: string): string {
+export function repairBrackets(line: string): string | null {
+  const tailMatch = /[\]}\s]*$/.exec(line);
+  const tailStart = tailMatch ? tailMatch.index : line.length;
+  const body = line.slice(0, tailStart);
+  const tail = line.slice(tailStart).replace(/\s+/g, "");
   const stack: string[] = [];
-  let out = "";
   let inString = false;
   let escaped = false;
-  for (const ch of line) {
+  for (const ch of body) {
     if (inString) {
-      out += ch;
       if (escaped) escaped = false;
       else if (ch === "\\") escaped = true;
       else if (ch === '"') inString = false;
       continue;
     }
-    if (ch === '"') {
-      inString = true;
-    } else if (ch === "{" || ch === "[") {
-      stack.push(ch === "{" ? "}" : "]");
-    } else if (ch === "}" || ch === "]") {
-      if (stack.at(-1) !== ch) continue;
-      stack.pop();
+    if (ch === '"') inString = true;
+    else if (ch === "{") stack.push("}");
+    else if (ch === "[") stack.push("]");
+    else if (ch === "}" || ch === "]") {
+      if (stack.pop() !== ch) return null;
     }
-    out += ch;
   }
-  if (inString) return line;
-  return out + stack.reverse().join("");
+  if (inString || stack.length === 0) return null;
+  const needed = stack.reverse().join("");
+  if (needed === tail || tail.length < 3 || Math.abs(needed.length - tail.length) > 2) return null;
+  return body + needed;
 }
 
 /** Light check only (the client validates fully): version "1.0", exactly one known key, an object with a surfaceId. */

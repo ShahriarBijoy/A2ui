@@ -30,6 +30,7 @@ import {
   FenceStripper,
   LineSplitter,
   type Llm,
+  type LlmResult,
   type LlmUsage,
   type Prompt,
   type ToolCall,
@@ -48,6 +49,8 @@ export type TurnDeps = {
   composeTimeoutMs: number;
   /** Safety net around route(), which already enforces its own 800 ms budget. */
   routeGuardMs: number;
+  /** Skipped and repaired composer lines are logged here (default console.warn, visible in wrangler tail). */
+  warn?: (message: string) => void;
 };
 
 export const SSE_HEADERS: Record<string, string> = {
@@ -318,11 +321,20 @@ function dataDefaults(ctx: PromptContext): DataDefaults {
   return { from: ctx.city, date: ctx.tomorrow };
 }
 
+/** Why the model stopped, as a short error line, when the stop is a failure. */
+function stopProblem(stopReason: string | null, producedUi: boolean): string | null {
+  if (stopReason === "refusal") return "Claude declined this request";
+  if (stopReason === "max_tokens" && !producedUi) return "The composer ran out of tokens before showing anything";
+  return null;
+}
+
 async function composeA2ui(req: TurnRequest, deps: TurnDeps, send: Emit, signal: AbortSignal): Promise<void> {
   const prompt = composerPrompt(req, deps.context);
+  const warn = deps.warn ?? ((m: string) => console.warn(m));
   const t0 = deps.now();
   let firstUi: number | null = null;
   let skipped = 0;
+  let repaired = 0;
   let createdSurface: string | null = null;
   /**
    * Data resolved before this turn's createSurface. The model sometimes writes the data line first;
@@ -330,6 +342,8 @@ async function composeA2ui(req: TurnRequest, deps: TurnDeps, send: Emit, signal:
    * for the next A2UI message and goes to that message's surface.
    */
   let pending: { into: string; records: JsonValue }[] = [];
+  /** The caption is held until the attempt ends: it is sent once, and only if a screen exists. */
+  let caption: string | null = null;
 
   const emitA2ui = async (msg: A2uiMessage, origin: "llm" | "data") => {
     firstUi ??= Math.round(deps.now() - t0);
@@ -343,17 +357,22 @@ async function composeA2ui(req: TurnRequest, deps: TurnDeps, send: Emit, signal:
     }
   };
   const fallbackSurface = () => createdSurface ?? req.surface?.id ?? req.nextSurfaceId;
+  const skip = (reason: string, line: string) => {
+    skipped++;
+    warn(`composer line skipped (${reason}): ${line.slice(0, 160)}`);
+  };
 
-  const handle = async (line: string) => {
-    const c = classifyLine(line);
+  const handle = async (line: string, opts: { repair?: boolean } = {}) => {
+    const c = classifyLine(line, opts);
     if (c.kind === "ignore") return;
-    if (c.kind === "invalid") {
-      skipped++;
-      return;
+    if (c.kind === "invalid") return skip(c.reason, line);
+    if (c.repaired) {
+      repaired++;
+      warn(`composer line repaired (closing brackets): ${line.slice(0, 160)}`);
     }
     if (c.kind === "caption") {
       await flushPending(fallbackSurface());
-      await send({ type: "caption", text: c.text });
+      caption = c.text;
       return;
     }
     if (c.kind === "a2ui") {
@@ -370,10 +389,7 @@ async function composeA2ui(req: TurnRequest, deps: TurnDeps, send: Emit, signal:
     }
     const args = resolveArgBindings(c.args, req.surface?.data ?? null);
     const res = resolveData({ source: c.source, args }, dataDefaults(deps.context));
-    if (!res.ok) {
-      skipped++;
-      return;
-    }
+    if (!res.ok) return skip(res.error, line);
     if (createdSurface) {
       await emitA2ui({ version: A2UI_VERSION, updateDataModel: { surfaceId: createdSurface, path: c.into, value: res.records } }, "data");
     } else {
@@ -381,7 +397,7 @@ async function composeA2ui(req: TurnRequest, deps: TurnDeps, send: Emit, signal:
     }
   };
 
-  const streamOnce = async (p: Prompt): Promise<LlmUsage> => {
+  const streamOnce = async (p: Prompt): Promise<LlmResult> => {
     const stream = deps.llm.streamText(p, signal);
     const splitter = new LineSplitter();
     const it = stream[Symbol.asyncIterator]();
@@ -391,28 +407,45 @@ async function composeA2ui(req: TurnRequest, deps: TurnDeps, send: Emit, signal:
         if (r.done) break;
         for (const line of splitter.push(r.value)) await handle(line);
       }
-      for (const line of splitter.flush()) await handle(line);
+      const result = await abortable(stream.result(), signal);
+      // After a max_tokens stop the unterminated last line is cut off: it must parse as written.
+      const cutOff = result.stopReason === "max_tokens";
+      for (const line of splitter.flush()) await handle(line, { repair: !cutOff });
       await flushPending(fallbackSurface());
-      return await abortable(stream.usage(), signal);
+      if (firstUi !== null && caption !== null) await send({ type: "caption", text: caption });
+      caption = null;
+      return result;
     } catch (err) {
       stream.abort();
       throw err;
     }
   };
 
-  let usage = await streamOnce(prompt);
+  const first = await streamOnce(prompt);
+  let usage = first.usage;
+  let stopReason = first.stopReason;
   // Without thinking the composer occasionally answers a tap with a caption only (measured ~1 in 10
-  // confirm taps). One retry costs ~1.5 s; an unchanged screen on stage costs more.
-  if (firstUi === null) usage = addUsage(usage, await streamOnce({ ...prompt, user: `${prompt.user}\n${COMPOSER_RETRY_NOTE}` }));
-  await send({
-    type: "usage",
+  // confirm taps). One retry costs ~1.5 s; an unchanged screen on stage costs more. A refusal or a
+  // max_tokens stop would only repeat, so those are not retried.
+  if (firstUi === null && stopReason !== "refusal" && stopReason !== "max_tokens") {
+    const retry = await streamOnce({ ...prompt, user: `${prompt.user}\n${COMPOSER_RETRY_NOTE}` });
+    usage = addUsage(usage, retry.usage);
+    stopReason = retry.stopReason;
+  }
+  // Built as a variable so it can carry repaired_lines before the shared type lists it.
+  const usageEvent = {
+    type: "usage" as const,
     ...usage,
     first_ui_ms: firstUi,
     compose_ms: Math.round(deps.now() - t0),
     skipped_lines: skipped,
-  });
-  // Still nothing: an error gives the speaker "Try again" (U15).
-  if (firstUi === null) await send({ type: "error", message: "The composer returned no screen" });
+    repaired_lines: repaired,
+  };
+  await send(usageEvent);
+  const problem = stopProblem(stopReason, firstUi !== null);
+  // Still no screen: an error gives the speaker "Try again" (U15).
+  if (problem) await send({ type: "error", message: problem });
+  else if (firstUi === null) await send({ type: "error", message: "The composer returned no screen" });
 }
 
 function addUsage(a: LlmUsage, b: LlmUsage): LlmUsage {
@@ -501,10 +534,24 @@ async function composeWidgets(req: TurnRequest, deps: TurnDeps, send: Emit, sign
   const t0 = deps.now();
   const reply = await abortable(deps.llm.callTools(widgetsPrompt(req, deps.context), WIDGET_TOOLS, signal), signal);
   const ms = Math.round(deps.now() - t0);
-  const widget = reply.tool ? widgetEvent(reply.tool, dataDefaults(deps.context)) : null;
+  // A tool input cut off by max_tokens can still look valid: never render it.
+  const tool = reply.stopReason === "max_tokens" || reply.stopReason === "refusal" ? null : reply.tool;
+  const widget = tool ? widgetEvent(tool, dataDefaults(deps.context)) : null;
+  const text = reply.stopReason === "refusal" ? "" : reply.text;
   if (widget) await send(widget);
-  else if (reply.text) await send({ type: "text", delta: reply.text });
-  await send({ type: "usage", ...reply.usage, first_ui_ms: widget || reply.text ? ms : null, compose_ms: ms, skipped_lines: 0 });
+  else if (text) await send({ type: "text", delta: text });
+  const shown = Boolean(widget || text);
+  const usageEvent = {
+    type: "usage" as const,
+    ...reply.usage,
+    first_ui_ms: shown ? ms : null,
+    compose_ms: ms,
+    skipped_lines: 0,
+    repaired_lines: 0,
+  };
+  await send(usageEvent);
+  const problem = stopProblem(reply.stopReason, shown);
+  if (problem) await send({ type: "error", message: problem });
 }
 
 // ── html mode ─────────────────────────────────────────────────────────────────
@@ -527,8 +574,18 @@ async function composeHtml(req: TurnRequest, deps: TurnDeps, send: Emit, signal:
       await forward(fence.push(r.value));
     }
     await forward(fence.end());
-    const usage = await abortable(stream.usage(), signal);
-    await send({ type: "usage", ...usage, first_ui_ms: firstUi, compose_ms: Math.round(deps.now() - t0), skipped_lines: 0 });
+    const { usage, stopReason } = await abortable(stream.result(), signal);
+    const usageEvent = {
+      type: "usage" as const,
+      ...usage,
+      first_ui_ms: firstUi,
+      compose_ms: Math.round(deps.now() - t0),
+      skipped_lines: 0,
+      repaired_lines: 0,
+    };
+    await send(usageEvent);
+    const problem = stopProblem(stopReason, firstUi !== null);
+    if (problem) await send({ type: "error", message: problem });
   } catch (err) {
     stream.abort();
     throw err;

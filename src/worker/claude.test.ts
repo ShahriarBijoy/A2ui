@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { checkEnvelope, classifyLine, describeLlmError, FenceStripper, LineSplitter, MissingKeyError } from "./claude";
+import { checkEnvelope, classifyLine, describeLlmError, FenceStripper, LineSplitter, MissingKeyError, repairBrackets } from "./claude";
 
 describe("LineSplitter", () => {
   test("joins lines split across chunks", () => {
@@ -107,10 +107,34 @@ describe("classifyLine", () => {
     const missing = text.replace('"id"}}}}}]}}}', '"id"}}}}}}}');
     expect(extra).not.toBe(text);
     expect(missing).not.toBe(text);
-    for (const l of [extra, missing, text.slice(0, -2)]) {
+    for (const l of [extra, missing]) {
       const c = classifyLine(l);
       expect(c.kind).toBe("a2ui");
+      expect(c.kind === "a2ui" && c.repaired).toBe(true);
       expect(c.kind === "a2ui" && c.msg).toEqual(good.a2ui as never);
+    }
+    // A clean line is not marked repaired.
+    expect(classifyLine(text)).toEqual({ kind: "a2ui", msg: good.a2ui as never });
+    // With repair off (the cut-off last line after max_tokens) a miscount stays invalid.
+    expect(classifyLine(extra, { repair: false }).kind).toBe("invalid");
+  });
+
+  test("truncated lines are never repaired into partial messages", () => {
+    const cuts = [
+      // cut right after the first component
+      '{"a2ui":{"version":"1.0","updateComponents":{"surfaceId":"s1","components":[{"id":"root","component":"Card","child":"main"}',
+      // cut after a property
+      '{"a2ui":{"version":"1.0","updateComponents":{"surfaceId":"s1","components":[{"id":"root","component":"Card"',
+      // cut inside a string
+      '{"a2ui":{"version":"1.0","updateComponents":{"surfaceId":"s1","components":[{"id":"ro',
+      // cut after an opening bracket
+      '{"a2ui":{"version":"1.0","updateComponents":{"surfaceId":"s1","components":[',
+      // a mismatch in the middle, not in the final run
+      '{"a2ui":{"version":"1.0","updateComponents":{"surfaceId":"s1"],"components":[]}}}',
+    ];
+    for (const l of cuts) {
+      expect(repairBrackets(l)).toBeNull();
+      expect(classifyLine(l).kind).toBe("invalid");
     }
   });
 

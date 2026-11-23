@@ -19,7 +19,7 @@ const ctx = {
   catalogId: "http://test/catalog/brick-box/v1",
 };
 
-function fakeStream(chunks: string[], opts: { failAfter?: number; hang?: boolean } = {}): TextStream {
+function fakeStream(chunks: string[], opts: { failAfter?: number; hang?: boolean; stopReason?: string } = {}): TextStream {
   let aborted = false;
   return {
     async *[Symbol.asyncIterator]() {
@@ -30,8 +30,8 @@ function fakeStream(chunks: string[], opts: { failAfter?: number; hang?: boolean
       }
       if (opts.hang) await new Promise(() => {});
     },
-    async usage() {
-      return usage;
+    async result() {
+      return { usage, stopReason: opts.stopReason ?? "end_turn" };
     },
     abort() {
       aborted = true;
@@ -67,6 +67,7 @@ function deps(over: Partial<TurnDeps> = {}): TurnDeps {
     now: () => (t += 10),
     composeTimeoutMs: 1000,
     routeGuardMs: 500,
+    warn: () => {},
     ...over,
   };
 }
@@ -316,25 +317,96 @@ describe("runTurn: compose path (a2ui)", () => {
       },
     };
     const events = await collect(request({ decision: false }), deps({ llm }));
-    expect(events.map((e) => e.type)).toEqual(["caption", "a2ui", "caption", "usage", "done"]);
+    // The first attempt's caption described a screen that was never built: it is dropped.
+    expect(events.map((e) => e.type)).toEqual(["a2ui", "caption", "usage", "done"]);
+    expect(events[1]).toEqual({ type: "caption", text: "x" });
     expect(prompts).toHaveLength(2);
     expect(prompts[1].user).toBe(`${prompts[0].user}\n${COMPOSER_RETRY_NOTE}`);
-    expect(events[3]).toMatchObject({ input_tokens: 20, output_tokens: 40, cache_read_tokens: 10 });
+    expect(events[2]).toMatchObject({ input_tokens: 20, output_tokens: 40, cache_read_tokens: 10 });
   });
 
   test("still no A2UI line after the retry → usage, then error", async () => {
     const llm = fakeLlm(['{"caption":"only words"}\n']);
     const events = await collect(request({ decision: false }), deps({ llm }));
-    expect(events.map((e) => e.type)).toEqual(["caption", "caption", "usage", "error", "done"]);
-    expect(events[3]).toEqual({ type: "error", message: "The composer returned no screen" });
+    expect(events.map((e) => e.type)).toEqual(["usage", "error", "done"]);
+    expect(events[1]).toEqual({ type: "error", message: "The composer returned no screen" });
     expect(llm.prompts).toHaveLength(2);
+  });
+});
+
+describe("runTurn: stop reasons, repairs, captions", () => {
+  const create = '{"a2ui":{"version":"1.0","createSurface":{"surfaceId":"s3","catalogId":"http://test/catalog/brick-box/v1"}}}';
+  const comps = (closers: string) =>
+    `{"a2ui":{"version":"1.0","updateComponents":{"surfaceId":"s3","components":[{"id":"root","component":"Card","child":"x","action":{"event":{"name":"go","context":{"id":{"@path":"id"${closers}`;
+  const good = comps("}}}}}]}}}");
+
+  test("max_tokens: the cut-off last line is skipped (not repaired); the screen so far stays, no error", async () => {
+    const warnings: string[] = [];
+    const cut = '{"a2ui":{"version":"1.0","updateComponents":{"surfaceId":"s3","components":[{"id":"root","component":"Card","child":"main"}';
+    const events = await collect(
+      request({ decision: false }),
+      deps({ llm: fakeLlm([`${create}\n${cut}`], { stopReason: "max_tokens" }), warn: (m) => void warnings.push(m) }),
+    );
+    expect(events.map((e) => e.type)).toEqual(["a2ui", "usage", "done"]);
+    expect(events[1]).toMatchObject({ skipped_lines: 1, repaired_lines: 0 });
+    expect(warnings).toHaveLength(1);
+    expect(warnings[0]).toStartWith("composer line skipped (invalid JSON)");
+  });
+
+  test("max_tokens with no screen → error, no retry", async () => {
+    const llm = fakeLlm(['{"a2ui":{"version":"1.0","updateComponents":{"surfaceId":"s3","compo'], { stopReason: "max_tokens" });
+    const events = await collect(request({ decision: false }), deps({ llm, warn: () => {} }));
+    expect(events.map((e) => e.type)).toEqual(["usage", "error", "done"]);
+    expect(events[1]).toEqual({ type: "error", message: "The composer ran out of tokens before showing anything" });
+    expect(llm.prompts).toHaveLength(1);
+  });
+
+  test("refusal → error after usage, in every mode", async () => {
+    const a = await collect(request({ decision: false }), deps({ llm: fakeLlm([`${create}\n`], { stopReason: "refusal" }) }));
+    expect(a.map((e) => e.type)).toEqual(["a2ui", "usage", "error", "done"]);
+    expect(a[2]).toEqual({ type: "error", message: "Claude declined this request" });
+    const h = await collect(request({ mode: "html", decision: false }), deps({ llm: fakeLlm([], { stopReason: "refusal" }) }));
+    expect(h.map((e) => e.type)).toEqual(["usage", "error", "done"]);
+    const reply: WidgetsReply = { tool: null, text: "I can't help with that.", usage, stopReason: "refusal" };
+    const w = await collect(request({ mode: "widgets", decision: false }), deps({ llm: fakeLlm([], {}, reply) }));
+    expect(w.map((e) => e.type)).toEqual(["usage", "error", "done"]);
+  });
+
+  test("html cut off by max_tokens after some HTML: no error (the page so far is shown)", async () => {
+    const events = await collect(request({ mode: "html", decision: false }), deps({ llm: fakeLlm(["<p>hi"], { stopReason: "max_tokens" }) }));
+    expect(events.map((e) => e.type)).toEqual(["html", "usage", "done"]);
+  });
+
+  test("widgets: a tool call cut off by max_tokens is never rendered", async () => {
+    const reply: WidgetsReply = { tool: { name: "show_restaurants", input: {} }, text: "", usage, stopReason: "max_tokens" };
+    const events = await collect(request({ mode: "widgets", decision: false }), deps({ llm: fakeLlm([], {}, reply) }));
+    expect(events.map((e) => e.type)).toEqual(["usage", "error", "done"]);
+  });
+
+  test("a miscounted closing run on a complete line is repaired, counted and logged", async () => {
+    const warnings: string[] = [];
+    const extra = comps("}}}}}}]}}}");
+    expect(() => JSON.parse(extra)).toThrow();
+    const events = await collect(
+      request({ decision: false }),
+      deps({ llm: fakeLlm([`${create}\n${extra}\n${good}\n{"caption":"x"}\n`]), warn: (m) => void warnings.push(m) }),
+    );
+    expect(events.map((e) => e.type)).toEqual(["a2ui", "a2ui", "a2ui", "caption", "usage", "done"]);
+    expect(events[4]).toMatchObject({ skipped_lines: 0, repaired_lines: 1 });
+    expect(warnings).toEqual([expect.stringContaining("composer line repaired")]);
+  });
+
+  test("at most one caption per turn, sent after the screen", async () => {
+    const events = await collect(request({ decision: false }), deps({ llm: fakeLlm([`{"caption":"early"}\n${create}\n{"caption":"late"}\n`]) }));
+    expect(events.filter((e) => e.type === "caption")).toEqual([{ type: "caption", text: "late" }]);
+    expect(events.map((e) => e.type)).toEqual(["a2ui", "caption", "usage", "done"]);
   });
 });
 
 describe("runTurn: errors and timeouts", () => {
   test("LLM error → error + done, no usage", async () => {
-    const events = await collect(request({ decision: false }), deps({ llm: fakeLlm(['{"caption":"x"}\n', "more"], { failAfter: 1 }) }));
-    expect(events.map((e) => e.type)).toEqual(["caption", "error", "done"]);
+    const events = await collect(request({ decision: false }), deps({ llm: fakeLlm(['{"a2ui":{"version":"1.0","deleteSurface":{"surfaceId":"s9"}}}\n', "more"], { failAfter: 1 }) }));
+    expect(events.map((e) => e.type)).toEqual(["a2ui", "error", "done"]);
     expect(events[1]).toEqual({ type: "error", message: "Composer failed: stream broke" });
   });
 
@@ -354,8 +426,8 @@ describe("runTurn: errors and timeouts", () => {
   });
 
   test("compose timeout → 'The composer took too long' + done", async () => {
-    const events = await collect(request({ decision: false }), deps({ llm: fakeLlm(['{"caption":"x"}\n'], { hang: true }), composeTimeoutMs: 30 }));
-    expect(events.map((e) => e.type)).toEqual(["caption", "error", "done"]);
+    const events = await collect(request({ decision: false }), deps({ llm: fakeLlm(['{"a2ui":{"version":"1.0","deleteSurface":{"surfaceId":"s9"}}}\n'], { hang: true }), composeTimeoutMs: 30 }));
+    expect(events.map((e) => e.type)).toEqual(["a2ui", "error", "done"]);
     expect(events[1]).toEqual({ type: "error", message: "The composer took too long" });
   });
 
@@ -370,7 +442,7 @@ describe("runTurn: errors and timeouts", () => {
 
 describe("runTurn: widgets and html modes", () => {
   test("widgets: tool call → widget with resolved places, then usage + done", async () => {
-    const reply: WidgetsReply = { tool: { name: "show_restaurants", input: { kind: "vegan" } }, text: "", usage };
+    const reply: WidgetsReply = { tool: { name: "show_restaurants", input: { kind: "vegan" } }, text: "", usage, stopReason: "tool_use" };
     const events = await collect(request({ mode: "widgets", decision: false }), deps({ llm: fakeLlm([], {}, reply) }));
     expect(events.map((e) => e.type)).toEqual(["widget", "usage", "done"]);
     expect(events[0]).toMatchObject({ type: "widget", name: "RestaurantWidget", props: { kind: "vegan" } });
@@ -379,7 +451,7 @@ describe("runTurn: widgets and html modes", () => {
   });
 
   test("widgets: no tool → text", async () => {
-    const reply: WidgetsReply = { tool: null, text: "Each pays 30 euro.", usage };
+    const reply: WidgetsReply = { tool: null, text: "Each pays 30 euro.", usage, stopReason: "end_turn" };
     const events = await collect(request({ mode: "widgets", decision: false }), deps({ llm: fakeLlm([], {}, reply) }));
     expect(events.slice(0, 1)).toEqual([{ type: "text", delta: "Each pays 30 euro." }]);
   });
