@@ -59,8 +59,43 @@ Read this before calling any external API. Items here override PLAN.md where the
 - "Demo data" badge: shown when any record in a surface's data model has `demo: true` (no model cooperation needed).
 - Pool tile count = session use count; "used" fill = accepted in the current turn.
 
-## Measurements
-(Filled in by steps 7, 10 and 13.)
+## Measurements (dev machine in Germany → Anthropic/TypeSafe; local wrangler dev; 2026-11-23)
+These are dev-machine numbers. The talk numbers come from step 13 against the deployed Worker.
+
+### Composer (claude-haiku-5-5, warm prompt cache, `thinking: {type: "disabled"}`)
+- First UI 618–888 ms, compose 1.2–2.7 s on all six opening lines, 0 skipped lines.
+- Cache: the static system prompt is ~4.6–5.0k tokens; every call after the first reads it (`cache_read_tokens` ≈ 4.6–5.0k).
+- Thinking comparison (first UI / compose / output tokens, ms):
+
+| line | disabled | adaptive + effort low | default adaptive (medium) |
+|---|---|---|---|
+| dinner | 902 / 1996 / 455 | 834 / 1897 / 427 | 2538 / 3889 / 858 |
+| flight | 715 / 2463 / 699 | 738 / 2554 / 706 | 2733 / 4466 / 1144 |
+| bill | 764 / 2307 / 565 | 4197 / 5879 / 1325 | 5204 / 6753 / 1514 |
+| packing | 685 / 2707 / 758 | 4246 / 6556 / 1492 | 3990 / 6219 / 1495 |
+| quiz | 673 / 2249 / 563 | 4458 / 5659 / 1308 | 3146 / 4618 / 1050 |
+| pink | 814 / 1383 / 224 | 777 / 1704 / 326 | 727 / 1523 / 262 |
+
+  → **Chosen: thinking disabled** (accepted on Haiku 5.5). Fallback: if the API rejects it before output, the call reruns once with adaptive + low.
+- Scenario runs with the final prompt (bcacf04, text + taps, decision off): dinner 2/2, flight 4/4 (24 turns). Earlier prompt versions: dinner 8/8, flight 5/6; the one failure was a caption-only confirm, now retried once.
+- Real output replayed through the client processor: **0 refused, 0 validation errors** over 54 turns (203 messages). One earlier refusal (`"rows": {"literal": 20}`) was fixed in the prompt.
+- Dinner line event timing (one run): createSurface 828 ms → places data 969 ms → components 1511 ms → OptionCard template 2010 ms → caption 2139 ms.
+
+### Decision model (Jev, jev-1.14.0)
+- Route (warm): median ~154 ms. "We're six, and later" → patch time ["20:00"] + guests 6 in 156–199 ms; all events at 228 ms; no LLM call, no usage event.
+- Cold: first call 810 ms (over the 800 ms budget) → `warmJev` (GET /v1/models): cold warm-up 214–311 ms, the next route 247 ms. **Wire /api/warm on page load and Space-down.**
+- Live eval: 30/30 lines routed correctly (edits patch; "book it", "confirm", "sounds good", "flight instead", "to New York, give me options" compose). Tightest call: "a different place for six people", new 0.50 vs edit 0.49 (composed).
+- Prediction: median ~153–164 ms. After rewording, "I need to book a flight and choose my seat" lights 3 bricks (ChoicePicker, DateTimeInput, SeatMap 0.80), down from 11; prefixes of 3/5/7 words light 0/0/1. Live calls stay on (median < 500 ms).
+
+### Other modes
+- Widgets: dinner → RestaurantWidget 734 ms; flight → FlightSearchWidget with 4 demo flights 931 ms; bill split → plain text 2.66 s.
+- HTML: "make the page pink and add a login box": first byte 652 ms, compose 2.9 s, 710 output tokens, obeyed. In a2ui the same line → "Not available" card with alternatives.
+- Client disconnect mid-stream ends the Worker invocation within ~720 ms; the next turn works.
+
+### Composer behaviours that differ from PLAN (lane W rulings, under review)
+- A data line written before createSurface waits and attaches to the new surface (the PLAN-literal rule put the flight list on the old form).
+- Lines with miscounted closing brackets are repaired, and repairs are not counted as skipped.
+- A caption-only answer (no screen) is retried once; usage sums both calls; if there is still no screen, the client gets usage and then an error.
 
 ## Prompt changes log
 (Step 7.)
