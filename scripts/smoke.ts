@@ -9,16 +9,21 @@
  * scenario's opening line once, in the modes the scenario lists.
  * A line passes when: at least one component rendered (widgets: a widget or text; html: a page),
  * no refused components and no validation errors from the real processor, at most 7 visible blocks,
- * no error, and for patchOnly steps a route decision "patch" with no usage event (no LLM call).
+ * no error. A patch step ("We're six, and later.", see PATCH_EXPECT) is judged by its result: on a screen with a
+ * people count and a time control that has a later time on the same date, the route must patch with no usage event
+ * (no LLM call), the count must be 6, one time control must move later on the same date, and no other data value
+ * may change. On a screen without such a time control (or count) the route must compose: a patch there dropped part
+ * of the line ("later dropped"). Before/after values and the route reason are printed for every run.
  * Visible block (controller ruling): a top-level visual unit inside the root container. The root is
  * unwrapped through Cards, single-child Columns and the first tab; each child of the main Column is one
  * block, whatever it holds (a label/value Row, a List, a nested Column or Card, a Button).
  */
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import type { A2uiMessage, Action, CheckRule, JsonValue } from "@shared/a2ui";
+import type { A2uiMessage, Action, CheckRule, JsonObject, JsonValue } from "@shared/a2ui";
 import { isChildTemplate, isPlainObject } from "@shared/a2ui";
-import { getAt } from "@shared/pointer";
+import { deriveKnobs } from "@shared/knobs";
+import { formatPointer, getAt } from "@shared/pointer";
 import type { Knob, Mode, TurnEvent, TurnRequest } from "@shared/protocol";
 import { SCENARIOS, type ScenarioExpect, type ScenarioStep } from "@shared/scenarios";
 import { evalChecks } from "../src/client/a2ui/evaluate";
@@ -222,6 +227,162 @@ function sameJson(a: JsonValue | undefined, b: unknown): boolean {
   return JSON.stringify(a) === JSON.stringify(b);
 }
 
+// ── Patch outcome (a patch step is judged by what it changed) ─────────────────
+
+/** What a spoken edit must do to the screen it was said on. Lives here because src/shared/scenarios.ts is a contract file. */
+export type PatchExpect = { count: number; time: "later" };
+
+/** Lines whose patch is checked value by value, not only as "route patch + no usage". */
+export const PATCH_EXPECT: Readonly<Record<string, PatchExpect>> = {
+  "We're six, and later.": { count: 6, time: "later" },
+};
+
+type ChoiceKnob = Extract<Knob, { type: "choice" }>;
+type TimeValue = { date: string | null; minutes: number };
+
+const TIME_RE = /^(\d{1,2}):(\d{2})$/;
+const DATE_TIME_RE = /^(\d{4}-\d{2}-\d{2})T(\d{2}):(\d{2})$/;
+const PEOPLE_RE = /guest|people|person|party|diner|pax|cover|group/i;
+
+/** "19:00", ["19:00"] (a ChoicePicker selection) or "2026-11-25T19:00" → date + minutes; null when unset or any other shape. */
+export function parseTime(v: JsonValue | undefined): TimeValue | null {
+  const s = Array.isArray(v) && v.length === 1 ? v[0] : v;
+  if (typeof s !== "string") return null;
+  const t = TIME_RE.exec(s);
+  if (t) return { date: null, minutes: Number(t[1]) * 60 + Number(t[2]) };
+  const dt = DATE_TIME_RE.exec(s);
+  return dt ? { date: dt[1], minutes: Number(dt[2]) * 60 + Number(dt[3]) } : null;
+}
+
+/**
+ * Time controls: a single-choice ChoicePicker of "HH:mm" chips, a time-only DateTimeInput, or a date+time
+ * DateTimeInput. A date-only DateTimeInput (a Day) is not one: "later" must never move a date.
+ */
+export function timeControls(knobs: Knob[]): ChoiceKnob[] {
+  return knobs.filter((k): k is ChoiceKnob => {
+    if (k.type !== "choice") return false;
+    const allSlots = k.options.length > 0 && k.options.every((o) => TIME_RE.test(o.key));
+    if (k.component === "ChoicePicker") return allSlots;
+    if (k.component !== "DateTimeInput") return false;
+    // A date+time knob mixes date keys ("Thu 26 Nov") with time slots, so its current value identifies it.
+    return allSlots || (typeof k.current === "string" && DATE_TIME_RE.test(k.current));
+  });
+}
+
+/** The knob offers a time later than its current one on the same date (chips are linear; DateTimeInput slots can cross midnight). */
+export function laterOnSameDate(knob: ChoiceKnob): boolean {
+  const cur = parseTime(knob.current);
+  if (!cur) return false;
+  return knob.options.some((o) => {
+    const t = parseTime(o.value);
+    return t !== null && t.date === cur.date && t.minutes > cur.minutes;
+  });
+}
+
+/** The people count: a Stepper or Slider, the one labelled for people when there are several. */
+export function countControl(knobs: Knob[]): ChoiceKnob | null {
+  const counts = knobs.filter((k): k is ChoiceKnob => k.type === "choice" && (k.component === "Stepper" || k.component === "Slider"));
+  const people = counts.filter((k) => PEOPLE_RE.test(k.label) || PEOPLE_RE.test(k.path));
+  return people[0] ?? (counts.length === 1 ? counts[0] : null);
+}
+
+export type PatchPlan =
+  | { expected: "patch"; count: ChoiceKnob; times: ChoiceKnob[] }
+  /** The screen cannot hold the whole edit, so a patch would drop part of it (the router's partial-edit rule). */
+  | { expected: "compose"; dropped: string; why: string };
+
+/** What the screen before the step allows: a patch only when it can express both the count and "later". */
+export function planPatch(knobs: Knob[], want: PatchExpect): PatchPlan {
+  const times = timeControls(knobs);
+  if (times.length === 0) return { expected: "compose", dropped: "later", why: "no time control on screen" };
+  if (!times.some(laterOnSameDate)) {
+    const unset = times.every((k) => parseTime(k.current) === null);
+    return { expected: "compose", dropped: "later", why: unset ? "the time control has no value to be later than" : "no later time on the same date" };
+  }
+  const count = countControl(knobs);
+  if (!count) return { expected: "compose", dropped: "the count", why: "no people count on screen" };
+  if (count.current !== want.count && !count.options.some((o) => o.value === want.count)) {
+    return { expected: "compose", dropped: "the count", why: `${count.label} cannot be ${want.count}` };
+  }
+  return { expected: "patch", count, times };
+}
+
+function asObject(v: JsonValue | undefined): JsonObject | null {
+  return isPlainObject(v) ? (v as JsonObject) : null;
+}
+
+/** JSON Pointers of the leaves that differ between two data models (arrays compared by index). */
+export function changedLeaves(a: JsonValue | undefined, b: JsonValue | undefined, tokens: string[] = []): string[] {
+  const oa = asObject(a);
+  const ob = asObject(b);
+  if (oa && ob) {
+    const keys = new Set([...Object.keys(oa), ...Object.keys(ob)]);
+    return [...keys].flatMap((k) => changedLeaves(oa[k], ob[k], [...tokens, k]));
+  }
+  if (Array.isArray(a) && Array.isArray(b)) {
+    return Array.from({ length: Math.max(a.length, b.length) }, (_, i) => changedLeaves(a[i], b[i], [...tokens, String(i)])).flat();
+  }
+  return sameJson(a, b) ? [] : [formatPointer(tokens)];
+}
+
+function show(v: JsonValue | undefined): string {
+  return v === undefined ? "unset" : JSON.stringify(v);
+}
+
+function clock(minutes: number): string {
+  return String(Math.floor(minutes / 60)).padStart(2, "0") + ":" + String(minutes % 60).padStart(2, "0");
+}
+
+function shift(before: JsonValue | undefined, after: JsonValue | undefined): string {
+  const b = parseTime(before);
+  const a = parseTime(after);
+  if (!b || !a || sameJson(before, after)) return "";
+  if (a.date !== b.date) return ` (date ${b.date ?? "none"} → ${a.date ?? "none"})`;
+  const d = a.minutes - b.minutes;
+  return ` (${d > 0 ? "+" : ""}${d} min, same date)`;
+}
+
+export type PatchCheck = { ok: boolean; reasons: string[]; values: string[] };
+
+/**
+ * Judges a patch by its result: the count equals want.count, exactly one time control moved later on the
+ * same date, and no other data value changed. On a screen that cannot hold the whole edit (see planPatch)
+ * every patch fails, since it dropped part of what was said.
+ */
+export function checkPatchOutcome(knobs: Knob[], before: JsonValue | undefined, after: JsonValue | undefined, want: PatchExpect): PatchCheck {
+  const plan = planPatch(knobs, want);
+  const reasons: string[] = [];
+  const values: string[] = [];
+  const changed = changedLeaves(before, after);
+  const change = (p: string) => `${p}: ${show(getAt(before, p))} → ${show(getAt(after, p))}`;
+  if (plan.expected === "compose") {
+    values.push(...(changed.length ? changed.map(change) : ["nothing changed"]));
+    reasons.push(`${plan.dropped} dropped: patched although ${plan.why} (expected compose)`);
+    return { ok: false, reasons, values };
+  }
+  const { count, times } = plan;
+  const countAfter = getAt(after, count.path);
+  values.push(`${count.label} ${change(count.path)}`);
+  if (countAfter !== want.count) reasons.push(`${count.label} is ${show(countAfter)}, expected ${want.count}`);
+  for (const k of times) values.push(`${k.label} ${change(k.path)}${shift(getAt(before, k.path), getAt(after, k.path))}`);
+  const moved = times.find((k) => !sameJson(getAt(before, k.path), getAt(after, k.path)));
+  if (!moved) {
+    reasons.push(`later dropped: ${times.map((k) => k.label).join(", ")} unchanged`);
+  } else {
+    const b = parseTime(getAt(before, moved.path));
+    const a = parseTime(getAt(after, moved.path));
+    if (!b || !a) reasons.push(`${moved.label} is not a time after the patch: ${show(getAt(after, moved.path))}`);
+    else if (a.date !== b.date) reasons.push(`${moved.label} moved to another date (${b.date} → ${a.date})`);
+    else if (a.minutes <= b.minutes) reasons.push(`${moved.label} is not later (${clock(b.minutes)} → ${clock(a.minutes)})`);
+  }
+  const allowed = moved ? [count.path, moved.path] : [count.path];
+  const others = changed.filter((p) => !allowed.some((q) => p === q || p.startsWith(q + "/")));
+  const shown = new Set(times.map((k) => k.path));
+  for (const p of others) if (!shown.has(p)) values.push(change(p));
+  if (others.length) reasons.push(`other values changed: ${others.join(", ")}`);
+  return { ok: reasons.length === 0, reasons, values };
+}
+
 // ── One turn ──────────────────────────────────────────────────────────────────
 
 type StepResult = {
@@ -244,7 +405,33 @@ type StepResult = {
   route: string | null;
   expectOk: boolean | null;
   model: string | null;
+  patch: PatchReport | null;
 };
+
+/** The patch check of one step (PATCH_EXPECT lines), printed per run and kept in --raw. */
+type PatchReport = {
+  /** What the screen before the step allows (planPatch). */
+  expected: "patch" | "compose";
+  why: string | null;
+  /** Route decision and the router's reason. */
+  route: string;
+  /** label path: before → after, per control and per other changed value. */
+  values: string[];
+  ok: boolean;
+  reasons: string[];
+};
+
+/** The newest surface as the step found it: its knobs (as the turn client derives them) and a copy of its data. */
+type PreStep = { surfaceId: string; knobs: Knob[]; data: JsonValue };
+
+function preStep(st: StoreApi): PreStep | null {
+  const s = st.getState();
+  const surface = s.newestSurfaceId ? s.surfaces[s.newestSurfaceId] : undefined;
+  if (!surface) return null;
+  const defs = Object.values(surface.components).flatMap((c) => (c.status === "ok" ? [c.def] : []));
+  const data = structuredClone(surface.data);
+  return { surfaceId: surface.id, knobs: deriveKnobs(defs, data), data };
+}
 
 type Timed = { t: number; ev: TurnEvent };
 
@@ -263,7 +450,17 @@ function maxT(events: Timed[], pick: (ev: TurnEvent) => boolean): number | null 
   return best === null ? null : Math.round(best);
 }
 
-function evaluate(job: Job, run: number, step: number, st: StoreApi, agent: AgentItem, expect: ScenarioExpect | undefined, notes: string[]): StepResult {
+function evaluate(
+  job: Job,
+  run: number,
+  step: number,
+  st: StoreApi,
+  agent: AgentItem,
+  expect: ScenarioExpect | undefined,
+  notes: string[],
+  say: string | null,
+  pre: PreStep | null,
+): StepResult {
   const state = st.getState();
   const events: Timed[] = state.recordings[agent.turnId]?.events ?? [];
   const m = agent.metrics;
@@ -290,6 +487,7 @@ function evaluate(job: Job, run: number, step: number, st: StoreApi, agent: Agen
     route: m.route ? m.route.decision : null,
     expectOk: null,
     model: m.usage?.model ?? null,
+    patch: null,
   };
   for (const f of fetches) {
     if (!f.ok) notes.push(`${f.source} failed: ${f.error ?? "unknown"}`);
@@ -322,10 +520,32 @@ function evaluate(job: Job, run: number, step: number, st: StoreApi, agent: Agen
         if (wrongData.length) notes.push(`expected data differs at ${wrongData.map(([p]) => p).join(", ")}`);
       }
     }
-    if (expect?.patchOnly) {
-      const usage = events.some((e) => e.ev.type === "usage");
-      if (m.route?.decision !== "patch") reasons.push(`route ${m.route ? `${m.route.decision} (${m.route.reason})` : "missing"}, expected patch`);
+    const usage = events.some((e) => e.ev.type === "usage");
+    const routeText = m.route ? `${m.route.decision} (${m.route.reason})` : "missing";
+    const spec = say !== null ? PATCH_EXPECT[say] : undefined;
+    if (spec && pre) {
+      const plan = planPatch(pre.knobs, spec);
+      const report: PatchReport = { expected: plan.expected, why: plan.expected === "compose" ? plan.why : null, route: routeText, values: [], ok: true, reasons: [] };
+      if (m.route?.decision === "patch") {
+        const check = checkPatchOutcome(pre.knobs, pre.data, state.surfaces[pre.surfaceId]?.data, spec);
+        report.values = check.values;
+        report.reasons.push(...check.reasons);
+        if (usage) report.reasons.push("LLM was called (usage event)");
+      } else {
+        report.values = pre.knobs.map((k) => `${k.label} ${k.path}: ${show(getAt(pre.data, k.path))} (before; not patched)`);
+        if (plan.expected === "patch") report.reasons.push(`route ${routeText}, expected patch`);
+        else if (!m.route) report.reasons.push("route missing, expected compose");
+      }
+      report.ok = report.reasons.length === 0;
+      reasons.push(...report.reasons);
+      result.patch = report;
+    } else if (expect?.patchOnly) {
+      if (m.route?.decision !== "patch") reasons.push(`route ${routeText}, expected patch`);
       if (usage) reasons.push("LLM was called (usage event)");
+    } else if (m.route?.decision === "patch" && pre) {
+      const after = state.surfaces[pre.surfaceId]?.data;
+      const changes = changedLeaves(pre.data, after).map((p) => `${p}: ${show(getAt(pre.data, p))} → ${show(getAt(after, p))}`);
+      notes.push(`patch not asserted (no expected outcome for this line): ${changes.join("; ") || "nothing changed"}`);
     }
   } else if (job.mode === "widgets") {
     if (!agent.widget && !agent.text?.trim()) reasons.push("no widget and no text");
@@ -421,6 +641,10 @@ function printResult(r: StepResult): void {
   if (r.route) parts.push(`route ${r.route}`);
   const why = [...r.reasons, ...r.notes];
   console.log(`${head} ${lineLabel(r)} · ${parts.join(" · ")}${why.length ? ` · ${why.join("; ")}` : ""}`);
+  if (r.patch) {
+    console.log(`    patch expected ${r.patch.expected}${r.patch.why ? ` (${r.patch.why})` : ""} · route ${r.patch.route}`);
+    for (const v of r.patch.values) console.log(`    patch ${v}`);
+  }
   for (const d of r.diag) console.log(`    diag ${d}`);
 }
 
@@ -503,6 +727,18 @@ function scenarioChecks(results: StepResult[]): string[] {
   ].filter((l): l is string => l !== null);
 }
 
+/** One line per checked patch step: verdict, what the screen allowed, the route and its reason, before → after values. */
+function patchSection(results: StepResult[]): string[] {
+  const lines = results.flatMap((r) => {
+    const p = r.patch;
+    if (!p) return [];
+    const why = p.why ? ` (${p.why})` : "";
+    const fail = p.reasons.length ? ` · ${p.reasons.join("; ")}` : "";
+    return [`- ${r.job.id} #${r.step + 1} run ${r.run + 1}: ${p.ok ? "PASS" : "FAIL"} · expected ${p.expected}${why} · route ${p.route} · ${p.values.join("; ")}${fail}`];
+  });
+  return lines.length ? ["## Patch checks", "", ...lines, ""] : [];
+}
+
 function berlinTime(d: Date): string {
   return new Intl.DateTimeFormat("en-GB", { timeZone: "Europe/Berlin", dateStyle: "medium", timeStyle: "short" }).format(d);
 }
@@ -548,7 +784,7 @@ async function runJob(job: Job, run: number, opts: Options, key: string, results
     if (blocked) {
       const r: StepResult = {
         diag: [], job, run, step: i, status: "not run", reasons: [blocked], notes, firstUi: null, screen: null, data: null, done: null,
-        outTokens: null, searchMs: null, records: null, blocks: null, route: null, expectOk: null, model: null,
+        outTokens: null, searchMs: null, records: null, blocks: null, route: null, expectOk: null, model: null, patch: null,
       };
       results.push(r);
       printResult(r);
@@ -556,6 +792,8 @@ async function runJob(job: Job, run: number, opts: Options, key: string, results
     }
     const before = lastAgent(st);
     lastRequest = null;
+    const say = "say" in step ? step.say : null;
+    const pre = say !== null ? preStep(st) : null;
     if ("say" in step) {
       await client.sendTurn({ input: { type: "utterance", text: step.say }, display: step.say, via: "text" });
     } else {
@@ -567,6 +805,7 @@ async function runJob(job: Job, run: number, opts: Options, key: string, results
           diag: diagnose(st, surface?.id, before, null),
           job, run, step: i, status: "fail", reasons: [`no OptionCard/Button action starting with "${step.tap}" on the newest surface`], notes,
           firstUi: null, screen: null, data: null, done: null, outTokens: null, searchMs: null, records: null, blocks: null, route: null, expectOk: null, model: null,
+          patch: null,
         };
         results.push(r);
         printResult(r);
@@ -582,8 +821,10 @@ async function runJob(job: Job, run: number, opts: Options, key: string, results
     }
     const agent = lastAgent(st);
     if (!agent || agent === before) throw new Error("the turn client started no turn");
-    const r = evaluate(job, run, i, st, agent, step.expect, notes);
-    const patchMiss = step.expect?.patchOnly === true && (r.route !== "patch" || r.reasons.some((x) => x.startsWith("LLM was called")));
+    const r = evaluate(job, run, i, st, agent, step.expect, notes, say, pre);
+    const patchMiss = r.patch
+      ? !r.patch.ok
+      : step.expect?.patchOnly === true && (r.route !== "patch" || r.reasons.some((x) => x.startsWith("LLM was called")));
     if (job.mode === "a2ui" && (patchMiss || r.expectOk === false)) {
       r.diag = diagnose(st, agent.surfaceId ?? agent.updatedSurfaceId ?? st.getState().newestSurfaceId, agent, lastRequest);
     }
@@ -592,7 +833,7 @@ async function runJob(job: Job, run: number, opts: Options, key: string, results
     if (opts.raw) {
       mkdirSync(opts.raw, { recursive: true });
       const rec = st.getState().recordings[agent.turnId];
-      writeFileSync(join(opts.raw, `${job.mode}-${job.id}-run${run + 1}-step${i + 1}.json`), JSON.stringify({ input: agent.retry.input, request: lastRequest, diag: r.diag, ...rec }, null, 1));
+      writeFileSync(join(opts.raw, `${job.mode}-${job.id}-run${run + 1}-step${i + 1}.json`), JSON.stringify({ input: agent.retry.input, request: lastRequest, patch: r.patch, diag: r.diag, ...rec }, null, 1));
     }
     if (agent.status === "error" && /^HTTP 40[13]/.test(agent.error ?? "")) {
       throw new Error(`stopping: ${agent.error} (check DEMO_KEY)`);
@@ -629,7 +870,8 @@ async function main(): Promise<void> {
     `- Script tree: ${gitHead()}. Models reported by the Worker: ${models.join(", ") || "–"}.`,
     ...(opts.note ? [`- Note: ${opts.note}`] : []),
     `- a2ui: every scenario (all steps) and five held-out lines, ${opts.runs}× each, decision model on. widgets and html: each scenario's opening line once, in the modes it lists.`,
-    "- Pass: at least one component rendered (widgets: a widget or text; html: a page); 0 refused and 0 validation errors in the real client processor; ≤ 7 visible blocks; no error; patchOnly steps: route decision patch and no usage event.",
+    "- Pass: at least one component rendered (widgets: a widget or text; html: a page); 0 refused and 0 validation errors in the real client processor; ≤ 7 visible blocks; no error.",
+    "- Patch step (\"We're six, and later.\"), judged by its result in the real processor: if the screen before it has a people count (Stepper/Slider) and a time control (ChoicePicker of HH:mm, time or date+time DateTimeInput) with a later time on the same date, the route must patch with no usage event, the count must be 6, one time control must move later on the same date, and no other data value may change. Otherwise the route must compose, and a patch fails (\"later dropped\"). Per-run values are under \"Patch checks\".",
     "- Visible block (controller ruling): a top-level visual unit inside the root container. The root is unwrapped through Cards, single-child Columns and the first tab; each child of the main Column counts once, whatever it holds (a label/value Row, a List, a nested Column or Card, a Button).",
     "- first UI: the turn's surface has a root (patch steps: the first knob change). screen done: last composer or knob line, caption, widget or html. data arrived: last live data event. Search ms is the Worker's own measure (the longest search of the turn); records are summed over the turn's searches.",
     "- Medians with (min–max). \"–\" means not measured. \"expect\" counts the scenario's expected bricks/data (informational, not part of pass).",
@@ -640,10 +882,12 @@ async function main(): Promise<void> {
     "",
     table,
     "",
+    ...patchSection(results),
   ].join("\n");
   writeFileSync(opts.out, md);
   console.log("\n" + checks.join("\n") + "\n\n" + table + `\n\nWrote ${opts.out}`);
   process.exitCode = passed === results.length ? 0 : 1;
 }
 
-await main();
+// Guarded so scripts/smoke.test.ts can import the pure helpers without starting a run.
+if (import.meta.main) await main();
