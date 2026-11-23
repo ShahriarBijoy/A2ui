@@ -283,6 +283,50 @@ describe("phase 2", () => {
   });
 });
 
+describe("replay", () => {
+  test("a replayed turn fills its own metrics but leaves session totals and pool counts unchanged", () => {
+    const s = createStore();
+    // One real turn, recorded.
+    const real = s.beginTurn(utter("table for four"));
+    s.applyTurnEvent(real, { type: "route", kind: "new", decision: "compose", ms: 160, engine: "jev", reason: "", patches: 0 });
+    for (const msg of DINNER_STEP_2.messages) s.applyTurnEvent(real, a2ui(msg));
+    s.applyTurnEvent(real, a2ui({ version: "1.0", updateComponents: { surfaceId: "s2", components: [{ id: "bad", component: "LoginForm" }] } }));
+    s.applyTurnEvent(real, {
+      type: "fetch",
+      source: "search",
+      query: "bistro",
+      ok: true,
+      records: 3,
+      ms: 2900,
+      input_tokens: 700,
+      output_tokens: 90,
+    });
+    s.applyTurnEvent(real, usage);
+    s.applyTurnEvent(real, { type: "done" });
+    const before = s.getState();
+    expect(before.totals).toMatchObject({ turns: 1, llmCalls: 2, inputTokens: 1900, outputTokens: 390, refusals: 1 });
+
+    // Replay it, plus a patch turn's route, through the same ingress.
+    const rec = before.recordings[real];
+    const replay = s.beginTurn({ input: { type: "utterance", text: rec.display }, display: rec.display, via: rec.via, replay: true });
+    for (const { ev } of rec.events) s.applyTurnEvent(replay, ev);
+    s.applyTurnEvent(replay, { type: "route", kind: "edit", decision: "patch", ms: 150, engine: "jev", reason: "", patches: 1 });
+    const after = s.getState();
+    expect(after.totals).toEqual(before.totals);
+    expect(after.pool.counts).toEqual(before.pool.counts);
+    const item = agentOf(s, replay);
+    expect(item?.replay).toBe(true);
+    expect(item?.metrics.usage?.output_tokens).toBe(300);
+    expect(item?.metrics.fetches).toHaveLength(1);
+    expect(item?.metrics.refused).toBe(1);
+    expect(item?.metrics.route?.decision).toBe("patch");
+    expect(item?.status).toBe("done");
+    expect(after.replaying).toBe(false);
+    // The replay re-fills the pool for the stage (used), without counting.
+    expect(after.pool.used.length).toBeGreaterThan(0);
+  });
+});
+
 describe("buildTurnRequest", () => {
   test("derives the thread (user, tap, agent), snapshots the newest surface, picks a fresh surface id", () => {
     const s = createStore();

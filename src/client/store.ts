@@ -305,7 +305,8 @@ export function createStore(): StoreApi {
         thread: [...state.thread, user, agent],
         activeTurnId: turnId,
         pool: { ...state.pool, used: [] },
-        totals: { ...state.totals, turns: state.totals.turns + 1 },
+        // A replay re-shows old numbers; session totals count only turns measured in this session.
+        totals: replay ? state.totals : { ...state.totals, turns: state.totals.turns + 1 },
         replaying: replay ? true : state.replaying,
         recordings: { ...state.recordings, [turnId]: { display, via, mode: state.mode, events: [] } },
       });
@@ -426,6 +427,11 @@ export function createStore(): StoreApi {
           break;
       }
 
+      if (a.replay) {
+        // The replayed item still fills its own metrics (the chip shows the originally measured
+        // numbers), but session totals and pool use counts must not count the same turn twice.
+        s = { ...s, totals: state.totals, pool: { ...s.pool, counts: state.pool.counts } };
+      }
       set({ ...s, thread: withAgent(s.thread, index, a) });
     },
 
