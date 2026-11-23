@@ -76,6 +76,12 @@ Read this before calling any external API. Items here override PLAN.md where the
 - Widgets: dinner → RestaurantWidget with 5 live places in 4.22 s; flight → FlightSearchWidget 0.86 s. HTML: first byte ~0.5–0.6 s, done 4.5–5.6 s.
 - Full table: scratchpad `main-10x-sonnet.md`. Production smoke (all lines) should be re-run during the evening before the talk (18:30–19:30), since dinner results depend on the real clock.
 
+## Production smoke (615d559, Sonnet composer, real clock ~00:05 Tue 24 Nov; scripts/smoke-results.md)
+- Flight 3/3 on every step. Pink 3/3. Widgets 5/5. HTML 6/6.
+- Dinner: the opening step passed 3/3, but live search found 0/3/0 places (past midnight, kitchens closed), so 2 runs had nothing to tap. The run with places passed every step ("We're six, and later" patched in 219 ms). Re-run in the evening.
+- Wildcards 7/9, held-out 13/15. **Every miss is a 8–9-block screen** (rule ≤ 7); Sonnet builds richer screens. Cosmetic; the prompt is frozen for the talk.
+- First UI on production with Sonnet: ~1.4–2.3 s (Haiku ~0.7–0.9 s); screen done ~3.7–6.7 s.
+
 ## Rulings (decisions made without asking)
 - Fonts: Geist + Geist Mono, bundled via fontsource (no network at the venue). PLAN says "system sans": same intent, consistent rendering on the stage machine.
 - Catalog id: `<origin>/catalog/brick-box/v1`, served publicly as JSON by the Worker. The processor accepts any catalogId ending in `/catalog/brick-box/v1`.
