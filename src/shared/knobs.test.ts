@@ -421,16 +421,33 @@ describe("buildRouteRequest", () => {
     expect(partial).toMatchObject({ decision: "compose", reason: "partial edit: When (date)" });
   });
 
-  test("date knobs get the date relative-word hint", () => {
-    const knobs = deriveKnobs(
-      [{ id: "d", component: "DateTimeInput", label: "Date", enableDate: true, value: { "@path": "/d" } }],
-      { d: "2026-11-24" },
-      NOW,
+  test("date-only knobs change only on a named day; time words go to a time knob, else to a 'time' sentinel", () => {
+    const day: CatalogComponent = { id: "d", component: "DateTimeInput", label: "Day", enableDate: true, value: { "@path": "/d" } };
+    const alone = buildRouteRequest("later", deriveKnobs([day], { d: "2026-11-24" }, NOW)).questions.k0;
+    if (alone.type !== "choice") throw new Error("k0 should be a choice");
+    expect(alone.instructions).toEndWith(
+      "Current value: Tuesday 24 November 2026 (tomorrow). Only a named day changes the date (such as 'on Friday', 'tomorrow' or 'the day after'). If the speaker says the day after, pick Wed 25 Nov. If the request mentions any time of day (such as 'at nine' or 'half past seven') or says later or earlier, pick time, even when a day is named too.",
     );
-    const q = buildRouteRequest("the day after", knobs).questions.k0;
-    expect(q.instructions).toEndWith(
-      "If the speaker only says later, earlier or the day after without a date, pick one day after or before the current value.",
+    expect(alone.criteria.time).toBe("A time of day, or just later or earlier, which this screen cannot set");
+    const withTime = buildRouteRequest("later", deriveKnobs([day, ...dinner], { d: "2026-11-24", booking: { time: ["19:00"], guests: 4 } }, NOW))
+      .questions.k0;
+    if (withTime.type !== "choice") throw new Error("k0 should be a choice");
+    expect(withTime.instructions).toEndWith(
+      "If the speaker says the day after, pick Wed 25 Nov. Later, earlier or a time of day alone leave the date unchanged.",
     );
+    expect(withTime.criteria.time).toBeUndefined();
+    // Choosing the sentinel is a partial edit.
+    const r = answersToRoute(
+      {
+        kind: { type: "choice", choice: "edit", confidence: 1, probabilities: { edit: 0.95, new: 0.05, other: 0 } },
+        k0: { type: "choice", choice: "time", confidence: 1, probabilities: { time: 0.9, unchanged: 0.1 } },
+        guard: { type: "noul", noul: 0.1 },
+      },
+      deriveKnobs([day], { d: "2026-11-24" }, NOW),
+      1,
+      "jev",
+    );
+    expect(r).toMatchObject({ decision: "compose", reason: "partial edit: Day (no time option)" });
   });
 
   test("multi knob → one noul per option; bool → one noul; duplicate labels get distinct screen keys", () => {

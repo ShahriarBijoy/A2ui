@@ -412,6 +412,8 @@ export function buildRouteRequest(utterance: string, knobs: Knob[]): RouteReques
   const questions: JevQuestions = {
     [KIND_QUESTION]: { type: "choice", instructions: KIND_INSTRUCTIONS, criteria: KIND_CRITERIA },
   };
+  // Time words belong to a time knob when the screen has one; a date-only knob must never claim them.
+  const hasTimeKnob = knobs.some((k) => k.type === "choice" && (isDateTimeKnob(k) || knobFlavour(k) === "time"));
   knobs.forEach((knob, i) => {
     screen[uniqueKey(screen, knob.label)] = knobCurrentLabel(knob);
     if (knob.type === "choice" && isDateTimeKnob(knob)) {
@@ -422,7 +424,8 @@ export function buildRouteRequest(utterance: string, knobs: Knob[]): RouteReques
         if (o.key !== UNCHANGED && !Object.hasOwn(criteria, o.key)) criteria[o.key] = o.label;
       }
       if (Object.keys(criteria).length < 2) return;
-      const hint = relativeHint(knob, knobFlavour(knob));
+      const flavour = knobFlavour(knob);
+      const hint = flavour === "date" ? dateHint(knob, hasTimeKnob) : relativeHint(knob, flavour);
       for (const [key, text] of Object.entries(hint.sentinels)) if (!Object.hasOwn(criteria, key)) criteria[key] = text;
       questions[knobQuestionId(i)] = {
         type: "choice",
@@ -493,6 +496,32 @@ const RELATIVE_HINT: Record<Flavour, string> = {
  * a sentinel criterion instead: tying both directions to one target made "later" at 21:00 patch
  * 20:00 (9 backwards patches in 15 measured cases); the sentinel turns it into a partial edit.
  */
+/**
+ * Date-only knobs change only on a named day. With "pick one day after" for a bare "later", a
+ * separate Day knob claimed "We're six, and later." and moved the date (A/B run: 5/10 dinner misses).
+ * With a time knob on screen, time words leave the date alone; without one, a "time" sentinel turns
+ * them into a partial edit, so "later" composes instead of moving the date or being dropped.
+ */
+function dateHint(knob: ChoiceKnob, hasTimeKnob: boolean): { text: string; sentinels: Record<string, string> } {
+  const sentinels: Record<string, string> = {};
+  let text = " Only a named day changes the date (such as 'on Friday', 'tomorrow' or 'the day after').";
+  const cur = typeof knob.current === "string" ? knob.current.slice(0, 10) : "";
+  if (/^\d{4}-\d{2}-\d{2}$/.test(cur)) {
+    const [y, m, d] = cur.split("-").map(Number);
+    const next = isoDate(new Date(y, m - 1, d + 1));
+    const dayAfter = knob.options.find((o) => String(o.value).startsWith(next));
+    if (dayAfter) text += " If the speaker says the day after, pick " + dayAfter.key + ".";
+  }
+  if (hasTimeKnob) {
+    text += " Later, earlier or a time of day alone leave the date unchanged.";
+  } else if (!knob.options.some((o) => o.key === "time")) {
+    sentinels.time = "A time of day, or just later or earlier, which this screen cannot set";
+    // "even when a day is named too": without it "Friday at nine" patched the date and dropped the nine.
+    text += " If the request mentions any time of day (such as 'at nine' or 'half past seven') or says later or earlier, pick time, even when a day is named too.";
+  }
+  return { text, sentinels };
+}
+
 function relativeHint(knob: ChoiceKnob, flavour: Flavour): { text: string; sentinels: Record<string, string> } {
   const sentinels: Record<string, string> = {};
   if (flavour !== "time") return { text: RELATIVE_HINT[flavour], sentinels };

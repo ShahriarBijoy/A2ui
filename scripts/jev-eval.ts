@@ -440,6 +440,48 @@ for (const [time, text, exp] of bothLines) {
   await runLine(both, { booking: { when: base2 + "T" + time, guests: 4 } }, text, exp);
 }
 
+// ── 12–14. A separate date-only "Day" knob (Sonnet often builds one next to a time control) ──
+// Only a named day moves the Day; time words go to the time knob, or compose when there is none.
+const dayKnob: CatalogComponent = { id: "day", component: "DateTimeInput", label: "Day", enableDate: true, value: { "@path": "/booking/day" } };
+const guestsKnob: CatalogComponent = { id: "guests", component: "Stepper", label: "Guests", min: 1, max: 12, value: { "@path": "/booking/guests" } };
+const timeChips: CatalogComponent = {
+  id: "time",
+  component: "ChoicePicker",
+  label: "Time",
+  variant: "mutuallyExclusive",
+  options: ["18:00", "18:30", "19:00", "19:30", "20:00", "20:30", "21:00"].map((t) => ({ label: t, value: t })),
+  value: { "@path": "/booking/time" },
+};
+const timeOnlyKnob: CatalogComponent = { id: "time", component: "DateTimeInput", label: "Time", enableTime: true, enableDate: false, value: { "@path": "/booking/time" } };
+const DAY = "/booking/day";
+const dayScreens: [string, CatalogComponent[], JsonValue, [string, Expect][]][] = [
+  ["12. Day (date-only) + Time chips + Guests", [dayKnob, timeChips, guestsKnob], { booking: { day: base2, time: ["19:00"], guests: 4 } }, [
+    ["We're six, and later.", { patches: { [G]: [6], [T]: [["20:00"]] } }],
+    ["make it Friday", { patches: { [DAY]: [fri] } }],
+    ["at nine on Friday", { patches: { [DAY]: [fri], [T]: [["21:00"]] } }],
+    ["later", { patches: { [T]: [["20:00"]] } }],
+    ["the day after", { patches: { [DAY]: [plus1(base2)] } }],
+  ]],
+  ["13. Day (date-only) + Time (time-only input) + Guests", [dayKnob, timeOnlyKnob, guestsKnob], { booking: { day: base2, time: "19:00", guests: 4 } }, [
+    ["We're six, and later.", { patches: { [G]: [6], [T]: ["20:00"] } }],
+    ["make it Friday", { patches: { [DAY]: [fri] } }],
+    ["at nine on Friday", { patches: { [DAY]: [fri], [T]: ["21:00"] } }],
+    ["later", { patches: { [T]: ["20:00"] } }],
+  ]],
+  ["14. Day (date-only) + Guests, no time control", [dayKnob, guestsKnob], { booking: { day: base2, guests: 4 } }, [
+    ["We're six, and later.", { compose: true }],
+    ["make it Friday", { patches: { [DAY]: [fri] } }],
+    ["at nine on Friday", { compose: true }],
+    ["Friday at nine", { compose: true }],
+    ["later", { compose: true }],
+    ["the day after", { patches: { [DAY]: [plus1(base2)] } }],
+  ]],
+];
+for (const [title, comps, data, lines] of dayScreens) {
+  console.log("\n" + title + " (Day " + base2 + ")");
+  for (const [text, exp] of lines) await runLine(comps, data, text, exp);
+}
+
 globalThis.fetch = realFetch;
 console.log("\nroute failures (all sections): " + fails);
 if (fails > 0) process.exit(1);
