@@ -33,7 +33,7 @@ Contract files: `src/shared/{a2ui,catalog,protocol,pointer}.ts` and `src/client/
 6. Deploy; give the owner the URL with `?k=<DEMO_KEY>` (the value is in `.dev.vars`).
 
 ## Waiting on the owner
-- `ANTHROPIC_API_KEY` and `SONIOX_API_KEY` in `.dev.vars` (empty at hand-off). The Soniox key needs the "Temporary API keys" permission.
+- (Keys: ANTHROPIC_API_KEY and SONIOX_API_KEY were added to `.dev.vars` and verified live on 2026-11-23: Claude answered, Soniox temp key minted 201.)
 - Venue name and city (`VENUE_NAME` / `VENUE_CITY` vars in wrangler.jsonc; currently "TODO venue", "Bremen").
 - 8 real places near the venue for `src/worker/data/places.json` (placeholders are marked "(TODO)").
 - Talk date (it decides whether to apply PLAN's cut order) and the projector resolution.
