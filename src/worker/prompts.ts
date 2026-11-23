@@ -150,7 +150,7 @@ list shows placeholders.
 Args without "?" are required, and "" counts as missing. If the person has not given one, this step has
 no data line and no List: ask for it with an input and a Button, and request the data after the tap.
 Never put a placeholder in an arg.
-  search  args {query, fields, max?}
+  search  args {query, fields, max?}   at most 2 search lines per turn
     query   one self-contained web search query in English with the place and the date from STATE:
             for "nearby", the venue (STATE.venue, STATE.venue_address if given, STATE.city);
             for events, the city and the month or date.

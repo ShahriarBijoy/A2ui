@@ -3,7 +3,7 @@ import type { Knob, RouteResult, TurnEvent, TurnRequest } from "@shared/protocol
 import type { Llm, LlmUsage, Prompt, TextStream, WidgetsReply } from "./claude";
 import type { SearchOutcome, SearchRequest } from "./search";
 import { COMPOSER_RETRY_NOTE } from "./prompts";
-import { encodeEvent, parseTurnRequest, patchCaption, runTurn, SSE_HEADERS, sseResponse, widgetEvent, type TurnDeps } from "./turn";
+import { encodeEvent, fixChecks, MAX_SEARCHES_PER_TURN, parseTurnRequest, patchCaption, runTurn, SSE_HEADERS, sseResponse, widgetEvent, type TurnDeps } from "./turn";
 import { generateFlights } from "./data/flights";
 
 /** Smallest real answer: one A2UI line and a caption. */
@@ -398,6 +398,22 @@ describe("runTurn: stop reasons, repairs, captions", () => {
     expect(warnings).toEqual([expect.stringContaining("composer line repaired")]);
   });
 
+  test("a check written without its condition wrapper is wrapped (the client would refuse the Button)", async () => {
+    const good = { condition: { "@call": "required", args: { value: { "@path": "/f/from" } } }, message: "From" };
+    const bare = { "@call": "required", args: { value: { "@path": "/f/to" } }, message: "To" };
+    const button = { id: "go", component: "Button", child: "l", action: { event: { name: "search", context: {} } }, "@checks": [good, bare] };
+    const line = JSON.stringify({ a2ui: { version: "1.0", updateComponents: { surfaceId: "s3", components: [button] } } });
+    const warnings: string[] = [];
+    const events = await collect(request({ decision: false }), deps({ llm: fakeLlm([`${create}\n${line}\n`]), warn: (m) => void warnings.push(m) }));
+    const sent = (events[1] as unknown as { msg: { updateComponents: { components: { "@checks": unknown }[] } } }).msg.updateComponents.components[0];
+    expect(sent["@checks"]).toEqual([good, { condition: { "@call": "required", args: { value: { "@path": "/f/to" } } }, message: "To" }]);
+    expect(warnings).toEqual([expect.stringContaining("composer @checks fixed (1 bare condition)")]);
+    // Well-formed messages pass through untouched (same object).
+    const ok = { version: "1.0" as const, updateComponents: { surfaceId: "s3", components: [{ ...button, "@checks": [good] }] } };
+    expect(fixChecks(ok)).toEqual({ msg: ok, fixed: 0 });
+    expect(fixChecks(ok).msg).toBe(ok);
+  });
+
   test("at most one caption per turn, sent after the screen", async () => {
     const events = await collect(request({ decision: false }), deps({ llm: fakeLlm([`{"caption":"early"}\n${create}\n{"caption":"late"}\n`]) }));
     expect(events.filter((e) => e.type === "caption")).toEqual([{ type: "caption", text: "late" }]);
@@ -611,6 +627,37 @@ describe("runTurn: live search data lines", () => {
     expect(events.map(label)).toEqual(["llm:createSurface", "error", "data:updateDataModel", "fetch", "done"]);
     expect(events[1]).toEqual({ type: "error", message: "The composer took too long" });
     expect(events[3]).toMatchObject({ ok: true, records: 2 });
+  });
+
+  test("at most 3 searches per turn: 5 search lines start 3 fetches, the other 2 get [] and 'too many searches'", async () => {
+    expect(MAX_SEARCHES_PER_TURN).toBe(3);
+    const lines = [1, 2, 3, 4, 5].map((i) => `{"data":{"source":"search","args":{"query":"thing ${i}","fields":["name"]},"into":"/r${i}"}}`);
+    const started: string[] = [];
+    const warnings: string[] = [];
+    const search = async (r: SearchRequest) => {
+      started.push(r.query);
+      await new Promise((res) => setTimeout(res, 10));
+      return found(1);
+    };
+    const events = await collect(
+      request({ decision: false }),
+      deps({ llm: fakeLlm([`${CREATE}\n${lines.join("\n")}\n{"caption":"x"}\n`]), search, warn: (m) => void warnings.push(m) }),
+    );
+    expect(started).toEqual(["thing 1", "thing 2", "thing 3"]);
+    const fetches = events.filter((e) => e.type === "fetch") as Extract<TurnEvent, { type: "fetch" }>[];
+    expect(fetches.filter((f) => f.ok).map((f) => f.query).sort()).toEqual(["thing 1", "thing 2", "thing 3"]);
+    expect(fetches.filter((f) => !f.ok)).toEqual([
+      { type: "fetch", source: "search", query: "thing 4", ok: false, records: 0, ms: 0, error: "too many searches" },
+      { type: "fetch", source: "search", query: "thing 5", ok: false, records: 0, ms: 0, error: "too many searches" },
+    ]);
+    // The rejected paths get [] at once, so their lists read "Nothing found" instead of a skeleton.
+    const rejected = events.filter((e) => e.type === "a2ui" && e.origin === "data").map(valueOf).filter((u) => u.path === "/r4" || u.path === "/r5");
+    expect(rejected).toEqual([
+      { surfaceId: "s3", path: "/r4", value: [] },
+      { surfaceId: "s3", path: "/r5", value: [] },
+    ]);
+    expect(warnings.filter((w) => w.startsWith("search not started"))).toHaveLength(2);
+    expect(events.at(-1)).toEqual({ type: "done" });
   });
 
   test("the client going away cancels running searches and ends with done only", async () => {

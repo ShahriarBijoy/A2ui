@@ -63,6 +63,11 @@ export type TurnDeps = {
 
 /** The client gives up after 25 s (CLIENT_TIMEOUT_MS); fetches end before that so their [] and error still arrive. */
 export const TURN_BUDGET_MS = 23_000;
+/**
+ * Each search costs ~15k input tokens plus a web search request. A prompt-injected "search 50 things"
+ * must not fan out: lines over the cap get [] and a failed fetch event instead of a request.
+ */
+export const MAX_SEARCHES_PER_TURN = 3;
 
 export const SSE_HEADERS: Record<string, string> = {
   "content-type": "text/event-stream",
@@ -310,6 +315,11 @@ class LiveFetches {
     return this.pending.has(key);
   }
 
+  /** Fetches started this turn (a reused fetch counts once). */
+  get size(): number {
+    return this.pending.size;
+  }
+
   start(key: string, run: (signal: AbortSignal) => Promise<SearchOutcome>, deliver: (r: FetchSettled) => Promise<void>): void {
     const t0 = this.now();
     const budget = Math.max(0, Math.min(this.timeoutMs, this.deadlineAt - t0));
@@ -465,7 +475,9 @@ async function composeA2ui(req: TurnRequest, deps: TurnDeps, send: Emit, signal:
       return;
     }
     if (c.kind === "a2ui") {
-      const msg = fixCatalogId(c.msg, deps.context.catalogId);
+      const checks = fixChecks(fixCatalogId(c.msg, deps.context.catalogId));
+      if (checks.fixed > 0) warn(`composer @checks fixed (${checks.fixed} bare condition): ${line.slice(0, 160)}`);
+      const msg = checks.msg;
       if ("createSurface" in msg) {
         createdSurface = msg.createSurface.surfaceId;
         await emitA2ui(msg, "llm");
@@ -486,6 +498,12 @@ async function composeA2ui(req: TurnRequest, deps: TurnDeps, send: Emit, signal:
       if (live.has(key)) return;
       const search = deps.search;
       const sreq = parsed.req;
+      if (live.size >= MAX_SEARCHES_PER_TURN) {
+        warn(`search not started (more than ${MAX_SEARCHES_PER_TURN} in one turn): ${sreq.query}`);
+        // [] turns the skeleton into "Nothing found" instead of shimmering until done.
+        await deliver(into, [], { type: "fetch", source: "search", query: sreq.query, ok: false, records: 0, ms: 0, error: "too many searches" }, false);
+        return;
+      }
       // Not awaited: the search runs beside the compose stream; done waits for it (runTurn).
       live.start(
         key,
@@ -585,6 +603,30 @@ function addUsage(a: LlmUsage, b: LlmUsage): LlmUsage {
 function fixCatalogId(msg: A2uiMessage, catalogId: string): A2uiMessage {
   if (!("createSurface" in msg) || msg.createSurface.catalogId?.endsWith?.(CATALOG_PATH)) return msg;
   return { version: A2UI_VERSION, createSurface: { ...msg.createSurface, catalogId } };
+}
+
+/**
+ * Without thinking the composer sometimes writes a second check as {"@call",...,"message"} without its
+ * "condition" wrapper (2 of 18 live flight forms); the client then refuses the whole Button. Wrap it.
+ */
+export function fixChecks(msg: A2uiMessage): { msg: A2uiMessage; fixed: number } {
+  if (!("updateComponents" in msg)) return { msg, fixed: 0 };
+  let fixed = 0;
+  const components = msg.updateComponents.components.map((comp) => {
+    const checks = comp["@checks"];
+    if (!Array.isArray(checks)) return comp;
+    let changed = false;
+    const next = checks.map((k: unknown) => {
+      if (!isPlainObject(k) || "condition" in k || typeof k["@call"] !== "string") return k;
+      const { message, ...call } = k;
+      changed = true;
+      fixed++;
+      return { condition: call, message };
+    });
+    return changed ? { ...comp, "@checks": next } : comp;
+  });
+  if (fixed === 0) return { msg, fixed };
+  return { msg: { version: A2UI_VERSION, updateComponents: { ...msg.updateComponents, components } }, fixed };
 }
 
 /** Data args should be literals; an absolute {"@path"} is read from the current surface's data. */
