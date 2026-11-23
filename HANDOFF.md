@@ -65,6 +65,14 @@ Contract files: `src/shared/{a2ui,catalog,protocol,pointer}.ts` and `src/client/
 - **UI SDK (vercel-labs/ui, ui-sdk.dev):** the owner suggested it to "not need prebuilt components". Investigated 2026-11-23. It is build-time behaviors for coding agents plus a runtime agent bridge that *operates* existing components. It has no runtime JSON renderer. Letting the runtime agent "build anything" would mean the LLM writes code, which collapses the talk's A2UI-vs-HTML contrast. **Ruling: keep the A2UI catalog with shadcn/Base UI bricks; don't install it mid-build.** The owner was asked "should the runtime agent compose (data) or write (code)?". If they choose code, that changes the thesis: revisit PLAN §0.1 / §9 with them before touching code. A later swap of the primitives would touch only `a2ui/bricks/*` and `components/ui`.
 - **Router latency from a Worker:** NOTES says the 800 ms budget holds, but that was measured from Bun with keep-alive. After deploy, measure `route.ms` from the deployed Worker, both cold and warm. If cold misses 800 ms, warm the Jev connection on page load or Space-down (the predict call already warms it). Do NOT silently raise the timeout.
 
+## Rehearsal checklist (owner, on the stage machine, Chrome)
+- Open the deployed URL with `?k=<DEMO_KEY>`. Allow the mic.
+- Hold Space: the transcript appears grey, then final; the glow rises; release, and the turn goes out.
+- Press real F1, F3, F5 and F6: they must play replays, not reload, open help or find, or jump to the address bar. Slots 5–6 may leak in Chrome; if so, use F1–F4 on stage.
+- Shift+R after each good live turn to save it; Shift+E (or DevRunner "Copy replays JSON") to export, so the controller can ship them in `src/client/replays.json`.
+- Turn wifi off and replay: it must still work.
+- Esc: the wave carries the thread away.
+
 ## Owner preferences
 - shadcn on **Base UI**, with the full component set installed. The catalog the agent sees stays at PLAN's 17 bricks (explained to the owner; ask before adding bricks).
 - Use subagents for parallel work and Fable as the advisor; treat it as our own project; be creative within the spec.
