@@ -28,11 +28,11 @@ export type PromptContext = {
 export const VENUE_TIME_ZONE = "Europe/Berlin";
 
 export function promptContext(
-  opts: { venue: string; city: string; address?: string; catalogId: string },
+  opts: { venue: string; city: string; address?: string; catalogId: string; devNow?: string },
   now: Date = new Date(),
   timeZone: string = VENUE_TIME_ZONE,
 ): PromptContext {
-  const today = zonedParts(now, timeZone);
+  const today = parseDevNow(opts.devNow) ?? zonedParts(now, timeZone);
   const tomorrowDate = new Date(Date.UTC(today.y, today.m - 1, today.d + 1));
   return {
     date: isoDate(today.y, today.m, today.d),
@@ -45,6 +45,25 @@ export function promptContext(
     ...(opts.address?.trim() ? { address: opts.address.trim() } : {}),
     catalogId: opts.catalogId,
   };
+}
+
+/**
+ * Dev-only clock (DEV_NOW in .dev.vars or the process env, never in wrangler.jsonc): a local
+ * "YYYY-MM-DDTHH:mm" in the venue's zone, so rehearsal runs can use the talk's evening at any hour.
+ */
+function parseDevNow(raw: string | undefined): { y: number; m: number; d: number; time: string } | null {
+  const s = raw?.trim();
+  if (!s) return null;
+  const m = /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})(?::\d{2})?$/.exec(s);
+  if (m) {
+    const [y, mo, d, h, mi] = [Number(m[1]), Number(m[2]), Number(m[3]), Number(m[4]), Number(m[5])];
+    const probe = new Date(Date.UTC(y, mo - 1, d));
+    if (probe.getUTCFullYear() === y && probe.getUTCMonth() === mo - 1 && probe.getUTCDate() === d && h < 24 && mi < 60) {
+      return { y, m: mo, d, time: `${m[4]}:${m[5]}` };
+    }
+  }
+  console.warn(`DEV_NOW ignored (expected YYYY-MM-DDTHH:mm, local ${VENUE_TIME_ZONE} time): ${s}`);
+  return null;
 }
 
 function zonedParts(now: Date, timeZone: string): { y: number; m: number; d: number; time: string } {
@@ -103,8 +122,8 @@ Change to the current step (the person corrects or changes a value already on th
 update the surface STATE.current_surface_id in place. Do not rebuild it, do not create a new one.
 A request for a new kind of content to choose from (options, results, a list of items) is a new step,
 even when it also gives a value for the current form: create STATE.next_surface_id, carry the known
-values forward (a short summary Text or prefilled inputs), and put the List, its template and the data
-line's "into" path on that new surface.
+values forward (prefilled inputs or a short summary Text; a value taken from STATE stays an editable
+input), and put the List, its template and the data line's "into" path on that new surface.
 A tap (INPUT says "tapped") answers the current step: build the next step as a new surface.
 Every answer has at least one a2ui line. A caption alone is never an answer.
 
@@ -137,8 +156,8 @@ INPUTS AND VALUES
   {"@path":"/trip/date"}. Never bind an input to a relative path or leave it unbound.
 - Send all initial values with ONE updateDataModel right after the components. Never write the
   path "/": it would erase the data.
-- Prefill from what the person said and from STATE: "tomorrow" is STATE.tomorrow, "we're six" is 6,
-  "from Bremen" is "Bremen". Unknown free text starts as "" unless STATE implies it (see DATA). Never invent it.
+- Prefill from what the person said and from STATE: "tomorrow" is STATE.tomorrow, "the three of us" is 3,
+  "from Porto" is "Porto". Unknown free text starts as "" unless STATE implies it (see DATA). Never invent it.
 - ChoicePicker values are string arrays: "value":{"@path":"/booking/time"} with initial ["19:00"].
 - A Button's action context carries the bound values the next step needs:
   "context":{"time":{"@path":"/booking/time"},"guests":{"@path":"/booking/guests"}}
@@ -157,6 +176,9 @@ opening hours, prices, event dates, ratings or distances yourself, not even as a
 Request them with a "data" line (literal args, no bindings) and show them with a List template bound to
 its "into" path. The server fills the list with live web results a few seconds later; until then the
 list shows placeholders.
+Use a data line only for facts that are local, current or changing: places, opening hours, events, prices,
+schedules, availability, news, weather. General knowledge you reliably know (word meanings and translations,
+definitions, how-to steps, lists of common items, arithmetic) you write yourself as literals; never search it.
 Args without "?" are required, and "" counts as missing. When the person did not say one but STATE implies
 it, use it: where the person is now is STATE.city (STATE.venue_address for "nearby"), today is STATE.date.
 Show such a value as a prefilled, editable input on the same step and send the data line.
@@ -235,8 +257,8 @@ export const COMPOSER_RETRY_NOTE =
   "NOTE: your previous answer had no a2ui line, so the screen did not change. Answer again: build the screen with a2ui lines, then the caption. A request outside the components gets the not-available Card.";
 
 /** Appended when a List whose data was requested could not render: no chain from root reached it (turn.ts retries once). */
-export function composerUnreachableNote(ids: readonly string[]): string {
-  return `NOTE: in your previous answer these ids were not reachable from root, so the requested data did not show: ${ids.join(", ")}. Answer again with the whole step: every id reachable from root, the List inside the main container, then the caption.`;
+export function composerUnreachableNote(ids: readonly string[], paths: readonly string[]): string {
+  return `NOTE: in your previous answer these ids were not reachable from root, so the requested data did not show: ${ids.join(", ")}. The data for ${paths.join(", ")} is already requested and arriving: bind the List template to that path and do not send a data line for it again. Answer again with the whole step: every id reachable from root, the List inside the main container, then the caption.`;
 }
 
 export function composerPrompt(req: TurnRequest, ctx: PromptContext): Prompt {

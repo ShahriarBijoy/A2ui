@@ -787,7 +787,7 @@ describe("runTurn: reachability and value shapes", () => {
     const warnings: string[] = [];
     const events = await collect(request({ decision: false }), deps({ llm, search: async () => (calls++, found), warn: (m) => void warnings.push(m) }));
     expect(llm.prompts).toHaveLength(2);
-    expect(llm.prompts[1].user).toBe(`${llm.prompts[0].user}\n${composerUnreachableNote(["list", "item"])}`);
+    expect(llm.prompts[1].user).toBe(`${llm.prompts[0].user}\n${composerUnreachableNote(["list", "item"], ["/results"])}`);
     expect(warnings).toContainEqual(expect.stringContaining("(orphans 2): s3: list, item"));
     // The repeated search line reuses the running search: one call, one fetch event.
     expect(calls).toBe(1);
@@ -801,6 +801,41 @@ describe("runTurn: reachability and value shapes", () => {
     // One caption per turn: attempt 1's described the screen that was rebuilt.
     expect(events.filter((e) => e.type === "caption")).toEqual([{ type: "caption", text: "y" }]);
     expect(events.at(-1)).toEqual({ type: "done" });
+  });
+
+  test("a retry that rewords the search reuses the first search for that path: one call, records kept", async () => {
+    const reworded = '{"data":{"source":"search","args":{"query":"second-hand bookshops, Lisbon centre","fields":["name","subtitle"]},"into":"/results"}}';
+    const top = comps("s3", [{ id: "root", component: "Card", child: "main" }, { id: "main", component: "Column", children: ["title"] }, { id: "title", component: "Text", text: "## Shops" }]);
+    const fixed = comps("s3", [{ id: "root", component: "Card", child: "main" }, { id: "main", component: "Column", children: ["title", "list"] }, { id: "title", component: "Text", text: "## Shops" }, LIST]);
+    const llm = scripted([[CREATE, top, SEARCH, comps("s3", [LIST]), comps("s3", [ITEM]), '{"caption":"x"}'].join("\n") + "\n", [CREATE, fixed, reworded, comps("s3", [ITEM]), '{"caption":"y"}'].join("\n") + "\n"]);
+    const started: string[] = [];
+    const events = await collect(request({ decision: false }), deps({ llm, search: async (r: SearchRequest) => (started.push(r.query), found) }));
+    expect(llm.prompts).toHaveLength(2);
+    expect(llm.prompts[1].user).toContain("The data for /results is already requested and arriving");
+    expect(started).toEqual(["bookshops in Lisbon"]);
+    expect(events.filter((e) => e.type === "fetch")).toHaveLength(1);
+    const writes = events.flatMap((e) => (e.type === "a2ui" && e.origin === "data" && "updateDataModel" in e.msg ? [e.msg.updateDataModel] : []));
+    // Never an empty list over the records: every write carries them, the last one after the retry's createSurface.
+    expect(writes.length).toBeGreaterThan(0);
+    for (const w of writes) expect(w).toEqual({ surfaceId: "s3", path: "/results", value: found.ok ? found.records : [] });
+    const labels = events.map(kindOf);
+    expect(labels.lastIndexOf("data:updateDataModel")).toBeGreaterThan(labels.lastIndexOf("llm:createSurface"));
+  });
+
+  test("a flights line repeated by the retry adds no second copy or fetch event", async () => {
+    const FLIGHTS = '{"data":{"source":"flights","args":{"from":"Porto","to":"Oslo","date":"2030-06-14"},"into":"/flights"}}';
+    const fl = { id: "fl", component: "List", children: { path: "/flights", componentId: "f" } };
+    const f = { id: "f", component: "OptionCard", title: { "@path": "carrier" } };
+    const top = comps("s3", [{ id: "root", component: "Card", child: "main" }, { id: "main", component: "Column", children: ["title"] }, { id: "title", component: "Text", text: "## Flights" }]);
+    const fixed = comps("s3", [{ id: "root", component: "Card", child: "main" }, { id: "main", component: "Column", children: ["title", "fl"] }, { id: "title", component: "Text", text: "## Flights" }, fl]);
+    const llm = scripted([[CREATE, top, FLIGHTS, comps("s3", [fl, f]), '{"caption":"x"}'].join("\n") + "\n", [CREATE, fixed, FLIGHTS, comps("s3", [f]), '{"caption":"y"}'].join("\n") + "\n"]);
+    const events = await collect(request({ decision: false }), deps({ llm }));
+    expect(llm.prompts).toHaveLength(2);
+    expect(events.filter((e) => e.type === "fetch")).toHaveLength(1);
+    const labels = events.map(kindOf);
+    const last = labels.lastIndexOf("data:updateDataModel");
+    expect(last).toBeGreaterThan(labels.lastIndexOf("llm:createSurface"));
+    expect((events[last] as { msg: { updateDataModel: { path: string; value: unknown[] } } }).msg.updateDataModel).toMatchObject({ path: "/flights", value: generateFlights("Porto", "Oslo", "2030-06-14") });
   });
 
   test("an unreachable component without requested data is logged, not retried", async () => {

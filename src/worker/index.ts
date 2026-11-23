@@ -52,7 +52,7 @@ app.post("/api/turn", async (c) => {
   if (!parsed.ok) return c.json({ error: parsed.message }, 400);
   const env = c.env;
   const origin = new URL(c.req.url).origin;
-  const context = promptContext({ venue: env.VENUE_NAME, city: env.VENUE_CITY, address: venueAddress(env), catalogId: origin + CATALOG_PATH });
+  const context = promptContext({ venue: env.VENUE_NAME, city: env.VENUE_CITY, address: venueAddress(env), catalogId: origin + CATALOG_PATH, devNow: devNow(env) });
   const webSearch = anthropicWebSearch(env);
   const deps: TurnDeps = {
     route: (req, signal) => route(req, env, signal),
@@ -92,6 +92,13 @@ app.onError((err, c) => {
   console.error("worker error", err);
   return c.json({ error: "internal error" }, 500);
 });
+
+/** Dev-only clock override for rehearsals (.dev.vars or the process env; never in wrangler.jsonc). */
+function devNow(env: Env): string | undefined {
+  if (!("DEV_NOW" in env)) return undefined;
+  const v = env.DEV_NOW;
+  return typeof v === "string" && v.trim() ? v.trim() : undefined;
+}
 
 /** Optional var (not in wrangler.jsonc yet): the venue's street address for "nearby" searches. */
 function venueAddress(env: Env): string | undefined {

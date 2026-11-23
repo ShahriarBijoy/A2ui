@@ -1,7 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import { BRICKS } from "@shared/catalog";
 import type { TurnRequest } from "@shared/protocol";
-import { COMPOSER_SYSTEM_PROMPT, composerPrompt, HTML_INSTRUCTION, htmlPrompt, promptContext, widgetsPrompt } from "./prompts";
+import { COMPOSER_SYSTEM_PROMPT, composerUnreachableNote, composerPrompt, HTML_INSTRUCTION, htmlPrompt, promptContext, widgetsPrompt } from "./prompts";
 
 const ctx = promptContext({ venue: "Venue", city: "Bremen", catalogId: "http://h/catalog/brick-box/v1" }, new Date("2026-11-23T18:55:00Z"));
 const req: TurnRequest = {
@@ -16,6 +16,16 @@ const req: TurnRequest = {
 describe("promptContext", () => {
   test("date, weekday, time and tomorrow in Europe/Berlin", () => {
     expect(ctx).toMatchObject({ date: "2026-11-23", weekday: "Monday", time: "19:55", tomorrow: "2026-11-24", tomorrowWeekday: "Tuesday" });
+  });
+
+  test("DEV_NOW (local venue time) replaces the clock; a malformed value is ignored", () => {
+    const at = (devNow: string) => promptContext({ venue: "", city: "", catalogId: "", devNow }, new Date("2026-11-23T18:55:00Z"));
+    expect(at("2026-11-25T18:45")).toMatchObject({ date: "2026-11-25", weekday: "Wednesday", time: "18:45", tomorrow: "2026-11-26", tomorrowWeekday: "Thursday" });
+    expect(at(" 2026-11-30T23:59:30 ")).toMatchObject({ date: "2026-11-30", time: "23:59", tomorrow: "2026-12-01", tomorrowWeekday: "Tuesday" });
+    for (const bad of ["tomorrow", "2026-02-30T10:00", "2026-11-25T24:00", "2026-11-25"]) {
+      expect(at(bad)).toMatchObject({ date: "2026-11-23", weekday: "Monday", time: "19:55" });
+    }
+    expect(at("")).toMatchObject({ date: "2026-11-23", time: "19:55" });
   });
 
   test("UTC evening already counts as the next day in Bremen; month rollover", () => {
@@ -73,6 +83,22 @@ describe("composer prompt", () => {
     expect(flat).toContain("When the person did not say one but STATE implies it, use it");
     expect(flat).toContain("still gets a screen, always");
     expect(flat).toContain("Never answer it with a caption alone");
+  });
+
+  test("search only for local, current or changing facts; general knowledge is written directly", () => {
+    const flat = COMPOSER_SYSTEM_PROMPT.replace(/\s+/g, " ");
+    expect(flat).toContain("Use a data line only for facts that are local, current or changing");
+    expect(flat).toContain("you write yourself as literals; never search it");
+    // No demo-line echoes in the prefill examples.
+    expect(flat).not.toContain("we're six");
+    expect(flat).not.toContain('"from Bremen"');
+  });
+
+  test("the unreachable-List note hands back the requested data paths", () => {
+    const note = composerUnreachableNote(["list", "item"], ["/results"]);
+    expect(note).toContain("not reachable from root, so the requested data did not show: list, item");
+    expect(note).toContain("The data for /results is already requested and arriving");
+    expect(note).toContain("do not send a data line for it again");
   });
 
   test("the venue address goes into STATE only when configured", () => {

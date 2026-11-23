@@ -442,8 +442,14 @@ async function composeA2ui(req: TurnRequest, deps: TurnDeps, send: Emit, signal:
   let intos = new Set<string>();
   /** Data already emitted: a retry that rebuilds the step gets it again on its own surface. */
   const delivered: { into: string; records: JsonValue; ui: boolean }[] = [];
-  /** Unreachable Lists (and their templates) whose requested data shows nowhere; set when an attempt ends. */
-  let unshown: string[] = [];
+  /** Unreachable Lists (and their templates) whose requested data shows nowhere, and those data paths; set when an attempt ends. */
+  let unshown: { ids: string[]; paths: string[] } = { ids: [], paths: [] };
+  /** The last surface this turn created: a retry that builds nothing new still has attempt 1's surface. */
+  let lastCreated: string | null = null;
+  /** Data paths that already received records this turn: an empty answer never replaces them. */
+  const filled = new Set<string>();
+  /** Demo data lines already resolved (path + query): a repeated line in a retry adds no second copy. */
+  const demoDone = new Set<string>();
   /** surfaceId + " " + absolute path → the input type bound there: the request's knobs, then this turn's components. */
   const bound = new Map<string, string>();
   const boundKey = (surfaceId: string, path: string) => `${surfaceId} ${path}`;
@@ -462,6 +468,7 @@ async function composeA2ui(req: TurnRequest, deps: TurnDeps, send: Emit, signal:
   const emitData = async (surfaceId: string, into: string, records: JsonValue, after: TurnEvent | null, ui: boolean) => {
     await emitA2ui(dataMsg(surfaceId, into, records), "data", ui);
     delivered.push({ into, records, ui });
+    if (hasRecords(records)) filled.add(into);
     if (after) await send(after);
   };
   const flushPending = async (surfaceId: string) => {
@@ -469,11 +476,17 @@ async function composeA2ui(req: TurnRequest, deps: TurnDeps, send: Emit, signal:
     pending = [];
     for (const p of held) await emitData(surfaceId, p.into, p.records, p.after, p.ui);
   };
-  const fallbackSurface = () => createdSurface ?? req.surface?.id ?? req.nextSurfaceId;
+  const fallbackSurface = () => createdSurface ?? lastCreated ?? req.surface?.id ?? req.nextSurfaceId;
   /** Nothing shown and nothing about to be: held demo data is a screen once flushed, a held search result is not. */
   const noScreen = () => firstUi === null && !pending.some((p) => p.ui);
   /** Resolved data goes to this turn's new surface, waits for it while the model still writes, else the fallback. */
   const deliver = async (into: string, records: JsonValue, after: TurnEvent, ui: boolean) => {
+    // Records already shown or waiting for this path are never replaced by an empty answer (a cap hit, a failure).
+    if (!hasRecords(records) && (filled.has(into) || pending.some((p) => p.into === into && hasRecords(p.records)))) {
+      warn(`empty data for ${into} not written: this turn already has records for it`);
+      await send(after);
+      return;
+    }
     // A copy carried over from the attempt before gives way to a fresh delivery for the same path.
     pending = pending.filter((p) => !(p.requeued && p.into === into));
     if (!createdSurface && holding) {
@@ -522,8 +535,9 @@ async function composeA2ui(req: TurnRequest, deps: TurnDeps, send: Emit, signal:
     let next: JsonValue;
     try {
       next = walk(path, value);
-    } catch {
+    } catch (err) {
       // A malformed pointer is the client's to reject; leave the message as written.
+      warn(`composer value shape not checked (${err instanceof Error ? err.message : String(err)}): ${JSON.stringify(msg.updateDataModel).slice(0, 160)}`);
       return msg;
     }
     if (fixed === 0) return msg;
@@ -534,7 +548,7 @@ async function composeA2ui(req: TurnRequest, deps: TurnDeps, send: Emit, signal:
    * Logs components that no chain from root reaches (the client never draws them) and returns the
    * unreachable Lists, with their templates, whose requested data no reachable component shows.
    */
-  const checkReachability = (): string[] => {
+  const checkReachability = (): { ids: string[]; paths: string[] } => {
     const lost: string[] = [];
     let count = 0;
     const reachable: WireComponent[] = [];
@@ -552,16 +566,18 @@ async function composeA2ui(req: TurnRequest, deps: TurnDeps, send: Emit, signal:
       }
     }
     if (count > 0) warn(`composer sent ${count} component(s) not reachable from root (orphans ${count}): ${lost.join("; ")}`);
-    const out: string[] = [];
+    const ids: string[] = [];
+    const paths: string[] = [];
     for (const { surfaceId, list } of orphanLists) {
       const t = list.children;
       if (!isChildTemplate(t) || !intos.has(t.path)) continue;
       if (reachable.some((c) => bindsPath(c, t.path))) continue;
       // An older List on the request surface may already show this path; its binding is not in the snapshot.
       if (!sent.get(surfaceId)?.created && req.surface?.id === surfaceId && req.surface.components.some((c) => c.component === "List")) continue;
-      out.push(list.id, t.componentId);
+      ids.push(list.id, t.componentId);
+      if (!paths.includes(t.path)) paths.push(t.path);
     }
-    return out;
+    return { ids, paths };
   };
   const skip = (reason: string, line: string) => {
     skipped++;
@@ -589,6 +605,7 @@ async function composeA2ui(req: TurnRequest, deps: TurnDeps, send: Emit, signal:
       const msg = normalize(checks.msg);
       if ("createSurface" in msg) {
         createdSurface = msg.createSurface.surfaceId;
+        lastCreated = createdSurface;
         await emitA2ui(msg, "llm");
         await flushPending(createdSurface);
       } else {
@@ -603,8 +620,8 @@ async function composeA2ui(req: TurnRequest, deps: TurnDeps, send: Emit, signal:
       const parsed = parseSearchArgs(args);
       if (!parsed.ok) return skip(parsed.error, line);
       intos.add(into);
-      const key = `search ${into} ${JSON.stringify(parsed.req)}`;
-      // A retry that repeats the line reuses the search already running.
+      // Only the first search per data path counts: a retry or a reworded repeat reuses it, whatever its query.
+      const key = `search ${into}`;
       if (live.has(key)) return;
       const search = deps.search;
       const sreq = parsed.req;
@@ -630,6 +647,10 @@ async function composeA2ui(req: TurnRequest, deps: TurnDeps, send: Emit, signal:
     const res = resolveData({ source: c.source, args }, dataDefaults(deps.context));
     if (!res.ok) return skip(res.error, line);
     intos.add(into);
+    const demoKey = `${into} ${res.query}`;
+    // A retry that repeats the line: the first copy already follows the retry's surface.
+    if (demoDone.has(demoKey)) return;
+    demoDone.add(demoKey);
     const after: TurnEvent = { type: "fetch", source: res.source, query: res.query, ok: true, records: res.records.length, ms: Math.round(deps.now() - tData) };
     await deliver(into, res.records, after, true);
   };
@@ -638,7 +659,7 @@ async function composeA2ui(req: TurnRequest, deps: TurnDeps, send: Emit, signal:
   // confirm taps). One retry costs ~1.5 s; an unchanged screen on stage costs more. A refusal or a
   // max_tokens stop would only repeat, so those are not retried.
   // A List whose data was requested but that root never reaches is a screen without its content: same retry.
-  const retryable = (r: LlmResult) => (noScreen() || unshown.length > 0) && r.stopReason !== "refusal" && r.stopReason !== "max_tokens";
+  const retryable = (r: LlmResult) => (noScreen() || unshown.ids.length > 0) && r.stopReason !== "refusal" && r.stopReason !== "max_tokens";
 
   const streamOnce = async (p: Prompt, mayRetry: boolean): Promise<LlmResult> => {
     const stream = deps.llm.streamText(p, signal);
@@ -683,7 +704,7 @@ async function composeA2ui(req: TurnRequest, deps: TurnDeps, send: Emit, signal:
   if (retryable(first)) {
     let note = COMPOSER_RETRY_NOTE;
     if (!noScreen()) {
-      note = composerUnreachableNote(unshown);
+      note = composerUnreachableNote(unshown.ids, unshown.paths);
       // The retry rebuilds the step, maybe on a surface that starts over: data waits for the retry's
       // first message again, and what attempt 1 already delivered goes along.
       createdSurface = null;
@@ -691,7 +712,7 @@ async function composeA2ui(req: TurnRequest, deps: TurnDeps, send: Emit, signal:
     }
     sent = new Map();
     intos = new Set();
-    unshown = [];
+    unshown = { ids: [], paths: [] };
     const retry = await streamOnce({ ...prompt, user: `${prompt.user}\n${note}` }, false);
     usage = addUsage(usage, retry.usage);
     stopReason = retry.stopReason;
@@ -760,6 +781,11 @@ export function fixChecks(msg: A2uiMessage): { msg: A2uiMessage; fixed: number }
   });
   if (fixed === 0) return { msg, fixed };
   return { msg: { version: A2UI_VERSION, updateComponents: { ...msg.updateComponents, components } }, fixed };
+}
+
+/** A data value that shows something: a non-empty list, or any non-null value. */
+function hasRecords(v: JsonValue): boolean {
+  return Array.isArray(v) ? v.length > 0 : v !== null;
 }
 
 /** Ids a component names as its children: child, children (ids, or a template's componentId), tabs[].child. */
