@@ -45,7 +45,7 @@ Read this before calling any external API. Items here override PLAN.md where the
 
 ### Cloudflare
 - Cloudflare Vite plugin 1.70.1 works (dev server runs the Worker in workerd). `run_worker_first: ["/api/*", "/catalog/*"]`, SPA fallback for everything else.
-- Wrangler is currently logged into the WRONG account. Deploy only after `wrangler whoami` shows the owner's personal account; then pin `account_id` in wrangler.jsonc.
+- Wrangler is logged into the owner's personal account; `account_id` 6b865b6e74012e0c96ada7e531e8cc9e is pinned in wrangler.jsonc.
 
 ### Tooling
 - TypeScript 7.0.2: `baseUrl` is removed; `paths` resolve relative to the tsconfig.

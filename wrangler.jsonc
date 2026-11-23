@@ -1,7 +1,8 @@
 {
   "$schema": "./node_modules/wrangler/config-schema.json",
   "name": "brick-box",
-  // account_id is pinned once `wrangler whoami` shows the personal account (see NOTES.md)
+  // Owner's personal Cloudflare account (verified with `wrangler whoami`, 2026-11-23)
+  "account_id": "6b865b6e74012e0c96ada7e531e8cc9e",
   "compatibility_date": "2026-11-01",
   "compatibility_flags": ["nodejs_compat"],
   "main": "./src/worker/index.ts",
