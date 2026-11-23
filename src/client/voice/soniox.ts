@@ -121,7 +121,7 @@ export const sonioxKeys: KeyProvider = createKeyProvider(fetchKeyFromWorker);
 
 const BASE_TERMS = ["Bremen", "New York", "A2UI", "Brick Box", "Jonas"];
 let extraTerms: string[] = [];
-/** Place names for recognition context; set once from the worker's places data. */
+/** Extra recognition context terms; set once from useVoice's static list. */
 export function setContextTerms(terms: readonly string[]): void {
   extraTerms = [...new Set(terms.map((t) => t.trim()).filter(Boolean))].slice(0, 200);
 }

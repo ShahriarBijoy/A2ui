@@ -36,9 +36,10 @@ import {
   type Prompt,
   type ToolCall,
 } from "./claude";
-import { findPlaces, placeQuery, resolveData, type DataDefaults } from "./data";
+import { resolveData, type DataDefaults } from "./data";
 import { generateFlights, isIsoDate } from "./data/flights";
 import { COMPOSER_RETRY_NOTE, composerPrompt, htmlPrompt, widgetsPrompt, type PromptContext } from "./prompts";
+import { placeQuery, recordsToPlaces, restaurantProps, restaurantSearch } from "./restaurants";
 import { parseSearchArgs, SEARCH_TIMEOUT_MS, type SearchOutcome, type SearchRequest } from "./search";
 
 export type Emit = (ev: TurnEvent) => void | Promise<void>;
@@ -278,7 +279,7 @@ export async function runTurn(req: TurnRequest, deps: TurnDeps, emit: Emit, clie
     }, deps.composeTimeoutMs);
     try {
       if (req.mode === "a2ui") await composeA2ui(req, deps, send, ctl.signal, live);
-      else if (req.mode === "widgets") await composeWidgets(req, deps, send, ctl.signal);
+      else if (req.mode === "widgets") await composeWidgets(req, deps, send, ctl.signal, live);
       else await composeHtml(req, deps, send, ctl.signal);
     } finally {
       clearTimeout(timer);
@@ -318,6 +319,11 @@ class LiveFetches {
   /** Fetches started this turn (a reused fetch counts once). */
   get size(): number {
     return this.pending.size;
+  }
+
+  /** The client went away: no fetch delivers any more. */
+  get cancelled(): boolean {
+    return this.signal.aborted;
   }
 
   start(key: string, run: (signal: AbortSignal) => Promise<SearchOutcome>, deliver: (r: FetchSettled) => Promise<void>): void {
@@ -683,15 +689,9 @@ export const WIDGET_TOOLS: Anthropic.Tool[] = [
   },
 ];
 
+/** The widget a tool call shows at once: the flight search (demo flights). show_restaurants searches first (composeWidgets). */
 export function widgetEvent(tool: ToolCall, defaults: DataDefaults): Extract<TurnEvent, { type: "widget" }> | null {
   const input = tool.input;
-  if (tool.name === "show_restaurants") {
-    const q = placeQuery(input);
-    const props: JsonObject = { places: findPlaces(q) };
-    if (q.kind) props.kind = q.kind;
-    if (q.max_walk_min !== undefined) props.max_walk_min = q.max_walk_min;
-    return { type: "widget", name: "RestaurantWidget" satisfies WidgetName, props };
-  }
   if (tool.name === "show_flight_search") {
     const from = typeof input.from === "string" && input.from.trim() ? input.from.trim() : undefined;
     const to = typeof input.to === "string" && input.to.trim() ? input.to.trim() : undefined;
@@ -705,28 +705,63 @@ export function widgetEvent(tool: ToolCall, defaults: DataDefaults): Extract<Tur
   return null;
 }
 
-async function composeWidgets(req: TurnRequest, deps: TurnDeps, send: Emit, signal: AbortSignal): Promise<void> {
+async function composeWidgets(req: TurnRequest, deps: TurnDeps, send: Emit, signal: AbortSignal, live: LiveFetches): Promise<void> {
   const t0 = deps.now();
   const reply = await abortable(deps.llm.callTools(widgetsPrompt(req, deps.context), WIDGET_TOOLS, signal), signal);
   const ms = Math.round(deps.now() - t0);
   // A tool input cut off by max_tokens can still look valid: never render it.
   const tool = reply.stopReason === "max_tokens" || reply.stopReason === "refusal" ? null : reply.tool;
-  const widget = tool ? widgetEvent(tool, dataDefaults(deps.context)) : null;
   const text = reply.stopReason === "refusal" ? "" : reply.text;
-  if (widget) await send(widget);
-  else if (text) await send({ type: "text", delta: text });
-  const shown = Boolean(widget || text);
+  let firstUi: number | null = null;
+  const show = async (ev: TurnEvent) => {
+    firstUi ??= Math.round(deps.now() - t0);
+    await send(ev);
+  };
+  if (tool?.name === "show_restaurants") {
+    startRestaurantSearch(tool.input, deps, send, show, live);
+    // The widget is not streamed: it shows once the search has answered (or failed, with no places).
+    await live.settle();
+    if (live.cancelled) return;
+  } else {
+    const widget = tool ? widgetEvent(tool, dataDefaults(deps.context)) : null;
+    if (widget) await show(widget);
+    else if (text) await show({ type: "text", delta: text });
+  }
+  // compose_ms is the tool call; first_ui_ms includes the restaurant search, since the widget waits for it.
   const usageEvent = {
     type: "usage" as const,
     ...reply.usage,
-    first_ui_ms: shown ? ms : null,
+    first_ui_ms: firstUi,
     compose_ms: ms,
     skipped_lines: 0,
     repaired_lines: 0,
   };
   await send(usageEvent);
-  const problem = stopProblem(reply.stopReason, shown);
+  const problem = stopProblem(reply.stopReason, firstUi !== null);
   if (problem) await send({ type: "error", message: problem });
+}
+
+/**
+ * show_restaurants: the same live search as a2ui data lines, with the same budget (LiveFetches) and
+ * validation (runSearch). Then the widget (no places on failure), then its measured fetch event.
+ */
+function startRestaurantSearch(input: JsonObject, deps: TurnDeps, send: Emit, show: Emit, live: LiveFetches): void {
+  const warn = deps.warn ?? ((m: string) => console.warn(m));
+  const q = placeQuery(input);
+  const sreq = restaurantSearch(q, deps.context);
+  const search = deps.search;
+  live.start(
+    "restaurants",
+    (sig) => (search ? search(sreq, sig) : Promise.resolve<SearchOutcome>({ ok: false, error: "live search is not configured" })),
+    async ({ outcome, ms }) => {
+      if (!outcome.ok) warn(`restaurant search failed (${outcome.error}): ${sreq.query}`);
+      else if (outcome.dropped > 0) warn(`restaurant search dropped ${outcome.dropped} invalid item(s): ${sreq.query}`);
+      const places = outcome.ok ? recordsToPlaces(outcome.records, q.max_walk_min) : [];
+      await show({ type: "widget", name: "RestaurantWidget" satisfies WidgetName, props: restaurantProps(places, q) });
+      // records counts the rows the widget shows, so the chip and the list agree.
+      await send({ ...fetchEvent("search", sreq.query, outcome, ms), records: places.length });
+    },
+  );
 }
 
 // ── html mode ─────────────────────────────────────────────────────────────────

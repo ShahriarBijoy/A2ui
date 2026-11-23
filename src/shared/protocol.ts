@@ -84,12 +84,15 @@ export type Place = {
   id: string;
   name: string;
   kind: string;
-  walk_min: number;
-  /** 1..4 */
-  price_level: number;
+  /** Walking minutes; null when no source states it (live search never estimates). */
+  walk_min: number | null;
+  /** 1..4; null when no source states it. */
+  price_level: number | null;
   tags: string[];
-  /** "HH:mm" */
-  opens_until: string;
+  /** "HH:mm" or null when no source states it. */
+  opens_until: string | null;
+  /** Source URL (live search records). */
+  source?: string;
 };
 export type Flight = {
   id: string;

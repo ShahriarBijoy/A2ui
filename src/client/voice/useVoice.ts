@@ -16,28 +16,9 @@ import { isTypingTarget as isEditableTextEntry } from "@/keyboard";
 
 export type VoiceState = { supported: boolean; ready: boolean; listening: boolean; error?: string };
 
-// Optional: the worker's place data biases recognition toward city names. Absent file → empty map, base terms only.
-const placeModules = import.meta.glob("../../worker/data/places.json", { eager: true, import: "default" });
-
-function collectPlaceNames(value: unknown, out: string[], depth = 0): void {
-  if (depth > 4 || out.length > 300) return;
-  if (typeof value === "string") out.push(value);
-  else if (Array.isArray(value)) for (const v of value) collectPlaceNames(v, out, depth + 1);
-  else if (value && typeof value === "object") {
-    const rec = value as Record<string, unknown>;
-    if (typeof rec.name === "string") out.push(rec.name);
-    if (typeof rec.city === "string") out.push(rec.city);
-    if (!("name" in rec)) for (const v of Object.values(rec)) collectPlaceNames(v, out, depth + 1);
-  }
-}
-
-const FALLBACK_PLACES = ["Berlin", "Hamburg", "Munich", "Cologne", "Frankfurt", "Paris", "London", "Amsterdam", "Vienna", "Zurich"];
-
-function loadContextTerms(): void {
-  const names: string[] = [];
-  for (const mod of Object.values(placeModules)) collectPlaceNames(mod, names);
-  setContextTerms(names.length > 0 ? names : FALLBACK_PLACES);
-}
+// Words the talk says that recognition would otherwise miss: the venue, its district, the flight line.
+// Static on purpose: there is no fixed place list any more (live search).
+const CONTEXT_TERMS = ["Bremen", "Überseestadt", "New York", "A2UI", "Brick Box", "JAAI"];
 
 function isTypingTarget(target: EventTarget | null): boolean {
   return target instanceof Element && isEditableTextEntry(target);
@@ -57,7 +38,7 @@ export function useVoice(): VoiceState {
       store.setTranscript({ error: "This browser cannot record audio." });
       return;
     }
-    loadContextTerms();
+    setContextTerms(CONTEXT_TERMS);
     const warm = () => {
       sonioxKeys.refresh().catch((err: unknown) => {
         console.error("[voice] key prefetch failed", err);

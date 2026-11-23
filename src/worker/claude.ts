@@ -330,7 +330,7 @@ function classifyObject(obj: unknown): ComposerLine {
       return { kind: "invalid", reason: "bad data line" };
     }
     // "/" would replace the whole data model, wiping the inputs' values.
-    if (!d.into.startsWith("/") || d.into === "/") return { kind: "invalid", reason: "data.into must be a path like /places" };
+    if (!d.into.startsWith("/") || d.into === "/") return { kind: "invalid", reason: "data.into must be a path like /results" };
     const args = isPlainObject(d.args) ? (d.args as JsonObject) : {};
     return { kind: "data", source: d.source, args, into: d.into };
   }

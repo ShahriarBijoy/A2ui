@@ -1,72 +1,8 @@
 import { describe, expect, test } from "bun:test";
-import { findPlaces, matchesKind, PLACES, placeQuery, resolveData } from "./index";
+import { DATA_SOURCES, resolveData } from "./index";
 import { generateFlights, isIsoDate } from "./flights";
 
 const defaults = { from: "Bremen", date: "2026-11-24" };
-
-describe("places.json", () => {
-  test("8 placeholder records, Place-shaped, marked TODO", () => {
-    expect(PLACES).toHaveLength(8);
-    const kinds = new Set(PLACES.map((p) => p.kind));
-    expect(kinds.size).toBe(8);
-    for (const p of PLACES) {
-      expect(p.name.endsWith(" (TODO)")).toBe(true);
-      expect(p.walk_min).toBeGreaterThanOrEqual(2);
-      expect(p.walk_min).toBeLessThanOrEqual(14);
-      expect(p.price_level).toBeGreaterThanOrEqual(1);
-      expect(p.price_level).toBeLessThanOrEqual(4);
-      expect(p.tags.length).toBeGreaterThanOrEqual(2);
-      expect(p.tags.length).toBeLessThanOrEqual(3);
-      expect(p.opens_until).toMatch(/^\d{2}:\d{2}$/);
-      expect(Object.keys(p).sort()).toEqual(["id", "kind", "name", "opens_until", "price_level", "tags", "walk_min"]);
-    }
-  });
-});
-
-describe("findPlaces", () => {
-  test("no filter: sorted by walk_min, at most 6", () => {
-    const res = findPlaces({});
-    expect(res).toHaveLength(6);
-    const walks = res.map((p) => p.walk_min);
-    expect(walks).toEqual([...walks].sort((a, b) => a - b));
-  });
-
-  test("max_walk_min filters", () => {
-    const res = findPlaces({ max_walk_min: 5 });
-    expect(res.length).toBeGreaterThanOrEqual(2);
-    expect(res.every((p) => p.walk_min <= 5)).toBe(true);
-  });
-
-  test("kind matches kind or tags, case-insensitive", () => {
-    expect(matchesKind(PLACES.find((p) => p.kind === "italian")!, "ITAL")).toBe(true);
-    expect(matchesKind(PLACES.find((p) => p.kind === "pub")!, "late")).toBe(true);
-    expect(matchesKind(PLACES.find((p) => p.kind === "vegan")!, "italian food")).toBe(false);
-    const late = findPlaces({ kind: "late" });
-    expect(late.length).toBeGreaterThanOrEqual(2);
-    expect(late.every((p) => p.tags.includes("late"))).toBe(true);
-  });
-
-  test("fewer than 2 matches: relaxes, keeps the exact match on top, never empty", () => {
-    const res = findPlaces({ kind: "italian" });
-    expect(res[0].kind).toBe("italian");
-    expect(res.length).toBeGreaterThanOrEqual(2);
-    const none = findPlaces({ kind: "ethiopian", max_walk_min: 1 });
-    expect(none.length).toBeGreaterThanOrEqual(2);
-  });
-
-  test("relaxes walk before kind", () => {
-    // Only the sushi place (14 min) is sushi; with max 5 min nothing strict matches.
-    const res = findPlaces({ kind: "sushi", max_walk_min: 5 });
-    expect(res.length).toBeGreaterThanOrEqual(2);
-    expect(res.every((p) => p.walk_min <= 5)).toBe(true);
-  });
-
-  test("placeQuery coerces numeric strings and ignores junk", () => {
-    expect(placeQuery({ kind: " vegan ", max_walk_min: "10" })).toEqual({ kind: "vegan", max_walk_min: 10 });
-    expect(placeQuery({ kind: 3, max_walk_min: "x" })).toEqual({ kind: "3" });
-    expect(placeQuery({})).toEqual({});
-  });
-});
 
 describe("flights", () => {
   test("deterministic for the same from|to|date", () => {
@@ -116,8 +52,9 @@ describe("flights", () => {
 });
 
 describe("resolveData", () => {
-  test("places is no longer a data-line source (live search replaced it)", () => {
-    expect(resolveData({ source: "places", args: { kind: "vegan" } }, defaults)).toEqual({ ok: false, error: 'source "places" was removed: use "search"' });
+  test("there is no fixed places source: only search and flights exist", () => {
+    expect(DATA_SOURCES).toEqual(["search", "flights"]);
+    expect(resolveData({ source: "places", args: { kind: "vegan" } }, defaults)).toEqual({ ok: false, error: 'unknown data source "places"' });
   });
 
   test("flights with defaults for from and date", () => {

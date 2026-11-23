@@ -379,10 +379,16 @@ describe("runTurn: stop reasons, repairs, captions", () => {
     expect(events.map((e) => e.type)).toEqual(["html", "usage", "done"]);
   });
 
-  test("widgets: a tool call cut off by max_tokens is never rendered", async () => {
+  test("widgets: a tool call cut off by max_tokens is never rendered, and nothing is searched", async () => {
     const reply: WidgetsReply = { tool: { name: "show_restaurants", input: {} }, text: "", usage, stopReason: "max_tokens" };
-    const events = await collect(request({ mode: "widgets", decision: false }), deps({ llm: fakeLlm([], {}, reply) }));
+    let searched = 0;
+    const search = async (): Promise<SearchOutcome> => {
+      searched++;
+      return { ok: true, records: [], dropped: 0, searches: 1, inputTokens: 1, outputTokens: 1 };
+    };
+    const events = await collect(request({ mode: "widgets", decision: false }), deps({ llm: fakeLlm([], {}, reply), search }));
     expect(events.map((e) => e.type)).toEqual(["usage", "error", "done"]);
+    expect(searched).toBe(0);
   });
 
   test("a miscounted closing run on a complete line is repaired, counted and logged", async () => {
@@ -772,13 +778,111 @@ describe("runTurn: errors and timeouts", () => {
 });
 
 describe("runTurn: widgets and html modes", () => {
-  test("widgets: tool call → widget with resolved places, then usage + done", async () => {
-    const reply: WidgetsReply = { tool: { name: "show_restaurants", input: { kind: "vegan" } }, text: "", usage, stopReason: "tool_use" };
-    const events = await collect(request({ mode: "widgets", decision: false }), deps({ llm: fakeLlm([], {}, reply) }));
+  const restaurantsReply = (input: Record<string, string | number> = {}): WidgetsReply => ({
+    tool: { name: "show_restaurants", input },
+    text: "",
+    usage,
+    stopReason: "tool_use",
+  });
+  const liveRecords = [
+    { id: "r1", name: "Feuerwache", kind: "german", walk_min: null, price_level: "€€", tags: ["beer"], opens_until: "23:00", source: "https://feuerwache.example/" },
+    { id: "r2", name: "Far Away", kind: "vegan", walk_min: 25, price_level: null, tags: null, opens_until: null, source: "https://far.example/" },
+    { id: "r3", name: null, kind: "vegan", walk_min: null, price_level: null, tags: null, opens_until: null, source: "https://noname.example/" },
+  ];
+
+  test("widgets: show_restaurants runs the live search, then the widget with its records, the fetch event, usage, done", async () => {
+    const asked: SearchRequest[] = [];
+    const search = async (r: SearchRequest): Promise<SearchOutcome> => {
+      asked.push(r);
+      return { ok: true, records: liveRecords, dropped: 1, searches: 1, inputTokens: 15000, outputTokens: 700 };
+    };
+    const warnings: string[] = [];
+    const events = await collect(
+      request({ mode: "widgets", decision: false }),
+      deps({ llm: fakeLlm([], {}, restaurantsReply({ kind: "vegan", max_walk_min: 10 })), search, warn: (m) => void warnings.push(m) }),
+    );
+    expect(asked).toEqual([
+      { query: "vegan restaurants near Venue, Bremen", fields: ["name", "kind", "walk_min", "price_level", "tags", "opens_until"], max: 5 },
+    ]);
+    expect(events.map((e) => e.type)).toEqual(["widget", "fetch", "usage", "done"]);
+    // No name → dropped; a stated 25 min walk is over the limit → dropped. Unknowns stay null.
+    expect(events[0]).toEqual({
+      type: "widget",
+      name: "RestaurantWidget",
+      props: {
+        places: [{ id: "r1", name: "Feuerwache", kind: "german", walk_min: null, price_level: 2, tags: ["beer"], opens_until: "23:00", source: "https://feuerwache.example/" }],
+        kind: "vegan",
+      },
+    });
+    expect(events[1]).toEqual({
+      type: "fetch",
+      source: "search",
+      query: "vegan restaurants near Venue, Bremen",
+      ok: true,
+      records: 1,
+      ms: expect.any(Number),
+      searches: 1,
+      input_tokens: 15000,
+      output_tokens: 700,
+    });
+    const u = events[2] as Extract<TurnEvent, { type: "usage" }>;
+    // The widget waits for the search, so its first UI comes after the tool call.
+    expect(u.first_ui_ms).toBeGreaterThan(u.compose_ms);
+    expect(warnings).toEqual([expect.stringContaining("restaurant search dropped 1 invalid item(s)")]);
+  });
+
+  test("widgets: a failed search shows the widget with no places and a failed fetch event", async () => {
+    const warnings: string[] = [];
+    const search = async (): Promise<SearchOutcome> => ({ ok: false, error: "no web search was made", searches: 0, inputTokens: 900, outputTokens: 40 });
+    const events = await collect(request({ mode: "widgets", decision: false }), deps({ llm: fakeLlm([], {}, restaurantsReply()), search, warn: (m) => void warnings.push(m) }));
+    expect(events.map((e) => e.type)).toEqual(["widget", "fetch", "usage", "done"]);
+    expect(events[0]).toEqual({ type: "widget", name: "RestaurantWidget", props: { places: [] } });
+    expect(events[1]).toMatchObject({ type: "fetch", source: "search", ok: false, records: 0, error: "no web search was made", searches: 0 });
+    expect(warnings).toEqual([expect.stringContaining("restaurant search failed (no web search was made)")]);
+  });
+
+  test("widgets: a search over its budget times out: no places, the request is aborted, then done", async () => {
+    let aborted = false;
+    const search = (_r: SearchRequest, signal: AbortSignal) =>
+      new Promise<SearchOutcome>(() => signal.addEventListener("abort", () => (aborted = true), { once: true }));
+    const events = await collect(request({ mode: "widgets", decision: false }), deps({ llm: fakeLlm([], {}, restaurantsReply()), search, fetchTimeoutMs: 30 }));
+    expect(events.map((e) => e.type)).toEqual(["widget", "fetch", "usage", "done"]);
+    expect(events[0]).toMatchObject({ props: { places: [] } });
+    expect(events[1]).toEqual({ type: "fetch", source: "search", query: "restaurants near Venue, Bremen", ok: false, records: 0, ms: expect.any(Number), error: "timed out after 30 ms" });
+    expect(aborted).toBe(true);
+  });
+
+  test("widgets: without a search dependency the widget fails visibly (no places), never with fixed data", async () => {
+    const events = await collect(request({ mode: "widgets", decision: false }), deps({ llm: fakeLlm([], {}, restaurantsReply()) }));
+    expect(events.map((e) => e.type)).toEqual(["widget", "fetch", "usage", "done"]);
+    expect(events[0]).toMatchObject({ props: { places: [] } });
+    expect(events[1]).toMatchObject({ ok: false, error: "live search is not configured" });
+  });
+
+  test("widgets: the client leaving during the search cancels it and ends with done only", async () => {
+    const ctl = new AbortController();
+    let cancelled = false;
+    const search = (_r: SearchRequest, signal: AbortSignal) =>
+      new Promise<SearchOutcome>(() => signal.addEventListener("abort", () => (cancelled = true), { once: true }));
+    const p = collect(request({ mode: "widgets", decision: false }), deps({ llm: fakeLlm([], {}, restaurantsReply()), search }), ctl.signal);
+    setTimeout(() => ctl.abort(), 20);
+    expect(await p).toEqual([{ type: "done" }]);
+    expect(cancelled).toBe(true);
+  });
+
+  test("widgets: the flight search shows at once, with no search", async () => {
+    let searched = 0;
+    const search = async (): Promise<SearchOutcome> => {
+      searched++;
+      return { ok: false, error: "unused" };
+    };
+    const reply: WidgetsReply = { tool: { name: "show_flight_search", input: { from: "Bremen", to: "New York" } }, text: "", usage, stopReason: "tool_use" };
+    const events = await collect(request({ mode: "widgets", decision: false }), deps({ llm: fakeLlm([], {}, reply), search }));
     expect(events.map((e) => e.type)).toEqual(["widget", "usage", "done"]);
-    expect(events[0]).toMatchObject({ type: "widget", name: "RestaurantWidget", props: { kind: "vegan" } });
     const u = events[1] as Extract<TurnEvent, { type: "usage" }>;
-    expect(u.first_ui_ms).toBe(u.compose_ms);
+    // Measured when the widget is sent: one tick of the fake clock after the tool call, no search between.
+    expect(u.first_ui_ms).toBe(u.compose_ms + 10);
+    expect(searched).toBe(0);
   });
 
   test("widgets: no tool → text", async () => {
@@ -797,6 +901,8 @@ describe("runTurn: widgets and html modes", () => {
     const full = widgetEvent({ name: "show_flight_search", input: { from: "Bremen", to: "New York" } }, d);
     expect(full?.props.flights).toEqual(generateFlights("Bremen", "New York", "2026-11-24"));
     expect(widgetEvent({ name: "unknown_tool", input: {} }, d)).toBeNull();
+    // Restaurants are searched first (composeWidgets), never answered from fixed data here.
+    expect(widgetEvent({ name: "show_restaurants", input: {} }, d)).toBeNull();
   });
 
   test("html: deltas forwarded with fences stripped, then usage + done", async () => {

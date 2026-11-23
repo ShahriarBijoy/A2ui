@@ -89,6 +89,11 @@ const FIELD_HINTS: Record<string, string> = {
   venue: "where it takes place",
   rating: 'the rating as written in the result (e.g. "4.5/5")',
   distance: "the distance as written in the result",
+  // Widgets mode's restaurant rows (restaurants.ts). Each is null unless a result states it.
+  kind: "the cuisine or kind of place (e.g. italian, vegan, pub)",
+  walk_min: "walking minutes from the person's location as a number, only if a result states it",
+  price_level: 'the number of currency signs in a price range a result shows ("€€" is 2), 1-4',
+  opens_until: 'closing time on the person\'s day (see Now) as "HH:mm", only as a result states it',
 };
 
 export function searchPrompt(req: SearchRequest, ctx: PromptContext): Prompt {
