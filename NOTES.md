@@ -57,6 +57,17 @@ Read this before calling any external API. Items here override PLAN.md where the
 - Live a2ui (phase 2, dev machine): first UI 0.6–0.9 s; data 4–6 s; 19 searches, 0 failures. `web_search_20260209` is unusable with Haiku 5.5 (invalid_tool_input 5/6, one 99 s run).
 - Known quality limits: some sources are yelp search pages (3/25 rows); a place closing at 17:00 can appear for "dinner" when the query lacks a time; walk_min is null in practice (25/25), since sources rarely state walking time.
 
+## Composer model A/B (2026-11-23, local, DEV_NOW=2026-11-25T18:45, HEAD 8918fc0, 10 runs per main scenario)
+| | Haiku 5.5 | Sonnet 5.5 |
+|---|---|---|
+| Main runs | 13/20 (dinner 10/10, flight 3/10) | 14/20 (dinner 5/10, flight 9/10) |
+| Seat map after flight pick | 0/10 | 10/10 |
+| First UI median / p90 | 1.45 / 2.03 s | 1.72 / 2.33 s |
+| Screen done median / p90 | 2.28 / 2.71 s | 3.91 / 5.07 s |
+| Output tokens median | 632 | 685 |
+| Held-out ×2 | 10/10 | 9/10 |
+- **Ruling: composer → claude-sonnet-5-5** (PLAN §3.6: "move up only if the scenarios fail"; Haiku ignores the generic seat/Button rules). Sonnet's dinner misses were the router (a separate date-only Day input claimed "later"), which is being fixed in knobs.ts. Search, widgets and html stay on Haiku. Thinking: Sonnet `between_tools` (84/84 turns ran it), Haiku `disabled` (73/73).
+
 ## Rulings (decisions made without asking)
 - Fonts: Geist + Geist Mono, bundled via fontsource (no network at the venue). PLAN says "system sans": same intent, consistent rendering on the stage machine.
 - Catalog id: `<origin>/catalog/brick-box/v1`, served publicly as JSON by the Worker. The processor accepts any catalogId ending in `/catalog/brick-box/v1`.
