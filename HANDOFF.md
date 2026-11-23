@@ -14,24 +14,17 @@ Vite + React 19 + Tailwind 4 + shadcn (**Base UI**, all components installed) cl
 Every event enters the client through `store.applyTurnEvent`, the single ingress that replay also uses.
 Contract files: `src/shared/{a2ui,catalog,protocol,pointer}.ts` and `src/client/state.ts`.
 
-## Status at hand-off (updated 2026-11-23 ~23:05)
-- **Production:** https://brick-box.shahriarbijoy.workers.dev runs **8bc7ae3** (deployed 2026-11-23 ~23:13 from a clean worktree). That includes replay, replay-totals, lenient @checks, the composer structure fixes d78f02e, the decision-model time/guard fixes 5996e08 and the voice fragment guard. The prod probe passed: patch 0.96 in 195 ms; dinner first UI 0.78 s. **The dinner search returned 0 places at 23:14 Monday**: the time-aware query correctly drops closed kitchens late at night, so test at the talk's clock (`DEV_NOW` override, coming) or during the evening.
-- **Complete and reviewed:** lanes R, S, W, D, V; phases 2 (R, S, W) and 3 (widgets live); step 12 replay (4f7da0e, b020f5e, 5b580c1); lenient @checks (c22534f). Ledger: `.superpowers/sdd/progress.md`.
-- **Open at hand-off:**
-  - Decision model fix round 1 (relativeHint edge wording; never a backwards patch).
-  - Review of the composer structure fixes d78f02e.
-  - Voice fragment guard (dispatched to the voice agent).
-- **Smoke:**
-  - Production (old fb43969): 53/62.
-  - Local HEAD (d78f02e, 22:56 Monday): 59/62. Main 3/6, wildcards 9/9, held-out 15/15, pink 3/3.
-  - Main misses: dinner "later" partial (possibly stale; it ran before 5f2eff0) and flight seat step (9 blocks; once no confirm target, which may be the script's matcher). **Re-run the main scenarios 10× on HEAD after the D fix round lands.** Only if a composer gap remains, A/B Sonnet 5.5 with a composer-only model var and per-model thinking config (Sonnet 5.5 rejects `thinking: disabled`; use `between_tools`).
-- **Next fixes queued:**
-  - Retry double search (reuse the search on the same `into` path).
-  - Search scope (only local, current or changing facts; the quiz shouldn't fetch vocabulary).
-  - Dev-only clock override in `.dev.vars` for testing at the talk's time.
-  - Smoke dumps of the surface, knobs and Jev probabilities for steps that should patch and don't.
-  - The step-12 wrong-API-key check (one error line + Try again).
-- **The §9.1 talk beats now depend on what the composer builds (no scripted flows). Replay is the safety net:** save good turns with Shift+R during rehearsal.
+## Status at hand-off (updated 2026-11-24 ~00:00)
+- **Production:** https://brick-box.shahriarbijoy.workers.dev runs **615d559**: composer `claude-sonnet-5-5` (search, widgets and html on Haiku), live web search, the decision model with time/date/Day fixes and the silent-drop guard, replay (F1–F6, Shift+R, Shift+E), voice-glow, the Esc wave, live widgets and the voice fragment guard. Open it with `?k=<DEMO_KEY from .dev.vars>`.
+- **Everything built is reviewed.** 422 tests pass, and `bunx tsc -b` is clean. Ledger: `.superpowers/sdd/progress.md` (every task, review, ruling and parked minor).
+- **Talk-clock main scenarios: 19/20 (95%)**; see NOTES → "Main scenarios at the talk's clock". Flight is 10/10 including the seat map. "We're six, and later" patches in about 200 ms with no LLM.
+- **Remaining (owner-dependent):**
+  1. The owner's live mic rehearsal in Chrome (checklist below). Save good turns with Shift+R, export with Shift+E, and paste them into `src/client/replays.json` (shipped F-key replays), then redeploy.
+  2. Confirm the venue and date (JAAI, Konsul-Smidt-Straße 8p, Wed 25 Nov 18:00). They drive `VENUE_*` vars and the "nearby" search.
+  3. Flights: demo-badged (current) vs indicative web results.
+  4. Re-run `bun run smoke` against production during the evening before the talk (18:30–19:30) and commit `scripts/smoke-results.md`. Those are the numbers for the talk.
+- **Parked minors** are in the ledger. The notable ones: block count can reach 8; the patch caption shows a raw ISO value for merged date+time patches; PLAN §9.3 should say "A2UI v1.0" (upstream marks it stable).
+- **Talk content notes:** the §9.1 beats now depend on what the composer builds, since there are no scripted flows; replay is the safety net. The closing line's N/M comes from the session totals, which replays don't change. Don't quote vendor numbers (§9.3).
 
 ## Event (found by web search 2026-11-23; owner to confirm)
 - Next AI Tinkerers Bremen meetup: **Wednesday 2026-11-25, 18:00 CET** (18:30 demos, 20:00 networking + food). https://bremen.aitinkerers.org/p/ai-tinkerers-bremen-4

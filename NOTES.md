@@ -68,6 +68,12 @@ Read this before calling any external API. Items here override PLAN.md where the
 | Held-out ×2 | 10/10 | 9/10 |
 - **Ruling: composer → claude-sonnet-5-5** (PLAN §3.6: "move up only if the scenarios fail"; Haiku ignores the generic seat/Button rules). Sonnet's dinner misses were the router (a separate date-only Day input claimed "later"), which is being fixed in knobs.ts. Search, widgets and html stay on Haiku. Thinking: Sonnet `between_tools` (84/84 turns ran it), Haiku `disabled` (73/73).
 
+## Main scenarios at the talk's clock (2026-11-23 ~23:55, local dev, DEV_NOW=2026-11-25T18:45, HEAD 615d559, composer claude-sonnet-5-5, 10 runs each)
+- **19/20 scenario runs pass (95%).** Flight 10/10 on every step, seat map included. Dinner 9/10; the one miss is a step-2 screen with 8 visible blocks (rule ≤ 7).
+- Per step (median): dinner opening first UI 1.87 s, screen 4.23 s, live data 5.49 s (search 3.0 s, 1–3 records); tap place 1.44 / 4.66 s; **"We're six, and later." patch 203 ms (decision model, no LLM)**; confirm 1.53 / 2.85 s; flight opening 1.33 / 3.89 s; "To New York, give me options" 2.21 / 5.16 s (4 demo flights); tap flight → seat map 1.68 / 4.29 s; confirm seat 1.66 / 2.82 s.
+- Widgets: dinner → RestaurantWidget with 5 live places in 4.22 s; flight → FlightSearchWidget 0.86 s. HTML: first byte ~0.5–0.6 s, done 4.5–5.6 s.
+- Full table: scratchpad `main-10x-sonnet.md`. Production smoke (all lines) should be re-run during the evening before the talk (18:30–19:30), since dinner results depend on the real clock.
+
 ## Rulings (decisions made without asking)
 - Fonts: Geist + Geist Mono, bundled via fontsource (no network at the venue). PLAN says "system sans": same intent, consistent rendering on the stage machine.
 - Catalog id: `<origin>/catalog/brick-box/v1`, served publicly as JSON by the Worker. The processor accepts any catalogId ending in `/catalog/brick-box/v1`.
