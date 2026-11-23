@@ -10,9 +10,9 @@
  * A line passes when: at least one component rendered (widgets: a widget or text; html: a page),
  * no refused components and no validation errors from the real processor, at most 7 visible blocks,
  * no error, and for patchOnly steps a route decision "patch" with no usage event (no LLM call).
- * Visible block: a component reachable from "root" in render order that is not a layout container
- * (Card, Column, Row, Tabs; only the first tab is visible). A List counts as one block, a Button as one
- * (its label is part of it), a refused placeholder as one.
+ * Visible block (controller ruling): a top-level visual unit inside the root container. The root is
+ * unwrapped through Cards, single-child Columns and the first tab; each child of the main Column is one
+ * block, whatever it holds (a label/value Row, a List, a nested Column or Card, a Button).
  */
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
@@ -29,7 +29,6 @@ import { createTurnClient } from "../src/client/turns";
 
 const DEFAULT_URL = "https://brick-box.shahriarbijoy.workers.dev";
 const MAX_BLOCKS = 7;
-const CONTAINERS = new Set(["Card", "Column", "Row", "Tabs"]);
 
 /**
  * The held-out lines exist only as summaries in lane-W-report.md; this wording is reconstructed and
@@ -177,8 +176,34 @@ function orphans(surface: SurfaceState): string[] {
   return Object.keys(surface.components).filter((id) => surface.components[id].status === "ok" && !reached.has(id));
 }
 
-function visibleBlocks(nodes: Node[]): number {
-  return nodes.filter((n) => !n.inList && !CONTAINERS.has(typeOf(n.entry))).length;
+/** Top-level visual units inside the root container (controller ruling: a Row is one unit, leaves are not counted). */
+function visibleBlocks(surface: SurfaceState): number {
+  let id = "root";
+  const seen = new Set<string>();
+  for (;;) {
+    const entry = surface.components[id];
+    if (!entry || entry.status !== "ok" || seen.has(id)) break;
+    seen.add(id);
+    const p = propsOf(entry);
+    const type = typeOf(entry);
+    const firstTab = type === "Tabs" && Array.isArray(p.tabs) ? p.tabs[0] : undefined;
+    if (type === "Card" && typeof p.child === "string") id = p.child;
+    else if (isPlainObject(firstTab) && typeof firstTab.child === "string") id = firstTab.child;
+    else if (type === "Column" && Array.isArray(p.children) && p.children.length === 1 && typeof p.children[0] === "string") id = p.children[0];
+    else break;
+  }
+  const main = surface.components[id];
+  if (!main) return 0;
+  if (main.status === "ok" && typeOf(main) === "Column") {
+    const kids = propsOf(main).children;
+    // Children that have not arrived render as skeletons, not as blocks.
+    if (Array.isArray(kids)) return kids.filter((k) => typeof k === "string" && surface.components[k] !== undefined).length;
+    if (isChildTemplate(kids)) {
+      const st = templateState(kids, surface.data, "/");
+      return st.kind === "items" ? st.items.length : 1;
+    }
+  }
+  return 1;
 }
 
 /** First OptionCard or Button (render order) whose action name starts with the prefix. */
@@ -283,7 +308,7 @@ function evaluate(job: Job, run: number, step: number, st: StoreApi, agent: Agen
       reasons.push("no surface created or updated");
     } else {
       const nodes = renderOrder(surface);
-      result.blocks = visibleBlocks(nodes);
+      result.blocks = visibleBlocks(surface);
       if (!nodes.some((n) => n.entry.status === "ok")) reasons.push("nothing rendered from root");
       if (result.blocks > MAX_BLOCKS) reasons.push(`${result.blocks} visible blocks`);
       const lost = orphans(surface);
@@ -605,7 +630,7 @@ async function main(): Promise<void> {
     ...(opts.note ? [`- Note: ${opts.note}`] : []),
     `- a2ui: every scenario (all steps) and five held-out lines, ${opts.runs}× each, decision model on. widgets and html: each scenario's opening line once, in the modes it lists.`,
     "- Pass: at least one component rendered (widgets: a widget or text; html: a page); 0 refused and 0 validation errors in the real client processor; ≤ 7 visible blocks; no error; patchOnly steps: route decision patch and no usage event.",
-    "- Visible block: a component reachable from root in render order, except layout containers (Card, Column, Row, Tabs; first tab only). A List is one block, a Button one, a refused placeholder one.",
+    "- Visible block (controller ruling): a top-level visual unit inside the root container. The root is unwrapped through Cards, single-child Columns and the first tab; each child of the main Column counts once, whatever it holds (a label/value Row, a List, a nested Column or Card, a Button).",
     "- first UI: the turn's surface has a root (patch steps: the first knob change). screen done: last composer or knob line, caption, widget or html. data arrived: last live data event. Search ms is the Worker's own measure (the longest search of the turn); records are summed over the turn's searches.",
     "- Medians with (min–max). \"–\" means not measured. \"expect\" counts the scenario's expected bricks/data (informational, not part of pass).",
     "",
