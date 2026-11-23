@@ -28,7 +28,8 @@
       "@shared/*": [
         "./src/shared/*"
       ]
-    }
+    },
+    "jsx": "react-jsx"
   },
   "include": [
     "vite.config.ts",
