@@ -55,6 +55,16 @@ describe("composer prompt", () => {
     expect(search.data).toMatchObject({ source: "search", into: "/results", args: { fields: ["name", "subtitle", "tags"] } });
   });
 
+  test("a request that implies a time names the day and time from STATE in its search query", () => {
+    const data = COMPOSER_SYSTEM_PROMPT.slice(COMPOSER_SYSTEM_PROMPT.indexOf("\nDATA\n"), COMPOSER_SYSTEM_PROMPT.indexOf("DESIGN RULES"));
+    const flat = data.replace(/\s+/g, " ");
+    expect(flat).toContain("When the request implies a time of day");
+    expect(flat).toContain("never earlier than STATE.time when it is today");
+    for (const field of ["STATE.weekday", "STATE.date", "STATE.time", "STATE.tomorrow_weekday", "STATE.tomorrow"]) expect(data).toContain(field);
+    // The system prompt is cached, so the real date must come from STATE, never from the prompt text.
+    expect(COMPOSER_SYSTEM_PROMPT).not.toMatch(/\b2026-\d{2}-\d{2}\b/);
+  });
+
   test("the venue address goes into STATE only when configured", () => {
     expect(JSON.parse(composerPrompt(req, ctx).user.split("\n")[1])).not.toHaveProperty("venue_address");
     const withAddress = promptContext({ venue: "Venue", city: "Bremen", address: " Konsul-Smidt-Straße 8p ", catalogId: "c" });

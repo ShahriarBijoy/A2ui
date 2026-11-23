@@ -195,6 +195,12 @@ describe("searchPrompt and runSearch", () => {
     expect(searchPrompt({ ...req, fields: ["lineup"] }, ctx).user).toContain("- lineup\n");
   });
 
+  test("items whose stated hours contradict the requested day or time are left out", () => {
+    expect(SEARCH_SYSTEM_PROMPT.replace(/\s+/g, " ")).toContain(
+      "Leave out every item whose stated opening hours or dates contradict the requested day or time",
+    );
+  });
+
   test("runSearch never throws: a failing call becomes ok:false with a short message", async () => {
     const out = await runSearch(req, async () => {
       throw new Error("boom");

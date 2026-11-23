@@ -154,6 +154,11 @@ Never put a placeholder in an arg.
     query   one self-contained web search query in English with the place and the date from STATE:
             for "nearby", the venue (STATE.venue, STATE.venue_address if given, STATE.city);
             for events, the city and the month or date.
+            When the request implies a time of day ("dinner", "tonight", "after this", "tomorrow morning"),
+            the query also names it from STATE: the weekday, the date and an approximate time, never earlier
+            than STATE.time when it is today (STATE.weekday, STATE.date, STATE.time; STATE.tomorrow_weekday
+            and STATE.tomorrow for tomorrow), e.g. "cafes open for breakfast on Saturday 15 June 2030 from
+            08:00 near Rua Augusta, Lisbon".
     fields  the item fields your template reads, from: name, subtitle (one line of key facts),
             tags (string array), detail (one sentence), price, date ("YYYY-MM-DD"), time ("HH:mm"),
             hours, address, venue. Every item also has "id" and "source" (its web page).

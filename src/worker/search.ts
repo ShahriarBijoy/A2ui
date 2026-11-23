@@ -69,6 +69,8 @@ the keys the request lists, plus "source".
   time, date, distance or rating.
 - Only items that meet the whole request. If it names a time, date, place, price or condition
   ("open tonight", "next month", "dog-friendly"), leave out items the results do not show meeting it.
+  Leave out every item whose stated opening hours or dates contradict the requested day or time
+  (it closes at 17:00 for a dinner after 20:00, or it is closed on that weekday).
   Fewer items, or [], is a correct answer.
 - One item per real thing (a place, an event, a route, a product), never a list page or an article.
 - English, at most 80 characters per string.`;
