@@ -1,0 +1,5 @@
+# Local secrets for `bun run dev` (copy to .dev.vars). Never commit .dev.vars.
+ANTHROPIC_API_KEY=
+JEV_API_KEY=
+SONIOX_API_KEY=
+DEMO_KEY=

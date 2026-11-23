@@ -1,0 +1,143 @@
+@import "tailwindcss";
+@import "tw-animate-css";
+@import "shadcn/tailwind.css";
+@import "@fontsource-variable/geist";
+@import "@fontsource-variable/geist-mono";
+
+/* Brick Box tokens (PLAN.md §6). Light only: one stage, one look. */
+@theme inline {
+  --font-heading: var(--font-sans);
+  --font-sans: "Geist Variable", ui-sans-serif, system-ui, sans-serif;
+  --font-mono: "Geist Mono Variable", ui-monospace, "Cascadia Code", Consolas, monospace;
+  --color-ring: var(--ring);
+  --color-input: var(--input);
+  --color-border: var(--border);
+  --color-destructive: var(--destructive);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-accent: var(--accent);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-muted: var(--muted);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-secondary: var(--secondary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-primary: var(--primary);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-popover: var(--popover);
+  --color-card-foreground: var(--card-foreground);
+  --color-card: var(--card);
+  --color-foreground: var(--foreground);
+  --color-background: var(--background);
+  --color-highlight: var(--highlight);
+  --color-highlight-foreground: var(--highlight-foreground);
+  --color-highlight-soft: var(--highlight-soft);
+  --radius-sm: calc(var(--radius) * 0.5);
+  --radius-md: calc(var(--radius) * 0.75);
+  --radius-lg: var(--radius);
+  --radius-xl: calc(var(--radius) * 1.25);
+  --radius-2xl: calc(var(--radius) * 1.5);
+  --radius-3xl: calc(var(--radius) * 2);
+  --radius-4xl: calc(var(--radius) * 2.5);
+}
+
+:root {
+  --background: #edece5;
+  --foreground: #1a1c17;
+  --card: #f7f6f1;
+  --card-foreground: #1a1c17;
+  --popover: #f7f6f1;
+  --popover-foreground: #1a1c17;
+  --primary: #1a1c17;
+  --primary-foreground: #f7f6f1;
+  --secondary: #c6cbb4;
+  --secondary-foreground: #1a1c17;
+  --muted: #dde1d2;
+  --muted-foreground: #4d5249;
+  --accent: #dde1d2;
+  --accent-foreground: #1a1c17;
+  --destructive: #a63e26;
+  --border: #d5d4ca;
+  --input: #b9b8ac;
+  --ring: #1a1c17;
+  /* used bricks, changed values */
+  --highlight: #e0714f;
+  --highlight-foreground: #1a1c17;
+  --highlight-soft: #f3c9b9;
+  --radius: 14px;
+}
+
+@layer base {
+  * {
+    @apply border-border outline-ring/50;
+  }
+  html {
+    @apply font-sans;
+    font-size: 16px;
+    -webkit-font-smoothing: antialiased;
+  }
+  /* U12: stage layout (1920×1080 projector) reads from the back row. */
+  @media (min-width: 1600px) {
+    html {
+      font-size: 18px;
+    }
+  }
+  body {
+    @apply bg-background text-foreground;
+  }
+  button:not(:disabled),
+  [role="button"]:not(:disabled) {
+    cursor: pointer;
+  }
+}
+
+/* U3: components appear in place with a 150 ms fade. */
+@keyframes bb-fade-in {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+.bb-appear {
+  animation: bb-fade-in 150ms ease-out both;
+}
+
+/* U5: a changed control flashes for 600 ms. */
+@keyframes bb-flash {
+  0% {
+    box-shadow: 0 0 0 3px var(--highlight);
+    background-color: var(--highlight-soft);
+  }
+  100% {
+    box-shadow: 0 0 0 3px transparent;
+  }
+}
+.bb-flash {
+  animation: bb-flash 600ms ease-out both;
+  border-radius: var(--radius-md);
+}
+
+/* Skeleton shimmer for ids that have not arrived yet. */
+@keyframes bb-pulse {
+  0%,
+  100% {
+    opacity: 0.55;
+  }
+  50% {
+    opacity: 0.9;
+  }
+}
+.bb-skeleton {
+  background: var(--accent);
+  border-radius: var(--radius-md);
+  animation: bb-pulse 1.2s ease-in-out infinite;
+}
+
+/* U14: reduced motion turns off fades, flashes and pulses. */
+@media (prefers-reduced-motion: reduce) {
+  .bb-appear,
+  .bb-flash,
+  .bb-skeleton {
+    animation: none !important;
+  }
+}
