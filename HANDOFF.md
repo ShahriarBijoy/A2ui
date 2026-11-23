@@ -41,11 +41,16 @@ Contract files: `src/shared/{a2ui,catalog,protocol,pointer}.ts` and `src/client/
 5. Step 13: `scripts/smoke.ts` over `src/shared/scenarios.ts` against the deployed URL; save the numbers to NOTES.md.
 6. Deploy; give the owner the URL with `?k=<DEMO_KEY>` (the value is in `.dev.vars`).
 
+## Event (found by web search 2026-11-23; owner to confirm)
+- Next AI Tinkerers Bremen meetup: **Wednesday 2026-11-25, 18:00 CET** (18:30 demos, 20:00 networking + food). https://bremen.aitinkerers.org/p/ai-tinkerers-bremen-4
+- Location says "exact location details will be provided later". The venue sponsor logo is **Just Add AI (JAAI)**, HQ Konsul-Smidt-Straße 8p, 28217 Bremen (Überseestadt / Europahafen). This is an inference.
+- **If this is the talk, the deadline is 2 days: apply PLAN's cut order up front.** Priorities: deploy → replay (never cut) → rehearsal → smoke numbers.
+- Real places near JAAI: a research agent writes `.superpowers/sdd/places-research.md`. Copy its JSON into `src/worker/data/places.json` after a sanity check, and set VENUE_NAME="JAAI, Überseestadt" (or the confirmed venue) and VENUE_CITY="Bremen".
+
 ## Waiting on the owner
 - (Keys: ANTHROPIC_API_KEY and SONIOX_API_KEY were added to `.dev.vars` and verified live on 2026-11-23: Claude answered, Soniox temp key minted 201.)
-- Venue name and city (`VENUE_NAME` / `VENUE_CITY` vars in wrangler.jsonc; currently "TODO venue", "Bremen").
-- 8 real places near the venue for `src/worker/data/places.json` (placeholders are marked "(TODO)").
-- Talk date (it decides whether to apply PLAN's cut order) and the projector resolution.
+- Confirm the venue (inferred JAAI, Überseestadt) and that the talk is the 25 Nov meetup.
+- Projector resolution (assume 1920×1080).
 - Talk wording: upstream A2UI now calls v1.0 **stable**, so PLAN §9.3's "v1.0 candidate" line should change.
 
 ## Open decisions
