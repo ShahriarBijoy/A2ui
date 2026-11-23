@@ -34,7 +34,7 @@ const MODE_ITEMS: readonly { mode: Mode; label: string }[] = [
 export function BottomBar(props: Props) {
   const { transcript, voice, mode, decision, handsFree, totals } = props;
   return (
-    <footer className="grid h-28 shrink-0 grid-rows-2 gap-y-1.5 border-t bg-card/60 px-5 py-2.5">
+    <footer className="grid h-[6.25rem] shrink-0 grid-rows-2 gap-y-1 border-t bg-card/60 px-5 py-2">
       <div className="flex min-w-0 items-center gap-6">
         <TranscriptLine transcript={transcript} voice={voice} handsFree={handsFree} />
         <Totals totals={totals} />

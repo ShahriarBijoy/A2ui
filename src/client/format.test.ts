@@ -11,6 +11,7 @@ import {
   pickInteractiveSurface,
   tailText,
   wireCounts,
+  wireDetail,
 } from "./format";
 import type { AgentItem, SurfaceState, ThreadItem, UserItem, WireEntry } from "./state";
 
@@ -132,6 +133,12 @@ describe("chipParts: measured values only", () => {
     expect(texts(item)).toContain("2 refused");
     expect(texts(agent({}, { usage: { ...usage, cache_read_tokens: 0 }, llmCalled: true }))).not.toContain("cached 0");
   });
+  test("compose – is only emphasised on patch turns", () => {
+    const aborted = chipParts(agent({ status: "done" }));
+    expect(aborted.find((p) => p.key === "compose")).toEqual({ key: "compose", text: "compose –", tone: "muted" });
+    const failed = chipParts(agent({ status: "error" }));
+    expect(failed.find((p) => p.key === "compose")?.tone).toBe("muted");
+  });
   test("failed turn after an LLM call shows no compose number", () => {
     expect(texts(agent({ status: "error" }, { llmCalled: true }))).toEqual(["route –"]);
   });
@@ -183,6 +190,26 @@ describe("buildTimeline", () => {
     expect(pickInteractiveSurface(tl, surfaces, null)).toBe("fx");
     expect(pickInteractiveSurface(tl, surfaces, "gone")).toBe("fx");
     expect(pickInteractiveSurface([], {}, null)).toBeNull();
+  });
+});
+
+describe("wireDetail", () => {
+  test("drops the kind and surface the row already shows", () => {
+    expect(wireDetail({ kind: "updateDataModel", surfaceId: "s2", summary: "updateDataModel s2 /booking/guests = 6" })).toBe(
+      "/booking/guests = 6",
+    );
+    expect(wireDetail({ kind: "updateComponents", surfaceId: "s2", summary: "updateComponents s2 · 5 components" })).toBe(
+      "5 components",
+    );
+    expect(wireDetail({ kind: "createSurface", surfaceId: "s2", summary: "createSurface s2" })).toBe("");
+    expect(wireDetail({ kind: "error", surfaceId: "s9", summary: "error /components/2/component · Unknown" })).toBe(
+      "/components/2/component · Unknown",
+    );
+    expect(wireDetail({ kind: "action", surfaceId: "s2", summary: "action confirm · {}" })).toBe("confirm · {}");
+    expect(wireDetail({ kind: "error", surfaceId: "", summary: "rejected · bad envelope" })).toBe("rejected · bad envelope");
+  });
+  test("does not cut a longer surface id that shares a prefix", () => {
+    expect(wireDetail({ kind: "createSurface", surfaceId: "s1", summary: "createSurface s12" })).toBe("s12");
   });
 });
 

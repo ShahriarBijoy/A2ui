@@ -30,10 +30,10 @@ export function BrickPool({ pool }: { pool: PoolState }) {
         </h2>
         <span className="font-mono text-[0.6875rem] tabular-nums text-muted-foreground">{BRICKS.length}</span>
       </header>
-      <div className="min-h-0 flex-1 overflow-y-auto px-3 pb-3">
+      <div className="min-h-0 flex-1 overflow-y-auto px-2.5 pb-3">
         {GROUPS.map(({ group, label }) => (
-          <div key={group} className="mb-4 last:mb-0">
-            <h3 className="mb-1.5 px-1 font-mono text-[0.625rem] uppercase tracking-[0.16em] text-muted-foreground/80">
+          <div key={group} className="mb-3 last:mb-0">
+            <h3 className="mb-1 px-1 font-mono text-[0.625rem] uppercase tracking-[0.16em] text-muted-foreground/80">
               {label}
               {group === "custom" && <span className="normal-case tracking-normal"> · Brick Box</span>}
             </h3>
@@ -62,13 +62,12 @@ function Tile({ def, state, count }: { def: BrickDef; state: TileState; count: n
       title={def.purpose}
       aria-label={`${def.poolLabel}: ${state}${count ? `, used ${count} times` : ""}`}
       className={cn(
-        "flex h-9 min-w-0 items-center gap-1 rounded-md border px-2 text-[0.8125rem] leading-none",
+        "flex h-9 min-w-0 items-center gap-1 rounded-md border pr-1.5 pl-2 text-[0.8rem] leading-none",
         "transition-colors duration-150 motion-reduce:transition-none",
         TILE[state],
       )}
     >
       <span className="min-w-0 flex-1 truncate">{def.poolLabel}</span>
-      {def.custom && <span aria-hidden className="size-1 shrink-0 rotate-45 bg-current opacity-45" />}
       <span className="w-[2ch] shrink-0 text-right font-mono text-[0.6875rem] tabular-nums">{count > 0 ? count : ""}</span>
     </li>
   );

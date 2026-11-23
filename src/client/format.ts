@@ -94,8 +94,8 @@ export function chipParts(item: AgentItem): ChipPart[] {
   if (usage) {
     parts.push({ key: "compose", text: `compose ${formatSeconds(usage.compose_ms)}`, tone: "muted" });
   } else if (finished && !llmCalled) {
-    // The talk points at this: an answered turn with no LLM behind it.
-    parts.push({ key: "compose", text: "compose –", tone: "strong" });
+    // The talk points at this on a patch turn: answered with no LLM behind it. Elsewhere (abort, error) it is just absent.
+    parts.push({ key: "compose", text: "compose –", tone: route?.decision === "patch" ? "strong" : "muted" });
   } else if (!finished) {
     parts.push({ key: "compose", text: "compose …", tone: "muted" });
   }
@@ -187,6 +187,22 @@ export function pickInteractiveSurface(
 
 // ── Wire log ─────────────────────────────────────────────────────────────────
 export type WireCounts = { messages: number; actions: number; refused: number };
+
+/**
+ * The wire row's second line: the store's summary without the "<kind> <surfaceId>" the first line already shows.
+ * "updateDataModel s2 /booking/guests = 6" → "/booking/guests = 6".
+ */
+export function wireDetail(entry: Pick<WireEntry, "kind" | "surfaceId" | "summary">): string {
+  const { kind, surfaceId, summary } = entry;
+  let rest = summary;
+  for (const prefix of [`${kind} ${surfaceId}`, kind]) {
+    if (prefix && (rest === prefix || rest.startsWith(`${prefix} `))) {
+      rest = rest.slice(prefix.length);
+      break;
+    }
+  }
+  return rest.replace(/^\s*(·\s*)?/, "");
+}
 
 export function wireCounts(wire: readonly WireEntry[]): WireCounts {
   let messages = 0;
