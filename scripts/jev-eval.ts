@@ -9,9 +9,10 @@ import type { CatalogComponent, JsonValue } from "../src/shared/a2ui";
 import { buildRouteRequest, deriveKnobs } from "../src/shared/knobs";
 import type { JevAnswers } from "../src/shared/knobs";
 import type { Knob, RouteResult, TurnRequest } from "../src/shared/protocol";
-import { decide } from "../src/worker/jev";
+import { decide, warmJev } from "../src/worker/jev";
 import type { JevEnv } from "../src/worker/jev";
 import { predictBricks } from "../src/worker/predict";
+import { BRICKS } from "../src/shared/catalog";
 import { route } from "../src/worker/router";
 
 function devVar(name: string): string | undefined {
@@ -132,11 +133,16 @@ async function runLine(components: CatalogComponent[], data: JsonValue, text: st
   console.log("       " + detail(knobs, lastBody?.answers) + (r.inputTokens ? " | in " + r.inputTokens + " tok" : ""));
 }
 
-// ── warm-up (cold number, reported separately) ───────────────────────────────
+// ── warm-up via warmJev (cold number, reported separately) ─────────────────────
 {
-  const t0 = Date.now();
-  await decide(env, { text: "hello" }, { q: { type: "noul", instructions: "Is this a greeting?" } }, { timeoutMs: 5000 });
-  console.log("warm-up (cold connection): " + (Date.now() - t0) + " ms\n");
+  const cold = await warmJev(env);
+  const { req } = turn(
+    [{ id: "g", component: "Stepper", label: "Guests", min: 1, max: 12, value: { "@path": "/g" } }],
+    { g: 4 },
+    "make it five",
+  );
+  const first = await route(req, env);
+  console.log("warmJev (cold connection, GET /v1/models): " + cold + " ms; first route() after it: " + first.ms + " ms (" + first.decision + ")\n");
 }
 
 // ── 1. Dinner screen ─────────────────────────────────────────────────────────
@@ -159,7 +165,7 @@ const dinnerLines: [string, Expect][] = [
   ["make it eight people", { patches: { [G]: [8] } }],
   ["at nine pm please", { patches: { [T]: [["21:00"]] } }],
   ["two more people", { patches: { [G]: [6] } }],
-  ["just the two of us, a bit earlier", { patches: { [G]: [2], [T]: [["18:00"], ["18:30"]] } }],
+  ["just the two of us, a bit earlier", { patches: { [G]: [2], [T]: [["18:00"]] } }],
   ["can we do half past seven", { patches: { [T]: [["19:30"]] } }],
   ["book it", { compose: true }],
   ["what about Italian?", { compose: true }],
@@ -208,6 +214,7 @@ const sentence = "I need to book a flight and choose my seat";
 const words = sentence.split(" ");
 const prefixes = [3, 5, 7, words.length].map((n) => words.slice(0, n).join(" "));
 const predictMs: number[] = [];
+const LAYOUT = new Set<string>(BRICKS.filter((b) => b.group === "layout").map((b) => b.name));
 console.log("\n3. Brick prediction (3 rounds per prefix)");
 await predictBricks("warm up", env);
 for (let round = 0; round < 3; round++) {
@@ -216,10 +223,11 @@ for (let round = 0; round < 3; round++) {
     predictMs.push(r.ms);
     if (round > 0) continue;
     const b = r.bricks;
-    const on = Object.entries(b)
+    const onList = Object.entries(b)
       .filter(([, v]) => (v ?? 0) >= 0.6)
-      .map(([k]) => k)
-      .join(", ");
+      .map(([k]) => k);
+    const nonLayout = onList.filter((n) => !LAYOUT.has(n)).length;
+    const on = onList.length + " (" + nonLayout + " non-layout): " + onList.join(", ");
     console.log(
       JSON.stringify(p).padEnd(46) + " SeatMap " + (b.SeatMap ?? 0).toFixed(2) + "  OptionCard " + (b.OptionCard ?? 0).toFixed(2) +
         "  DateTimeInput " + (b.DateTimeInput ?? 0).toFixed(2) + "  " + String(r.ms).padStart(4) + " ms  ≥0.6: " + (on || "none") + "  (" + r.engine + ")",
@@ -270,7 +278,12 @@ const fullKnobs: Knob[] = windowKnobs.map((k) => {
   const options = [];
   for (let m = 0; m < 1440; m += 30) {
     const hh = String(Math.floor(m / 60)).padStart(2, "0") + ":" + String(m % 60).padStart(2, "0");
-    if (hh !== "19:00") options.push({ key: hh, label: hh, value: hh });
+    const diff = m - 19 * 60;
+    const abs = Math.abs(diff);
+    const h = Math.floor(abs / 60);
+    const mm = abs % 60;
+    const rel = (h && mm ? h + " h " + mm + " min" : h ? h + " h" : mm + " min") + (diff > 0 ? " later" : " earlier");
+    if (hh !== "19:00") options.push({ key: hh, label: hh + " (" + rel + ")", value: hh });
   }
   return { ...k, options };
 });
@@ -288,4 +301,25 @@ for (const [name, knobs] of [["window", windowKnobs], ["full", fullKnobs]] as co
   console.log(name.padEnd(7) + String(opts).padStart(3) + " options  median " + median(ms) + " ms  " + summary);
 }
 
+// ── 6. SeatMap, through route() ──────────────────────────────────────────────
+const seatMap: CatalogComponent[] = [
+  {
+    id: "seat",
+    component: "SeatMap",
+    rows: 30,
+    layout: "ABC DEF",
+    taken: ["1A", "1B", "3C", "5F", "7D", "10A", "12A", "12B", "14E", "20C"],
+    value: { "@path": "/seat" },
+  },
+];
+console.log("\n6. SeatMap 30 x ABC DEF, 10 taken, no seat selected");
+const seatLines: [string, Expect][] = [
+  ["seat 12C please", { patches: { "/seat": ["12C"] } }],
+  ["a window seat", { compose: true }],
+  ["book it", { compose: true }],
+];
+for (const [text, exp] of seatLines) await runLine(seatMap, { seat: "" }, text, exp);
+
 globalThis.fetch = realFetch;
+console.log("\nroute failures (all sections): " + fails);
+if (fails > 0) process.exit(1);

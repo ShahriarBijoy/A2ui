@@ -8,8 +8,13 @@ afterEach(() => {
   globalThis.fetch = realFetch;
 });
 
+let calls = 0;
 function mockFetch(handler: (init: RequestInit) => Promise<Response>) {
-  globalThis.fetch = mock((_url: string | URL | Request, init?: RequestInit) => handler(init ?? {})) as unknown as typeof fetch;
+  calls = 0;
+  globalThis.fetch = mock((_url: string | URL | Request, init?: RequestInit) => {
+    calls++;
+    return handler(init ?? {});
+  }) as unknown as typeof fetch;
 }
 
 describe("predictBricks", () => {
@@ -29,7 +34,7 @@ describe("predictBricks", () => {
     expect(Object.keys(q)).toEqual([...BRICK_NAMES]);
     expect(q.SeatMap.type).toBe("noul");
     expect(q.SeatMap.instructions).toBe(
-      "Will a good screen for this request need a seat map to choose a seat on a plane, train or venue (the `SeatMap` component)?",
+      "Is a seat map to choose a seat on a plane, train or venue (the `SeatMap` component) one of the few components this request is really about?",
     );
     expect(sent!.state).toEqual({
       app: "An agent builds a screen from components for the request.",
@@ -53,6 +58,17 @@ describe("predictBricks", () => {
   test("empty text → no request", async () => {
     mockFetch(() => Promise.reject(new Error("should not be called")));
     const r = await predictBricks("   ", env);
-    expect(r.bricks).toEqual({});
+    expect(r).toEqual({ bricks: {}, ms: 0, engine: "skipped: empty text" });
+    expect(calls).toBe(0);
+  });
+
+  test("timeout after 1500 ms → empty bricks", async () => {
+    mockFetch(
+      (init) =>
+        new Promise((_, reject) => init.signal?.addEventListener("abort", () => reject(new DOMException("aborted", "AbortError")))),
+    );
+    const r = await predictBricks("book a flight", env);
+    expect(r).toMatchObject({ bricks: {}, engine: "error: timeout" });
+    expect(r.ms).toBeGreaterThanOrEqual(1490);
   });
 });
