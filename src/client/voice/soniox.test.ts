@@ -123,6 +123,46 @@ describe("push to talk", () => {
     expect(t.state.transcript.listening).toBe(true);
   });
 
+  const speak = (text: string, holdMs = 500) => {
+    const t = setup();
+    t.ctl.keyDown();
+    t.handle.connected = true;
+    t.cb().onConnected();
+    t.clock.advance(holdMs);
+    if (text) t.cb().onTokens([f(text)]);
+    t.ctl.keyUp();
+    t.clock.advance(200);
+    t.cb().onFinalized();
+    return t;
+  };
+
+  test("a tap with no speech sends nothing and shows no notice", () => {
+    const t = speak("", 100);
+    expect(t.turns).toEqual([]);
+    expect(t.state.transcript.error).toBeUndefined();
+    expect(t.state.transcript.final).toBe("");
+  });
+
+  test("a fragment like I' is dropped with a short-lived notice", () => {
+    const t = speak("I'");
+    expect(t.turns).toEqual([]);
+    expect(t.state.transcript.error).toBe("Didn't catch that");
+    t.clock.advance(1500);
+    expect(t.state.transcript.error).toBeUndefined();
+  });
+
+  test("fillers are dropped, short answers and digits pass", () => {
+    expect(speak("uh").turns).toEqual([]);
+    expect(speak("äh").turns).toEqual([]);
+    expect(speak("Yes").turns).toEqual(["Yes"]);
+    expect(speak("6").turns).toEqual(["6"]);
+    expect(speak("Nein.").turns).toEqual(["Nein."]);
+  });
+
+  test("a normal sentence is sent", () => {
+    expect(speak("Book a table for four").turns).toEqual(["Book a table for four"]);
+  });
+
   test("a silent press sends nothing", () => {
     const t = setup();
     t.ctl.keyDown();

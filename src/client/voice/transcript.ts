@@ -12,6 +12,21 @@ export function isControlToken(text: string): boolean {
   return CONTROL_TOKEN.test(text);
 }
 
+const SHORT_ANSWERS = new Set(["yes", "no", "ok", "ja", "nein", "nö", "yep", "nope"]);
+
+/** Guards against fragments ("I'", "uh") becoming turns while short real answers ("yes", "6") still pass. */
+export function isMeaningfulUtterance(text: string): boolean {
+  const words = text
+    .toLowerCase()
+    .split(/\s+/)
+    .map((w) => w.replace(/[^\p{L}\p{N}]/gu, ""))
+    .filter((w) => w !== "" && !isControlToken(w));
+  if (words.length === 0) return false;
+  if (words.length > 1) return true;
+  const w = words[0]!;
+  return /^\d+$/.test(w) || SHORT_ANSWERS.has(w) || w.length > 2;
+}
+
 /** Injected so tests can run a fake clock. */
 export type Timers = { set: (fn: () => void, ms: number) => unknown; clear: (handle: unknown) => void };
 export const realTimers: Timers = {

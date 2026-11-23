@@ -18,7 +18,7 @@ import type { SonioxKeyResponse } from "../../shared/protocol";
 import type { StoreApi, UserItem } from "../state";
 import type { PredictScheduler } from "./predictClient";
 import { TappedMicrophoneSource } from "./micTap";
-import { realTimers, TranscriptAssembler, type Timers, type TokenLike } from "./transcript";
+import { isMeaningfulUtterance, realTimers, TranscriptAssembler, type Timers, type TokenLike } from "./transcript";
 
 export const SONIOX_MODEL = "stt-rt-v6";
 export const LANGUAGE_HINTS = ["en", "de"];
@@ -29,6 +29,10 @@ export const FINALIZE_WAIT_MS = 700;
 /** Safety net when the socket never opens (offline, key rejected silently). */
 export const CONNECT_GIVE_UP_MS = 4000;
 const KEY_MARGIN_MS = 30_000;
+/** Below this hold time with no words, a press is an accidental tap and is cancelled quietly. */
+export const MIN_HOLD_MS = 250;
+export const DROPPED_NOTICE = "Didn't catch that";
+const NOTICE_MS = 1500;
 
 /** Error with a message that is already fit for the status line. */
 export class VoiceError extends Error {}
@@ -255,6 +259,7 @@ type Session = {
   timerHandles: unknown[];
   timing: VoiceTiming;
   pressedAt: number;
+  releasedAt: number | null;
 };
 
 export type VoiceController = {
@@ -301,6 +306,7 @@ export function createVoiceController(deps: VoiceDeps): VoiceController {
       timerHandles: [],
       timing: { connectMs: null, firstTokenMs: null },
       pressedAt: now(),
+      releasedAt: null,
     };
     timings.push(s.timing);
     s.handle = deps.start(
@@ -322,7 +328,7 @@ export function createVoiceController(deps: VoiceDeps): VoiceController {
           predictor.cancel();
           s.needClearPredicted = true;
           store.setTranscript({ final: "", interim: "" });
-          if (text) send(text);
+          if (text && isMeaningfulUtterance(text)) send(text);
         },
         onFinalized: () => {
           if (s.done || current !== s || s.handsFree || !s.finalizing) return;
@@ -380,11 +386,28 @@ export function createVoiceController(deps: VoiceDeps): VoiceController {
     // Also reached when a new press preempts the trailing window or the cap fires before every token is final:
     // interim words are better than dropping speech.
     const text = s.asm.fullText();
+    const heldMs = s.releasedAt === null ? Infinity : s.releasedAt - s.pressedAt;
     end(s);
     phase = "idle";
-    store.setTranscript({ final: text, interim: "", listening: false });
-    if (text) send(text);
+    if (text && isMeaningfulUtterance(text)) {
+      store.setTranscript({ final: text, interim: "", listening: false });
+      send(text);
+    } else if (text === "" && heldMs < MIN_HOLD_MS) {
+      store.setTranscript({ final: "", interim: "", listening: false });
+    } else {
+      showDropped();
+    }
     syncHandsFree();
+  };
+
+  let noticeTimer: unknown = null;
+  const showDropped = () => {
+    store.setTranscript({ final: "", interim: "", listening: false, error: DROPPED_NOTICE });
+    if (noticeTimer !== null) timers.clear(noticeTimer);
+    noticeTimer = timers.set(() => {
+      noticeTimer = null;
+      if (store.getState().transcript.error === DROPPED_NOTICE) store.setTranscript({ error: undefined });
+    }, NOTICE_MS);
   };
 
   const keyDown = () => {
@@ -402,6 +425,7 @@ export function createVoiceController(deps: VoiceDeps): VoiceController {
     const s = current;
     if (phase !== "held" || !s) return;
     phase = "draining";
+    s.releasedAt = now();
     // Safety net for a socket that never opens.
     later(s, () => {
       if (s.done) return;
@@ -437,6 +461,7 @@ export function createVoiceController(deps: VoiceDeps): VoiceController {
     dispose: () => {
       disposed = true;
       if (current && !current.done) end(current);
+      if (noticeTimer !== null) timers.clear(noticeTimer);
       phase = "idle";
     },
   };
