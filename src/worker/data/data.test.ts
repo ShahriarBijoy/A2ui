@@ -116,15 +116,15 @@ describe("flights", () => {
 });
 
 describe("resolveData", () => {
-  test("places", () => {
-    const res = resolveData({ source: "places", args: { kind: "vegan" } }, defaults);
-    expect(res.ok && res.source === "places" && res.records[0].kind).toBe("vegan");
+  test("places is no longer a data-line source (live search replaced it)", () => {
+    expect(resolveData({ source: "places", args: { kind: "vegan" } }, defaults)).toEqual({ ok: false, error: 'source "places" was removed: use "search"' });
   });
 
   test("flights with defaults for from and date", () => {
     const res = resolveData({ source: "flights", args: { to: "New York" } }, defaults);
     if (!res.ok || res.source !== "flights") throw new Error("expected flights");
     expect(res.records).toEqual(generateFlights("Bremen", "New York", "2026-11-24"));
+    expect(res.query).toBe("Bremen → New York 2026-11-24");
   });
 
   test("flights accepts a date-time and falls back on a bad date", () => {

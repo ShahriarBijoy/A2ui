@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import type { Knob, RouteResult, TurnEvent, TurnRequest } from "@shared/protocol";
 import type { Llm, LlmUsage, Prompt, TextStream, WidgetsReply } from "./claude";
+import type { SearchOutcome, SearchRequest } from "./search";
 import { COMPOSER_RETRY_NOTE } from "./prompts";
 import { encodeEvent, parseTurnRequest, patchCaption, runTurn, SSE_HEADERS, sseResponse, widgetEvent, type TurnDeps } from "./turn";
 import { generateFlights } from "./data/flights";
@@ -226,7 +227,7 @@ describe("runTurn: patch path", () => {
 describe("runTurn: compose path (a2ui)", () => {
   const lines = [
     '{"a2ui":{"version":"1.0","createSurface":{"surfaceId":"s3","catalogId":"brick-box/v1"}}}',
-    '{"data":{"source":"places","args":{"max_walk_min":15},"into":"/places"}}',
+    '{"data":{"source":"flights","args":{"to":"Oslo"},"into":"/flights"}}',
     "Sure! Here is your screen:",
     '{"a2ui":{"version":"1.0","updateComponents":{"surfaceId":"s3","components":[{"id":"root","component":"Card","child":"list"}]}}}',
     "```",
@@ -237,20 +238,20 @@ describe("runTurn: compose path (a2ui)", () => {
   // Split mid-line on purpose.
   const chunks = [text.slice(0, 37), text.slice(37, 150), text.slice(150, 151), text.slice(151)];
 
-  test("emits a2ui/data/caption/usage/done in order; counts skipped lines; measures timings", async () => {
+  test("emits a2ui/data/fetch/caption/usage/done in order; counts skipped lines; measures timings", async () => {
     const llm = fakeLlm(chunks);
     const events = await collect(request({ decision: false, surface: null }), deps({ llm }));
-    expect(events.map((e) => e.type)).toEqual(["a2ui", "a2ui", "a2ui", "caption", "usage", "done"]);
-    const [create, data, comps] = events as Extract<TurnEvent, { type: "a2ui" }>[];
+    expect(events.map((e) => e.type)).toEqual(["a2ui", "a2ui", "fetch", "a2ui", "caption", "usage", "done"]);
+    const [create, data, comps] = events.filter((e) => e.type === "a2ui") as Extract<TurnEvent, { type: "a2ui" }>[];
     expect(create.origin).toBe("llm");
     // A mangled catalog id is replaced with the real one.
     expect(create.msg).toEqual({ version: "1.0", createSurface: { surfaceId: "s3", catalogId: ctx.catalogId } });
     expect(data.origin).toBe("data");
-    expect(data.msg).toMatchObject({ updateDataModel: { surfaceId: "s3", path: "/places" } });
-    const records = (data.msg as unknown as { updateDataModel: { value: { walk_min: number }[] } }).updateDataModel.value;
-    expect(records.length).toBeGreaterThanOrEqual(2);
+    expect(data.msg).toEqual({ version: "1.0", updateDataModel: { surfaceId: "s3", path: "/flights", value: generateFlights("Bremen", "Oslo", "2026-11-24") } });
+    // Demo sources get a fetch event too, right after their data.
+    expect(events[2]).toMatchObject({ type: "fetch", source: "flights", query: "Bremen → Oslo 2026-11-24", ok: true, records: 4 });
     expect(comps.origin).toBe("llm");
-    const u = events[4] as Extract<TurnEvent, { type: "usage" }>;
+    const u = events[5] as Extract<TurnEvent, { type: "usage" }>;
     expect(u).toMatchObject({ model: "fake-model", input_tokens: 10, output_tokens: 20, cache_read_tokens: 5, skipped_lines: 2 });
     expect(u.first_ui_ms).toBeGreaterThan(0);
     expect(u.compose_ms).toBeGreaterThanOrEqual(u.first_ui_ms!);
@@ -281,6 +282,7 @@ describe("runTurn: compose path (a2ui)", () => {
     expect(events.map((e) => (e.type === "a2ui" ? `${e.origin}:${Object.keys(e.msg)[1]}:${(Object.values(e.msg)[1] as { surfaceId: string }).surfaceId}` : e.type))).toEqual([
       "llm:createSurface:s3",
       "data:updateDataModel:s3",
+      "fetch",
       "llm:updateComponents:s3",
       "caption",
       "usage",
@@ -289,12 +291,12 @@ describe("runTurn: compose path (a2ui)", () => {
   });
 
   test("a held data line follows the surface of the next message, or the fallback at the end", async () => {
-    const data = '{"data":{"source":"places","args":{},"into":"/places"}}';
+    const data = '{"data":{"source":"flights","args":{"to":"Oslo"},"into":"/flights"}}';
     const comps = '{"a2ui":{"version":"1.0","updateComponents":{"surfaceId":"s9","components":[]}}}';
     const a = await collect(request({ decision: false }), deps({ llm: fakeLlm([`${data}\n${comps}\n`]) }));
     expect(a[0]).toMatchObject({ origin: "data", msg: { updateDataModel: { surfaceId: "s9" } } });
     const b = await collect(request({ decision: false }), deps({ llm: fakeLlm([`${data}\n{"caption":"x"}\n`]) }));
-    expect(b.map((e) => e.type)).toEqual(["a2ui", "caption", "usage", "done"]);
+    expect(b.map((e) => e.type)).toEqual(["a2ui", "fetch", "caption", "usage", "done"]);
     expect(b[0]).toMatchObject({ msg: { updateDataModel: { surfaceId: "s2" } } });
   });
 
@@ -400,6 +402,229 @@ describe("runTurn: stop reasons, repairs, captions", () => {
     const events = await collect(request({ decision: false }), deps({ llm: fakeLlm([`{"caption":"early"}\n${create}\n{"caption":"late"}\n`]) }));
     expect(events.filter((e) => e.type === "caption")).toEqual([{ type: "caption", text: "late" }]);
     expect(events.map((e) => e.type)).toEqual(["a2ui", "caption", "usage", "done"]);
+  });
+});
+
+describe("runTurn: live search data lines", () => {
+  const CREATE = '{"a2ui":{"version":"1.0","createSurface":{"surfaceId":"s3","catalogId":"http://test/catalog/brick-box/v1"}}}';
+  const ROOT = '{"a2ui":{"version":"1.0","updateComponents":{"surfaceId":"s3","components":[{"id":"root","component":"List","children":{"path":"/results","componentId":"item"}}]}}}';
+  const QUERY = "concerts in Hamburg December 2026";
+  const SEARCH = `{"data":{"source":"search","args":{"query":"${QUERY}","fields":["name","subtitle","id"],"max":9},"into":"/results"}}`;
+  const items = (n: number) => Array.from({ length: n }, (_, i) => ({ id: `r${i + 1}`, name: `Item ${i + 1}`, subtitle: null, source: `https://example.org/${i}` }));
+  const found = (n: number): SearchOutcome => ({
+    ok: true,
+    records: items(n),
+    dropped: 0,
+    searches: 1,
+    inputTokens: 15000,
+    outputTokens: 800,
+  });
+  const label = (e: TurnEvent) => (e.type === "a2ui" ? `${e.origin}:${Object.keys(e.msg)[1]}` : e.type);
+  function deferred<T>() {
+    let resolve!: (v: T) => void;
+    const promise = new Promise<T>((r) => (resolve = r));
+    return { promise, resolve };
+  }
+  const valueOf = (e: TurnEvent | undefined) => (e as { msg: { updateDataModel: { surfaceId: string; path: string; value: unknown } } }).msg.updateDataModel;
+
+  test("the search starts as soon as its line parses, runs beside the stream, and done waits for it", async () => {
+    const log: string[] = [];
+    const started = deferred<void>();
+    const answer = deferred<SearchOutcome>();
+    const llm: Llm = {
+      streamText() {
+        return {
+          async *[Symbol.asyncIterator]() {
+            yield `${CREATE}\n${ROOT}\n${SEARCH}\n`;
+            // The stream cannot go on until the search has started: proof of the parallel start.
+            await started.promise;
+            log.push("stream: more lines");
+            yield '{"caption":"Concerts"}\n';
+            log.push("stream: end");
+          },
+          async result() {
+            return { usage, stopReason: "end_turn" };
+          },
+          abort() {},
+        };
+      },
+      async callTools() {
+        throw new Error("unused");
+      },
+    };
+    let seen: SearchRequest | null = null;
+    const search = async (r: SearchRequest) => {
+      seen = r;
+      log.push("search: start");
+      started.resolve();
+      return answer.promise;
+    };
+    const events: TurnEvent[] = [];
+    await runTurn(request({ decision: false }), deps({ llm, search }), (ev) => {
+      events.push(ev);
+      // The search answers only after the compose stream has finished.
+      if (ev.type === "usage") setTimeout(() => answer.resolve(found(2)), 5);
+    });
+    expect(log).toEqual(["search: start", "stream: more lines", "stream: end"]);
+    // id is server-owned, so it is not asked for; max is capped.
+    expect(seen!).toEqual({ query: QUERY, fields: ["name", "subtitle"], max: 6 });
+    expect(events.map(label)).toEqual(["llm:createSurface", "llm:updateComponents", "caption", "usage", "data:updateDataModel", "fetch", "done"]);
+    expect(valueOf(events[4])).toEqual({ surfaceId: "s3", path: "/results", value: items(2) });
+    const f = events[5] as Extract<TurnEvent, { type: "fetch" }>;
+    expect(f).toMatchObject({ type: "fetch", source: "search", query: QUERY, ok: true, records: 2, searches: 1, input_tokens: 15000, output_tokens: 800 });
+    expect(f.ms).toBeGreaterThan(0);
+    expect(f.error).toBeUndefined();
+  });
+
+  test("a search past its budget: [] then fetch ok:false, the request is cancelled, then done", async () => {
+    const warnings: string[] = [];
+    let cancelled = false;
+    const search = (_r: SearchRequest, signal: AbortSignal) => {
+      signal.addEventListener("abort", () => (cancelled = true));
+      return new Promise<SearchOutcome>(() => {});
+    };
+    const llm = fakeLlm([`${CREATE}\n${ROOT}\n${SEARCH}\n{"caption":"x"}\n`]);
+    const events = await collect(request({ decision: false }), deps({ llm, search, fetchTimeoutMs: 30, warn: (m) => void warnings.push(m) }));
+    expect(events.map(label)).toEqual(["llm:createSurface", "llm:updateComponents", "caption", "usage", "data:updateDataModel", "fetch", "done"]);
+    expect(valueOf(events[4]).value).toEqual([]);
+    expect(events[5]).toEqual({ type: "fetch", source: "search", query: QUERY, ok: false, records: 0, ms: expect.any(Number), error: "timed out after 30 ms" });
+    expect(cancelled).toBe(true);
+    expect(warnings).toEqual([`search failed (timed out after 30 ms): ${QUERY}`]);
+  });
+
+  test("the turn budget caps a fetch below its own timeout", async () => {
+    const llm = fakeLlm([`${CREATE}\n${SEARCH}\n`]);
+    const t0 = performance.now();
+    const events = await collect(
+      request({ decision: false }),
+      deps({ llm, search: () => new Promise<SearchOutcome>(() => {}), now: () => performance.now(), fetchTimeoutMs: 10_000, turnBudgetMs: 60 }),
+    );
+    expect(performance.now() - t0).toBeLessThan(1000);
+    expect(events.find((e) => e.type === "fetch")).toMatchObject({ ok: false, error: expect.stringMatching(/^timed out after \d+ ms$/) });
+  });
+
+  test("a failed search delivers [] with its measured tokens and error", async () => {
+    const failed: SearchOutcome = { ok: false, error: "no web search was made", searches: 0, inputTokens: 900, outputTokens: 40 };
+    const events = await collect(request({ decision: false }), deps({ llm: fakeLlm([`${CREATE}\n${SEARCH}\n`]), search: async () => failed }));
+    expect(valueOf(events.find((e) => e.type === "a2ui" && e.origin === "data")).value).toEqual([]);
+    expect(events.find((e) => e.type === "fetch")).toEqual({
+      type: "fetch",
+      source: "search",
+      query: QUERY,
+      ok: false,
+      records: 0,
+      ms: expect.any(Number),
+      searches: 0,
+      input_tokens: 900,
+      output_tokens: 40,
+      error: "no web search was made",
+    });
+    expect(events.at(-1)).toEqual({ type: "done" });
+  });
+
+  test("a throwing search and a missing search dep both fail visibly", async () => {
+    const a = await collect(
+      request({ decision: false }),
+      deps({
+        llm: fakeLlm([`${CREATE}\n${SEARCH}\n`]),
+        search: async () => {
+          throw new Error("socket hang up");
+        },
+      }),
+    );
+    expect(a.find((e) => e.type === "fetch")).toMatchObject({ ok: false, error: "Fetch failed: socket hang up" });
+    const b = await collect(request({ decision: false }), deps({ llm: fakeLlm([`${CREATE}\n${SEARCH}\n`]) }));
+    expect(b.find((e) => e.type === "fetch")).toMatchObject({ ok: false, error: "live search is not configured" });
+  });
+
+  test("a search line without a query is skipped and counted, no fetch", async () => {
+    const line = '{"data":{"source":"search","args":{"fields":["name"]},"into":"/results"}}';
+    let called = false;
+    const events = await collect(
+      request({ decision: false }),
+      deps({
+        llm: fakeLlm([`${CREATE}\n${line}\n`]),
+        search: async () => {
+          called = true;
+          return found(1);
+        },
+      }),
+    );
+    expect(called).toBe(false);
+    expect(events.some((e) => e.type === "fetch")).toBe(false);
+    expect(events.find((e) => e.type === "usage")).toMatchObject({ skipped_lines: 1 });
+  });
+
+  test("a result that arrives before createSurface waits for it, then data and fetch follow", async () => {
+    const llm: Llm = {
+      streamText() {
+        return {
+          async *[Symbol.asyncIterator]() {
+            yield `${SEARCH}\n`;
+            await new Promise((r) => setTimeout(r, 20));
+            yield `${CREATE}\n${ROOT}\n{"caption":"x"}\n`;
+          },
+          async result() {
+            return { usage, stopReason: "end_turn" };
+          },
+          abort() {},
+        };
+      },
+      async callTools() {
+        throw new Error("unused");
+      },
+    };
+    const events = await collect(request({ decision: false }), deps({ llm, search: async () => found(1) }));
+    expect(events.map(label)).toEqual(["llm:createSurface", "data:updateDataModel", "fetch", "llm:updateComponents", "caption", "usage", "done"]);
+    expect(valueOf(events[1]).surfaceId).toBe("s3");
+  });
+
+  test("search data is not the first UI: a search-only answer is retried, and the repeated line reuses the search", async () => {
+    const answers = [`${SEARCH}\n{"caption":"x"}\n`, `${CREATE}\n${SEARCH}\n${ROOT}\n{"caption":"y"}\n`];
+    const prompts: Prompt[] = [];
+    const llm: Llm = {
+      streamText(p) {
+        prompts.push(p);
+        return fakeStream([answers[prompts.length - 1]]);
+      },
+      async callTools() {
+        throw new Error("unused");
+      },
+    };
+    let calls = 0;
+    const search = async () => {
+      calls++;
+      return found(3);
+    };
+    const events = await collect(request({ decision: false }), deps({ llm, search }));
+    expect(prompts).toHaveLength(2);
+    expect(calls).toBe(1);
+    expect(events.filter((e) => e.type === "fetch")).toHaveLength(1);
+    expect(events.find((e) => e.type === "usage")).toMatchObject({ first_ui_ms: expect.any(Number) });
+    expect(events.at(-1)).toEqual({ type: "done" });
+  });
+
+  test("the compose timeout does not cut a running search: error, then the data, then done", async () => {
+    const llm = fakeLlm([`${CREATE}\n${SEARCH}\n`], { hang: true });
+    const search = () => new Promise<SearchOutcome>((r) => setTimeout(() => r(found(2)), 60));
+    const events = await collect(request({ decision: false }), deps({ llm, search, composeTimeoutMs: 30 }));
+    expect(events.map(label)).toEqual(["llm:createSurface", "error", "data:updateDataModel", "fetch", "done"]);
+    expect(events[1]).toEqual({ type: "error", message: "The composer took too long" });
+    expect(events[3]).toMatchObject({ ok: true, records: 2 });
+  });
+
+  test("the client going away cancels running searches and ends with done only", async () => {
+    const ctl = new AbortController();
+    let signal: AbortSignal | null = null;
+    const search = (_r: SearchRequest, s: AbortSignal) => {
+      signal = s;
+      return new Promise<SearchOutcome>(() => {});
+    };
+    const p = collect(request({ decision: false }), deps({ llm: fakeLlm([`${CREATE}\n${SEARCH}\n{"caption":"x"}\n`]), search }), ctl.signal);
+    setTimeout(() => ctl.abort(), 20);
+    const events = await p;
+    expect(events.map(label)).toEqual(["llm:createSurface", "caption", "usage", "done"]);
+    expect(signal!.aborted).toBe(true);
   });
 });
 

@@ -41,6 +41,28 @@ describe("composer prompt", () => {
     for (const l of jsonLines) expect(() => JSON.parse(l)).not.toThrow();
   });
 
+  test("DATA asks for live search, never fixed places; its example lines are valid JSON", () => {
+    const data = COMPOSER_SYSTEM_PROMPT.slice(COMPOSER_SYSTEM_PROMPT.indexOf("\nDATA\n"), COMPOSER_SYSTEM_PROMPT.indexOf("DESIGN RULES"));
+    expect(COMPOSER_SYSTEM_PROMPT).toContain('{"data": {"source":"search"|"flights"');
+    expect(data).toContain("search  args {query, fields, max?}");
+    expect(data).toContain("Never search for flights");
+    expect(COMPOSER_SYSTEM_PROMPT).not.toContain("places  args");
+    expect(COMPOSER_SYSTEM_PROMPT).not.toContain("walk_min");
+    const lines = data.split("\n").map((l) => l.trim()).filter((l) => l.startsWith("{"));
+    expect(lines.length).toBe(4);
+    for (const l of lines) expect(() => JSON.parse(l)).not.toThrow();
+    const search = JSON.parse(lines[0]);
+    expect(search.data).toMatchObject({ source: "search", into: "/results", args: { fields: ["name", "subtitle", "tags"] } });
+  });
+
+  test("the venue address goes into STATE only when configured", () => {
+    expect(JSON.parse(composerPrompt(req, ctx).user.split("\n")[1])).not.toHaveProperty("venue_address");
+    const withAddress = promptContext({ venue: "Venue", city: "Bremen", address: " Konsul-Smidt-Straße 8p ", catalogId: "c" });
+    expect(withAddress.address).toBe("Konsul-Smidt-Straße 8p");
+    expect(JSON.parse(composerPrompt(req, withAddress).user.split("\n")[1])).toMatchObject({ venue: "Venue", venue_address: "Konsul-Smidt-Straße 8p", city: "Bremen" });
+    expect(promptContext({ venue: "V", city: "C", address: "  ", catalogId: "c" })).not.toHaveProperty("address");
+  });
+
   test("STATE, THREAD and INPUT go in the user message; system is cached", () => {
     const p = composerPrompt(req, ctx);
     expect(p.system).toBe(COMPOSER_SYSTEM_PROMPT);

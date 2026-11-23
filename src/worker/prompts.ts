@@ -19,6 +19,8 @@ export type PromptContext = {
   tomorrowWeekday: string;
   venue: string;
   city: string;
+  /** Street address of the venue, when configured (VENUE_ADDRESS); "nearby" searches use it. */
+  address?: string;
   catalogId: string;
 };
 
@@ -26,7 +28,7 @@ export type PromptContext = {
 export const VENUE_TIME_ZONE = "Europe/Berlin";
 
 export function promptContext(
-  opts: { venue: string; city: string; catalogId: string },
+  opts: { venue: string; city: string; address?: string; catalogId: string },
   now: Date = new Date(),
   timeZone: string = VENUE_TIME_ZONE,
 ): PromptContext {
@@ -40,6 +42,7 @@ export function promptContext(
     tomorrowWeekday: weekdayName(tomorrowDate.getTime()),
     venue: opts.venue,
     city: opts.city,
+    ...(opts.address?.trim() ? { address: opts.address.trim() } : {}),
     catalogId: opts.catalogId,
   };
 }
@@ -83,7 +86,7 @@ OUTPUT
 JSONL: one complete JSON object per line. Nothing else: no prose, no markdown, no code fences,
 no blank lines, never one object spread over several lines. Each line is one of:
   {"a2ui": <A2UI message>}
-  {"data": {"source":"places"|"flights","args":{...},"into":"/pointer"}}
+  {"data": {"source":"search"|"flights","args":{...},"into":"/pointer"}}
   {"caption": "<max 12 words: what you built>"}      exactly one, last line
 
 A2UI MESSAGES (version "1.0")
@@ -100,12 +103,13 @@ Every answer has at least one a2ui line. A caption alone is never an answer.
 
 ORDER FOR A NEW STEP
 1. createSurface
-2. data lines, if the step shows places or flights
-3. updateComponents: the first message has "root" and the top containers, later messages the details,
-   3 to 8 components per message
-4. ONE updateDataModel with the initial values of all inputs, at the task namespace
+2. updateComponents with "root" and the top containers (with a List only if this step sends a data line,
+   and a data line only if every required arg is known)
+3. the data line, if the step shows real-world items (see DATA): early, because the search takes seconds
+4. updateComponents with the details: the List template alone in its message, 3 to 8 components per message
+5. ONE updateDataModel with the initial values of all inputs, at the task namespace
    (e.g. "path":"/booking","value":{"time":["19:00"],"guests":2})
-5. caption
+6. caption
 
 COMPONENTS (nothing else exists; any other type is refused)
 ${catalogPromptBlock()}
@@ -138,16 +142,34 @@ INPUTS AND VALUES
   ChoicePicker's options, re-send that ChoicePicker with the option added.
 
 DATA
-You do not know restaurants, flights, prices or times. Never write them yourself.
-Request them with a "data" line (literal args, no bindings) and bind a List template to its "into" path.
-Args without "?" are required. If the person has not given one, send no data line yet: ask for it
-with an input and a Button, and request the data after the tap. Never put a placeholder in an arg.
-  places  args {kind?, max_walk_min?}   item fields: id, name, kind, walk_min, price_level (1-4), tags, opens_until
-  flights args {from, to, date}          item fields: id, carrier, from, to, depart, arrive ("YYYY-MM-DDTHH:mm"), stops, price_eur
+You know no current real-world facts. Never write names of places, events, shops or products, addresses,
+opening hours, prices, event dates, ratings or distances yourself, not even as an example or a first guess.
+Request them with a "data" line (literal args, no bindings) and show them with a List template bound to
+its "into" path. The server fills the list with live web results a few seconds later; until then the
+list shows placeholders.
+Args without "?" are required, and "" counts as missing. If the person has not given one, this step has
+no data line and no List: ask for it with an input and a Button, and request the data after the tap.
+Never put a placeholder in an arg.
+  search  args {query, fields, max?}
+    query   one self-contained web search query in English with the place and the date from STATE:
+            for "nearby", the venue (STATE.venue, STATE.venue_address if given, STATE.city);
+            for events, the city and the month or date.
+    fields  the item fields your template reads, from: name, subtitle (one line of key facts),
+            tags (string array), detail (one sentence), price, date ("YYYY-MM-DD"), time ("HH:mm"),
+            hours, address, venue. Every item also has "id" and "source" (its web page).
+    max     3 to 5 (default 5)
+    into    a path of its own, outside the input namespace: "/results", "/events".
+  flights args {from, to, date}   all three required. Demo data, no live source (the UI marks it).
+            Never search for flights.
+    item fields: id, carrier, from, to, depart, arrive ("YYYY-MM-DDTHH:mm"), stops, price_eur
+A fact the web does not state arrives as null, and formatString shows null as nothing: bind each field
+on its own ({"@path":"subtitle"}), never join several fields in one formatString.
 Template pattern: a List whose children are {"path","componentId"}, and one OptionCard template whose
 relative paths read the item:
-  {"id":"list","component":"List","children":{"path":"/places","componentId":"place"}}
-  {"id":"place","component":"OptionCard","title":{"@path":"name"},"subtitle":{"@call":"formatString","args":{"value":"\${kind} · \${walk_min} min walk · until \${opens_until}"}},"tags":{"@path":"tags"},"action":{"event":{"name":"pick_place","context":{"id":{"@path":"id"},"name":{"@path":"name"}}}}}
+  {"data":{"source":"search","args":{"query":"bookshops open Saturday 2030-06-15 near Rua Augusta, Lisbon","fields":["name","subtitle","tags"],"max":5},"into":"/results"}}
+  {"id":"list","component":"List","children":{"path":"/results","componentId":"item"}}
+  {"id":"item","component":"OptionCard","title":{"@path":"name"},"subtitle":{"@path":"subtitle"},"tags":{"@path":"tags"},"action":{"event":{"name":"pick_shop","context":{"id":{"@path":"id"},"name":{"@path":"name"},"subtitle":{"@path":"subtitle"}}}}}
+One fact (tonight's weather, a ticket price) uses the same pattern with "max":1 and a Text template.
 Flights: the same pattern with into "/flights":
   {"id":"flight","component":"OptionCard","title":{"@path":"carrier"},"subtitle":{"@call":"formatDate","args":{"value":{"@path":"depart"},"format":"EEE d MMM, HH:mm"}},"price":{"@call":"formatCurrency","args":{"value":{"@path":"price_eur"},"currency":"EUR"}},"action":{"event":{"name":"pick_flight","context":{"id":{"@path":"id"},"carrier":{"@path":"carrier"},"depart":{"@path":"depart"},"arrive":{"@path":"arrive"},"price_eur":{"@path":"price_eur"}}}}}
 Send each OptionCard template in its own updateComponents message (short lines are safer).
@@ -201,6 +223,7 @@ export function composerPrompt(req: TurnRequest, ctx: PromptContext): Prompt {
     tomorrow: ctx.tomorrow,
     tomorrow_weekday: ctx.tomorrowWeekday,
     venue: ctx.venue,
+    ...(ctx.address ? { venue_address: ctx.address } : {}),
     city: ctx.city,
     catalog_id: ctx.catalogId,
     current_surface_id: req.surface?.id ?? null,

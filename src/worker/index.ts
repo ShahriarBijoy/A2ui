@@ -5,10 +5,11 @@
 import { Hono } from "hono";
 import { CATALOG_PATH, catalogJson } from "@shared/catalog";
 import { LIMITS } from "@shared/protocol";
-import { anthropicLlm } from "./claude";
+import { anthropicLlm, anthropicWebSearch } from "./claude";
 import { predictBricks } from "./predict";
 import { promptContext } from "./prompts";
 import { route } from "./router";
+import { runSearch } from "./search";
 import { createSonioxKey } from "./soniox";
 import { parseTurnRequest, runTurn, sseResponse, type TurnDeps } from "./turn";
 
@@ -51,10 +52,13 @@ app.post("/api/turn", async (c) => {
   if (!parsed.ok) return c.json({ error: parsed.message }, 400);
   const env = c.env;
   const origin = new URL(c.req.url).origin;
+  const context = promptContext({ venue: env.VENUE_NAME, city: env.VENUE_CITY, address: venueAddress(env), catalogId: origin + CATALOG_PATH });
+  const webSearch = anthropicWebSearch(env);
   const deps: TurnDeps = {
     route: (req, signal) => route(req, env, signal),
     llm: anthropicLlm(env),
-    context: promptContext({ venue: env.VENUE_NAME, city: env.VENUE_CITY, catalogId: origin + CATALOG_PATH }),
+    context,
+    search: (req, signal) => runSearch(req, webSearch, context, signal),
     now: () => performance.now(),
     composeTimeoutMs: LIMITS.composeTimeoutMs,
     routeGuardMs: LIMITS.routerTimeoutMs + 400,
@@ -88,6 +92,13 @@ app.onError((err, c) => {
   console.error("worker error", err);
   return c.json({ error: "internal error" }, 500);
 });
+
+/** Optional var (not in wrangler.jsonc yet): the venue's street address for "nearby" searches. */
+function venueAddress(env: Env): string | undefined {
+  if (!("VENUE_ADDRESS" in env)) return undefined;
+  const v = env.VENUE_ADDRESS;
+  return typeof v === "string" && v.trim() ? v.trim() : undefined;
+}
 
 type BodyResult = { ok: true; value: unknown } | { ok: false; status: 400 | 413; error: string };
 

@@ -1,6 +1,6 @@
 /**
  * Claude side of a turn: the Anthropic client, the composer/html text stream, the widgets tool call,
- * and the pure helpers that turn a token stream into composer lines.
+ * the web search call for live data lines, and the pure helpers that turn a token stream into composer lines.
  * SDK: @anthropic-ai/sdk 1.12.0 (messages.stream / messages.create). Settings follow NOTES.md "Claude API":
  * no temperature/top_p/top_k, no assistant prefill, tool_choice auto.
  */
@@ -53,6 +53,25 @@ export interface Llm {
   callTools(prompt: Prompt, tools: Anthropic.Tool[], signal: AbortSignal): Promise<WidgetsReply>;
 }
 
+/** The parts of a web search reply that search.ts needs, in content order. */
+export type SearchBlock =
+  | { type: "text"; text: string }
+  /** One successful web_search_tool_result: the result URLs. */
+  | { type: "results"; urls: string[] }
+  /** A web_search_tool_result error (e.g. max_uses_exceeded on a second parallel query). */
+  | { type: "search_error"; code: string };
+
+export type SearchReply = {
+  blocks: SearchBlock[];
+  stopReason: string | null;
+  /** usage.server_tool_use.web_search_requests: searches actually run (and billed). */
+  searches: number;
+  inputTokens: number;
+  outputTokens: number;
+};
+
+export type WebSearch = (prompt: Prompt, signal: AbortSignal) => Promise<SearchReply>;
+
 export class MissingKeyError extends Error {}
 
 // ── Anthropic implementation ──────────────────────────────────────────────────
@@ -88,6 +107,50 @@ function toUsage(msg: Anthropic.Message): LlmUsage {
     output_tokens: msg.usage.output_tokens,
     cache_read_tokens: msg.usage.cache_read_input_tokens ?? 0,
     cache_write_tokens: msg.usage.cache_creation_input_tokens ?? 0,
+  };
+}
+
+/**
+ * One search per data line: measured median ~4.5 s for one search, two searches roughly double it.
+ * web_search_20260209 is not used: with Haiku 5.5 it answered invalid_tool_input on 5 of 6 probes
+ * and one probe took 99 s (code execution).
+ */
+export const SEARCH_TOOL = { type: "web_search_20250305", name: "web_search", max_uses: 1 } as const;
+export const SEARCH_MAX_TOKENS = 3000;
+
+export function anthropicWebSearch(env: ClaudeEnv): WebSearch {
+  const model = env.LLM_MODEL || DEFAULT_MODEL;
+  return async (prompt, signal) => {
+    const msg = await clientFor(env).messages.create(
+      {
+        model,
+        max_tokens: SEARCH_MAX_TOKENS,
+        system: systemParam(prompt),
+        messages: [{ role: "user", content: prompt.user }],
+        tools: [{ ...SEARCH_TOOL }],
+        thinking: { type: "disabled" },
+      },
+      // A retry would not fit in the 12 s search budget.
+      { signal, maxRetries: 0 },
+    );
+    return toSearchReply(msg);
+  };
+}
+
+export function toSearchReply(msg: Anthropic.Message): SearchReply {
+  const blocks: SearchBlock[] = [];
+  for (const b of msg.content) {
+    if (b.type === "text") blocks.push({ type: "text", text: b.text });
+    else if (b.type === "web_search_tool_result") {
+      blocks.push(Array.isArray(b.content) ? { type: "results", urls: b.content.map((r) => r.url) } : { type: "search_error", code: b.content.error_code });
+    }
+  }
+  return {
+    blocks,
+    stopReason: msg.stop_reason ?? null,
+    searches: msg.usage.server_tool_use?.web_search_requests ?? 0,
+    inputTokens: msg.usage.input_tokens,
+    outputTokens: msg.usage.output_tokens,
   };
 }
 
@@ -166,7 +229,7 @@ export function anthropicLlm(env: ClaudeEnv, thinking: ThinkingSetting = COMPOSE
 }
 
 /** A short line for the error event: what failed and what to check, never the raw payload. */
-export function describeLlmError(err: unknown): string {
+export function describeLlmError(err: unknown, fallbackPrefix = "Composer failed"): string {
   if (err instanceof MissingKeyError) return "Claude API: ANTHROPIC_API_KEY is not set";
   if (err instanceof Anthropic.AuthenticationError) return "Claude API: authentication failed (check ANTHROPIC_API_KEY)";
   if (err instanceof Anthropic.PermissionDeniedError) return "Claude API: permission denied for this key";
@@ -178,7 +241,7 @@ export function describeLlmError(err: unknown): string {
   if (err instanceof Anthropic.APIConnectionTimeoutError) return "Claude API: request timed out";
   if (err instanceof Anthropic.APIConnectionError) return "Claude API: connection failed";
   if (err instanceof Anthropic.APIError) return `Claude API: error ${err.status ?? ""}`.trim();
-  return `Composer failed: ${clip(err instanceof Error ? err.message : String(err), 140)}`;
+  return `${fallbackPrefix}: ${clip(err instanceof Error ? err.message : String(err), 140)}`;
 }
 
 function clip(s: string, n: number): string {

@@ -1,0 +1,121 @@
+{
+  "id": "msg_011ChLTpXfCwHcPvyHiT8bYr",
+  "type": "message",
+  "role": "assistant",
+  "model": "claude-haiku-5-5",
+  "stop_reason": "end_turn",
+  "stop_sequence": null,
+  "usage": {
+    "input_tokens": 15136,
+    "output_tokens": 876,
+    "server_tool_use": {
+      "web_search_requests": 1,
+      "web_fetch_requests": 0
+    }
+  },
+  "content": [
+    {
+      "type": "text",
+      "text": "I'll search for restaurants open for dinner near Überseestadt in Bremen.",
+      "citations": null
+    },
+    {
+      "type": "server_tool_use",
+      "id": "srvtoolu_01ESAzzQogBAeX1PqT37yAXa",
+      "name": "web_search",
+      "input": {
+        "query": "restaurants Überseestadt Bremen dinner"
+      }
+    },
+    {
+      "type": "server_tool_use",
+      "id": "srvtoolu_012HMcYnT1s8qmuqDsQEuKiP",
+      "name": "web_search",
+      "input": {
+        "query": "Überseestadt Bremen Restaurant Abendessen Montag"
+      }
+    },
+    {
+      "type": "web_search_tool_result",
+      "tool_use_id": "srvtoolu_01ESAzzQogBAeX1PqT37yAXa",
+      "content": [
+        {
+          "type": "web_search_result",
+          "url": "https://www.wfb-bremen.de/en/page/bremen-invest/the-tastes-of-ueberseestadt",
+          "title": "The Tastes of the Überseestadt",
+          "page_age": "1385 days ago",
+          "encrypted_content": "…"
+        },
+        {
+          "type": "web_search_result",
+          "url": "https://www.ueberseestadt-bremen.de/en/page/press/the-taste-gastronomy",
+          "title": "Discover international cuisine in the überseestadt",
+          "page_age": "3280 days ago",
+          "encrypted_content": "…"
+        },
+        {
+          "type": "web_search_result",
+          "url": "https://www.tripadvisor.com/RestaurantsNear-g187325-d17469336-oa30-B_b_Hotel_Bremen_uberseestadt-Bremen.html",
+          "title": "THE 10 BEST Restaurants Near B&b Hotel Bremen-uberseestadt",
+          "page_age": null,
+          "encrypted_content": "…"
+        },
+        {
+          "type": "web_search_result",
+          "url": "https://www.bremen.de/leben-in-bremen/kulinarisch/essen-am-wasser",
+          "title": "Essen am Wasser - Bremens maritime Seite genießen",
+          "page_age": null,
+          "encrypted_content": "…"
+        },
+        {
+          "type": "web_search_result",
+          "url": "https://www.ueberseestadt-bremen.de/de/page/freizeit-tourismus/essen-und-trinken",
+          "title": "Essen und Trinken",
+          "page_age": "1399 days ago",
+          "encrypted_content": "…"
+        },
+        {
+          "type": "web_search_result",
+          "url": "https://insiderei.com/listen/restaurants-in-bremen",
+          "title": "Essen am Wasser",
+          "page_age": "1944 days ago",
+          "encrypted_content": "…"
+        },
+        {
+          "type": "web_search_result",
+          "url": "https://www.the-grill-bremen.de/",
+          "title": "The Grill Upper River",
+          "page_age": "339 days ago",
+          "encrypted_content": "…"
+        },
+        {
+          "type": "web_search_result",
+          "url": "https://www.arrivalguides.com/de/Travelguide/BREMEN/dining/uberseestadt-131916",
+          "title": "Überseestadt in Bremen",
+          "page_age": null,
+          "encrypted_content": "…"
+        },
+        {
+          "type": "web_search_result",
+          "url": "https://www.ubereats.com/de-en/region/hb",
+          "title": "Uber Eats Home",
+          "page_age": null,
+          "encrypted_content": "…"
+        }
+      ]
+    },
+    {
+      "type": "web_search_tool_result",
+      "tool_use_id": "srvtoolu_012HMcYnT1s8qmuqDsQEuKiP",
+      "content": {
+        "type": "web_search_tool_result_error",
+        "error_code": "max_uses_exceeded"
+      }
+    },
+    {
+      "type": "text",
+      "text": "I couldn't confirm tonight's opening hours, since the search results are mostly older pages and don't include current Monday hours. The list below is restaurants in Überseestadt that the sources describe as serving dinner or evening meals; please check each one's hours before going.\n\n```json\n[\n  {\"name\": \"Blaufeuer (Steigenberger Hotel Bremen)\", \"subtitle\": \"Creative international cuisine; open all day, serving breakfast, lunch and dinner per the sources\", \"tags\": [\"dinner\", \"hotel restaurant\", \"seafood\", \"North German\"], \"source\": \"https://www.ueberseestadt-bremen.de/en/page/press/the-taste-gastronomy\"},\n  {\"name\": \"The Grill Upper River\", \"subtitle\": \"Fine dining steak and seafood restaurant with upstairs bar, Ludwig-Franzius-Platz 14\", \"tags\": [\"dinner\", \"fine dining\", \"steak\", \"seafood\", \"bar\"], \"source\": \"https://www.the-grill-bremen.de/\"},\n  {\"name\": \"Elisa\", \"subtitle\": \"Italian/Mediterranean restaurant combining Italian, Greek and Turkish cuisine, opened 2015\", \"tags\": [\"dinner\", \"Italian\", \"Mediterranean\"], \"source\": \"https://www.wfb-bremen.de/en/page/bremen-invest/the-tastes-of-ueberseestadt\"},\n  {\"name\": \"Feuerwache\", \"subtitle\": \"Italian restaurant in the old fire station at Holzhafen, Waller Stieg 5, with terrace facing the ships\", \"tags\": [\"dinner\", \"Italian\", \"pizza\", \"terrace\"], \"source\": \"https://insiderei.com/listen/restaurants-in-bremen\"},\n  {\"name\": \"Al-Dar\", \"subtitle\": \"Syrian cuisine with Lebanese wines in Schuppen Eins, Konsul-Smidt-Straße 26\", \"tags\": [\"dinner\", \"Syrian\", \"Middle Eastern\"], \"source\": \"https://www.bremen.de/leben-in-bremen/kulinarisch/essen-am-wasser\"}\n]\n```",
+      "citations": null
+    }
+  ]
+}
