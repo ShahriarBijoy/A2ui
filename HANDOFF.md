@@ -16,7 +16,7 @@ Contract files: `src/shared/{a2ui,catalog,protocol,pointer}.ts` and `src/client/
 
 ## Status at hand-off (updated 2026-11-23 ~20:35)
 - **All five lanes have landed.** Whole tree: `bunx tsc -b` clean, `bun test` 224 pass / 0 fail.
-- **Step 1:** done locally. Wrangler is on the owner's personal account (`account_id` pinned). **Not deployed yet.**
+- **Step 1: DONE, including deploy.** Live at **https://brick-box.shahriarbijoy.workers.dev** (open with `?k=<DEMO_KEY from .dev.vars>`). Secrets are set: DEMO_KEY, JEV_API_KEY, ANTHROPIC_API_KEY, SONIOX_API_KEY. It was deployed from a clean worktree at bb688f2, the reviewed state before phase 2. Redeploy with `bun run deploy` when the tree is green.
 - **V (voice, steps 8/10 client):** complete and reviewed (2b31dbc..b60b31e). The live mic test with the owner is pending.
 - **D (decision model, steps 9/10):** complete and reviewed (5461a57..22a1cf6). 30/30 live lines, warm route ~150 ms. `warmJev` exists but is **not wired yet**.
 - **R (A2UI runtime/renderer, steps 2–3):** landed (b8bfe71..e2b8165, 55 tests); **review was running** at hand-off. See `.superpowers/sdd/lane-R-review.md` if present; if not, re-dispatch the review.
@@ -31,7 +31,7 @@ Contract files: `src/shared/{a2ui,catalog,protocol,pointer}.ts` and `src/client/
 - After those pass their scoped re-reviews: land the contract additions (fetch event, search source, `repaired_lines`), then dispatch phase 2 (W live search, S components), then deploy.
 
 ## Integration TODO (after the reviews and their fix rounds)
-1. Wire `GET /api/warm` → `warmJev(env)` in `src/worker/index.ts`. Call it from the client on page load and on Space-down (cold Jev was 810 ms against an 800 ms budget).
+1. ~~Wire /api/warm~~: not needed. The cold route from the deployed Worker was 153 ms (NOTES → Production).
 2. Voice: add a minimum-length guard so one-word fragments like "I'" are not sent as turns (seen in lane S's live session).
 3. `index.css`: add a darker highlight token for highlight-coloured *text* (lane S measured 3.1:1 on the background).
 4. Step 12: replay (Shift+R saves the last turn's `recordings[turnId]` to localStorage; `src/client/replay.ts` holds exported turns; F1..F6 play them through `store.beginTurn` + `applyTurnEvent` with the original timing and a "replay" badge). Also: check error handling with a wrong ANTHROPIC key (one error line + Try again), and check the stage layout.

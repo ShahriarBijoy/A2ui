@@ -92,6 +92,11 @@ These are dev-machine numbers. The talk numbers come from step 13 against the de
 - HTML: "make the page pink and add a login box": first byte 652 ms, compose 2.9 s, 710 output tokens, obeyed. In a2ui the same line → "Not available" card with alternatives.
 - Client disconnect mid-stream ends the Worker invocation within ~720 ms; the next turn works.
 
+### Production (Cloudflare Worker, https://brick-box.shahriarbijoy.workers.dev, deployed 2026-11-23 from bb688f2; probe from Germany)
+- /api/health: 401 without the key, 200 with it; all three API keys present.
+- Router (dinner screen, "We're six, and later."): **first (cold) call 153 ms**, then 144 / 138 / 141 ms; whole turn (SSE, route + 2 knob patches + caption + done) 166–209 ms; patch decision on 4/4 with Time → 20:00, Guests → 6. → The 810 ms cold call happened only from the dev machine. **No /api/warm needed** (warmJev stays available, unwired).
+- Compose (dinner line, decision off, first call after deploy, cache cold): first UI 751 ms, compose 1.92 s, 472 output tokens.
+
 ### Composer behaviours that differ from PLAN (lane W rulings, under review)
 - A data line written before createSurface waits and attaches to the new surface (the PLAN-literal rule put the flight list on the old form).
 - Lines with miscounted closing brackets are repaired, and repairs are not counted as skipped.
