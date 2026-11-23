@@ -23,8 +23,19 @@ export type ClaudeEnv = { ANTHROPIC_API_KEY?: string; LLM_MODEL?: string };
  * Haiku 5.5 thinks by default (adaptive). Thinking delays the first line, so the composer runs without it.
  * See the lane W report for the measured comparison.
  */
-export type ThinkingSetting = "disabled" | "adaptive-low" | "default";
+export type ThinkingSetting = "disabled" | "between-tools" | "adaptive-low" | "default";
 export const COMPOSER_THINKING: ThinkingSetting = "disabled";
+
+/**
+ * Thinking off for the composer, per model (claude-api skill, Thinking & Effort): Haiku 5.5 accepts
+ * {type:"disabled"}; Sonnet 5.5 rejects it with a 400 and turns thinking off with {type:"between_tools"}
+ * (effort high or below, no other thinking field); Opus 5.5 cannot turn it off, so effort low.
+ */
+export function composerThinkingFor(model: string): ThinkingSetting {
+  if (model.startsWith("claude-sonnet-5-5")) return "between-tools";
+  if (model.startsWith("claude-opus-5-5")) return "adaptive-low";
+  return COMPOSER_THINKING;
+}
 
 export type Prompt = { system?: string; cacheSystem?: boolean; user: string };
 
@@ -37,7 +48,12 @@ export type LlmUsage = {
 };
 
 /** Usage plus why the model stopped ("end_turn", "max_tokens", "refusal", ...; null if not reported). */
-export type LlmResult = { usage: LlmUsage; stopReason: string | null };
+export type LlmResult = {
+  usage: LlmUsage;
+  stopReason: string | null;
+  /** The thinking setting the answer actually ran with, after any fallback. */
+  thinking?: ThinkingSetting;
+};
 
 /** Text deltas of one streamed answer; result() resolves after the stream ended. */
 export interface TextStream extends AsyncIterable<string> {
@@ -85,8 +101,10 @@ function clientFor(env: ClaudeEnv): Anthropic {
   return cached.client;
 }
 
-function thinkingParams(setting: ThinkingSetting): { thinking?: Anthropic.ThinkingConfigParam; output_config?: Anthropic.OutputConfig } {
+export function thinkingParams(setting: ThinkingSetting): { thinking?: Anthropic.ThinkingConfigParam; output_config?: Anthropic.OutputConfig } {
   if (setting === "disabled") return { thinking: { type: "disabled" } };
+  // No effort field: Sonnet 5.5's default (high) is the highest level between_tools accepts.
+  if (setting === "between-tools") return { thinking: { type: "between_tools" } };
   if (setting === "adaptive-low") return { thinking: { type: "adaptive" }, output_config: { effort: "low" } };
   return {};
 }
@@ -171,6 +189,7 @@ export function anthropicLlm(env: ClaudeEnv, thinking: ThinkingSetting = COMPOSE
           { signal },
         );
       let stream = start(thinking);
+      let ran = thinking;
       return {
         async *[Symbol.asyncIterator]() {
           let yielded = false;
@@ -182,8 +201,10 @@ export function anthropicLlm(env: ClaudeEnv, thinking: ThinkingSetting = COMPOSE
               }
             }
           } catch (err) {
-            // Insurance: if the API ever rejects thinking:disabled, rerun once with adaptive/low.
-            if (yielded || thinking !== "disabled" || !(err instanceof Anthropic.BadRequestError)) throw err;
+            // Insurance: if the API rejects the thinking-off setting, rerun once with adaptive/low, never silently.
+            if (yielded || (thinking !== "disabled" && thinking !== "between-tools") || !(err instanceof Anthropic.BadRequestError)) throw err;
+            console.warn(`composer: thinking "${thinking}" rejected by ${model} (${err.message}); rerunning once with adaptive thinking at effort low`);
+            ran = "adaptive-low";
             stream = start("adaptive-low");
             for await (const ev of stream) {
               if (ev.type === "content_block_delta" && ev.delta.type === "text_delta") yield ev.delta.text;
@@ -192,7 +213,7 @@ export function anthropicLlm(env: ClaudeEnv, thinking: ThinkingSetting = COMPOSE
         },
         async result() {
           const msg = await stream.finalMessage();
-          return { usage: toUsage(msg), stopReason: msg.stop_reason ?? null };
+          return { usage: toUsage(msg), stopReason: msg.stop_reason ?? null, thinking: ran };
         },
         abort() {
           stream.abort();

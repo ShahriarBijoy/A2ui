@@ -5,7 +5,7 @@
 import { Hono } from "hono";
 import { CATALOG_PATH, catalogJson } from "@shared/catalog";
 import { LIMITS } from "@shared/protocol";
-import { anthropicLlm, anthropicWebSearch } from "./claude";
+import { anthropicLlm, anthropicWebSearch, composerThinkingFor } from "./claude";
 import { predictBricks } from "./predict";
 import { promptContext } from "./prompts";
 import { route } from "./router";
@@ -54,9 +54,11 @@ app.post("/api/turn", async (c) => {
   const origin = new URL(c.req.url).origin;
   const context = promptContext({ venue: env.VENUE_NAME, city: env.VENUE_CITY, address: venueAddress(env), catalogId: origin + CATALOG_PATH, devNow: devNow(env) });
   const webSearch = anthropicWebSearch(env);
+  const composerModel = optionalVar(env, "COMPOSER_MODEL");
   const deps: TurnDeps = {
     route: (req, signal) => route(req, env, signal),
     llm: anthropicLlm(env),
+    ...(composerModel ? { composerLlm: anthropicLlm({ ANTHROPIC_API_KEY: env.ANTHROPIC_API_KEY, LLM_MODEL: composerModel }, composerThinkingFor(composerModel)) } : {}),
     context,
     search: (req, signal) => runSearch(req, webSearch, context, signal),
     now: () => performance.now(),
@@ -95,8 +97,12 @@ app.onError((err, c) => {
 
 /** Dev-only clock override for rehearsals (.dev.vars or the process env; never in wrangler.jsonc). */
 function devNow(env: Env): string | undefined {
-  if (!("DEV_NOW" in env)) return undefined;
-  const v = env.DEV_NOW;
+  return optionalVar(env, "DEV_NOW");
+}
+
+/** A var that is only set in .dev.vars (DEV_NOW, COMPOSER_MODEL): absent from the generated Env type. */
+function optionalVar(env: Env, name: string): string | undefined {
+  const v: unknown = (env as unknown as Record<string, unknown>)[name];
   return typeof v === "string" && v.trim() ? v.trim() : undefined;
 }
 

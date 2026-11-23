@@ -94,6 +94,15 @@ describe("composer prompt", () => {
     expect(flat).not.toContain('"from Bremen"');
   });
 
+  test("decision steps end with one primary Button; assigned places are picked before the confirm step", () => {
+    const flat = COMPOSER_SYSTEM_PROMPT.replace(/\s+/g, " ");
+    expect(flat).toContain("Every step that needs a decision ends with one primary Button");
+    expect(flat).toContain("Only a final summary or receipt step may end without one");
+    expect(flat).toContain(
+      "When the person books something with assigned places (seats), let them pick the place with the most specific component before the confirm step; then end that step with one primary Button whose action context carries the chosen place.",
+    );
+  });
+
   test("the unreachable-List note hands back the requested data paths", () => {
     const note = composerUnreachableNote(["list", "item"], ["/results"]);
     expect(note).toContain("not reachable from root, so the requested data did not show: list, item");

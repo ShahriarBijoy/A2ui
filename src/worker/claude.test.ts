@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { checkEnvelope, classifyLine, describeLlmError, FenceStripper, LineSplitter, MissingKeyError, repairBrackets } from "./claude";
+import { composerThinkingFor, thinkingParams, checkEnvelope, classifyLine, describeLlmError, FenceStripper, LineSplitter, MissingKeyError, repairBrackets } from "./claude";
 
 describe("LineSplitter", () => {
   test("joins lines split across chunks", () => {
@@ -170,6 +170,18 @@ describe("FenceStripper", () => {
 
   test("backticks that are not a fence are kept", () => {
     expect(run(["```x y\n"])).toBe("```x y\n");
+  });
+});
+
+describe("composer thinking per model", () => {
+  test("Haiku 5.5 disables thinking; Sonnet 5.5 sends between_tools and no other field; Opus 5.5 runs adaptive at low effort", () => {
+    expect(composerThinkingFor("claude-haiku-5-5")).toBe("disabled");
+    expect(composerThinkingFor("claude-sonnet-5-5")).toBe("between-tools");
+    expect(composerThinkingFor("claude-opus-5-5")).toBe("adaptive-low");
+    expect(thinkingParams("disabled")).toEqual({ thinking: { type: "disabled" } });
+    expect(thinkingParams("between-tools")).toEqual({ thinking: { type: "between_tools" } });
+    expect(thinkingParams("adaptive-low")).toEqual({ thinking: { type: "adaptive" }, output_config: { effort: "low" } });
+    expect(thinkingParams("default")).toEqual({});
   });
 });
 

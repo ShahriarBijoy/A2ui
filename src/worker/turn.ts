@@ -49,6 +49,8 @@ export type Emit = (ev: TurnEvent) => void | Promise<void>;
 export type TurnDeps = {
   route: (req: TurnRequest, signal: AbortSignal) => Promise<RouteResult>;
   llm: Llm;
+  /** The a2ui composer's own model (COMPOSER_MODEL), when set; widgets, html and search keep llm / LLM_MODEL. */
+  composerLlm?: Llm;
   context: PromptContext;
   now: () => number;
   composeTimeoutMs: number;
@@ -662,7 +664,7 @@ async function composeA2ui(req: TurnRequest, deps: TurnDeps, send: Emit, signal:
   const retryable = (r: LlmResult) => (noScreen() || unshown.ids.length > 0) && r.stopReason !== "refusal" && r.stopReason !== "max_tokens";
 
   const streamOnce = async (p: Prompt, mayRetry: boolean): Promise<LlmResult> => {
-    const stream = deps.llm.streamText(p, signal);
+    const stream = (deps.composerLlm ?? deps.llm).streamText(p, signal);
     const splitter = new LineSplitter();
     const it = stream[Symbol.asyncIterator]();
     holding = true;
@@ -701,6 +703,7 @@ async function composeA2ui(req: TurnRequest, deps: TurnDeps, send: Emit, signal:
   const first = await streamOnce(prompt, true);
   let usage = first.usage;
   let stopReason = first.stopReason;
+  let thinking = first.thinking;
   if (retryable(first)) {
     let note = COMPOSER_RETRY_NOTE;
     if (!noScreen()) {
@@ -716,6 +719,7 @@ async function composeA2ui(req: TurnRequest, deps: TurnDeps, send: Emit, signal:
     const retry = await streamOnce({ ...prompt, user: `${prompt.user}\n${note}` }, false);
     usage = addUsage(usage, retry.usage);
     stopReason = retry.stopReason;
+    thinking = retry.thinking ?? thinking;
   }
   // Built as a variable so it can carry repaired_lines before the shared type lists it.
   const usageEvent = {
@@ -725,6 +729,8 @@ async function composeA2ui(req: TurnRequest, deps: TurnDeps, send: Emit, signal:
     compose_ms: Math.round(deps.now() - t0),
     skipped_lines: skipped,
     repaired_lines: repaired,
+    // Which thinking setting ran (a rejected thinking-off setting falls back to adaptive): log only, no contract field.
+    ...(thinking ? { thinking } : {}),
   };
   await send(usageEvent);
   const problem = stopProblem(stopReason, firstUi !== null);

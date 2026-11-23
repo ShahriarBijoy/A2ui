@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import type { Knob, RouteResult, TurnEvent, TurnRequest } from "@shared/protocol";
-import type { Llm, LlmUsage, Prompt, TextStream, WidgetsReply } from "./claude";
+import type { Llm, LlmUsage, Prompt, TextStream, ThinkingSetting, WidgetsReply } from "./claude";
 import type { SearchOutcome, SearchRequest } from "./search";
 import { COMPOSER_RETRY_NOTE, composerUnreachableNote } from "./prompts";
 import {
@@ -911,6 +911,46 @@ describe("runTurn: reachability and value shapes", () => {
     expect(normalizeInputValue("Stepper", "six")).toBe("six");
     expect(normalizeInputValue("CheckBox", "true")).toBe(true);
     expect(normalizeInputValue("Text", ["x"])).toEqual(["x"]);
+  });
+});
+
+describe("runTurn: composer model", () => {
+  const streamOf = (thinking?: ThinkingSetting): TextStream => ({
+    async *[Symbol.asyncIterator]() {
+      yield MINIMAL;
+    },
+    async result() {
+      return { usage, stopReason: "end_turn", ...(thinking ? { thinking } : {}) };
+    },
+    abort() {},
+  });
+  const named = (name: string, used: string[], thinking?: ThinkingSetting): Llm => ({
+    streamText() {
+      used.push(name);
+      return streamOf(thinking);
+    },
+    async callTools() {
+      used.push(name);
+      return { tool: null, text: "plain", usage, stopReason: "end_turn" };
+    },
+  });
+
+  test("composerLlm composes a2ui; widgets and html stay on llm; usage carries the thinking setting that ran", async () => {
+    const used: string[] = [];
+    const d = deps({ llm: named("llm", used), composerLlm: named("composer", used, "between-tools") });
+    const a2ui = await collect(request({ decision: false }), d);
+    expect(used).toEqual(["composer"]);
+    expect(a2ui.find((e) => e.type === "usage")).toMatchObject({ thinking: "between-tools" });
+    await collect(request({ decision: false, mode: "widgets" }), d);
+    await collect(request({ decision: false, mode: "html" }), d);
+    expect(used).toEqual(["composer", "llm", "llm"]);
+  });
+
+  test("without composerLlm the composer uses llm, and the usage event has no thinking field when none is reported", async () => {
+    const used: string[] = [];
+    const events = await collect(request({ decision: false }), deps({ llm: named("llm", used) }));
+    expect(used).toEqual(["llm"]);
+    expect(events.find((e) => e.type === "usage")).not.toHaveProperty("thinking");
   });
 });
 
