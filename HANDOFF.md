@@ -14,39 +14,24 @@ Vite + React 19 + Tailwind 4 + shadcn (**Base UI**, all components installed) cl
 Every event enters the client through `store.applyTurnEvent`, the single ingress that replay also uses.
 Contract files: `src/shared/{a2ui,catalog,protocol,pointer}.ts` and `src/client/state.ts`.
 
-## Status at hand-off (updated 2026-11-23 ~20:35)
-- **All five lanes have landed.** Whole tree: `bunx tsc -b` clean, `bun test` 224 pass / 0 fail.
-- **Deployed:** https://brick-box.shahriarbijoy.workers.dev (open with `?k=<DEMO_KEY from .dev.vars>`). Latest deploy: fb43969, with live web search, voice-glow, the Esc wave and live widgets. Redeploy with `bun run deploy` from a green tree.
-- **All lanes and phases 2–3 are complete and reviewed** (ledger: `.superpowers/sdd/progress.md`). 352 tests pass.
-- **V (voice, steps 8/10 client):** complete and reviewed (2b31dbc..b60b31e). The live mic test with the owner is pending.
-- **D (decision model, steps 9/10):** complete and reviewed (5461a57..22a1cf6). 30/30 live lines, warm route ~150 ms. `warmJev` exists but is **not wired yet**.
-- **R (A2UI runtime/renderer, steps 2–3):** landed (b8bfe71..e2b8165, 55 tests); **review was running** at hand-off. See `.superpowers/sdd/lane-R-review.md` if present; if not, re-dispatch the review.
-- **W (Worker/composer, steps 5/6/11):** landed (4becab3..bcacf04, 74 tests). Live: first UI 0.6–0.9 s, dinner 2/2, flight 4/4, 0 refused over 54 turns. **Review was running**; see `lane-W-review.md`.
-- **S (stage shell, step 4 + UX):** landed (99349f0..0e83338, 27 tests). Headless checks pass at 1920 and 1280. **Review was running**; see `lane-S-review.md`.
-- Measured numbers are in NOTES.md → Measurements.
-
-## Fix rounds in flight at hand-off (check reports and git log)
-- R round 1: clearThread resets `replaying`; SSE client tests; **pending-list skeletons only while the owning turn streams**, then empty state or nothing.
-- W round 1 (step A): one caption per turn; check stop_reason on every call; count repaired lines; scenario steering removed; held-out lines re-run.
-- S round 1: the wire row stays in place on expand; `isTypingTarget` predicate so Slider and read-only focus doesn't kill Space and shortcuts. U8/U2 deviations accepted by ruling.
-- After those pass their scoped re-reviews: land the contract additions (fetch event, search source, `repaired_lines`), then dispatch phase 2 (W live search, S components), then deploy.
-
-## Integration TODO (after the reviews and their fix rounds)
-1. ~~Wire /api/warm~~: not needed. The cold route from the deployed Worker was 153 ms (NOTES → Production).
-2. Voice: add a minimum-length guard so one-word fragments like "I'" are not sent as turns (seen in lane S's live session).
-3. `index.css`: add a darker highlight token for highlight-coloured *text* (lane S measured 3.1:1 on the background).
-4. Step 12: replay (Shift+R saves the last turn's `recordings[turnId]` to localStorage; `src/client/replay.ts` holds exported turns; F1..F6 play them through `store.beginTurn` + `applyTurnEvent` with the original timing and a "replay" badge). Also: check error handling with a wrong ANTHROPIC key (one error line + Try again), and check the stage layout.
-5. Step 13: `scripts/smoke.ts` over `src/shared/scenarios.ts` against the deployed URL, all three modes, 3× each; write the numbers into NOTES.md.
-6. Deploy: `bun run deploy`, then `wrangler secret put` DEMO_KEY / JEV_API_KEY / ANTHROPIC_API_KEY / SONIOX_API_KEY. Then measure `route.ms` from the deployed Worker, cold and warm.
-7. A live voice rehearsal with the owner in Chrome (both scenarios by voice, U1/U2).
-
-## Next steps after the lanes
-1. Review each lane against its brief (spec compliance + quality) and fix gaps.
-2. Integrate: App wiring check, `?dev` DevRunner, `useVoice` mounted, widgets.
-3. Run the step checks in order: 2, 3, 4, 5, 6, then step 7 (tune the composer prompt until dinner and flight pass 5/5, logging in NOTES), 8, 9, 10, 11.
-4. Step 12: replay (Shift+R saves the last turn to localStorage; F1..F6 play `replay.ts` with the original timing and a "replay" badge), 1920×1080 and 1280×720 layouts, error handling.
-5. Step 13: `scripts/smoke.ts` over `src/shared/scenarios.ts` against the deployed URL; save the numbers to NOTES.md.
-6. Deploy; give the owner the URL with `?k=<DEMO_KEY>` (the value is in `.dev.vars`).
+## Status at hand-off (updated 2026-11-23 ~23:05)
+- **Production:** https://brick-box.shahriarbijoy.workers.dev runs **fb43969** (live search, voice-glow, Esc wave, live widgets). It **lacks**: replay (step 12), the replay-totals fix, lenient @checks, the composer structure fixes (d78f02e) and the decision-model time/guard fixes (5f2eff0+). **Redeploy** once the open reviews and fix rounds below clear (`bun run deploy` from a green tree), then re-run `bun run smoke` against production and refresh `scripts/smoke-results.md` and NOTES.
+- **Complete and reviewed:** lanes R, S, W, D, V; phases 2 (R, S, W) and 3 (widgets live); step 12 replay (4f7da0e, b020f5e, 5b580c1); lenient @checks (c22534f). Ledger: `.superpowers/sdd/progress.md`.
+- **Open at hand-off:**
+  - Decision model fix round 1 (relativeHint edge wording; never a backwards patch).
+  - Review of the composer structure fixes d78f02e.
+  - Voice fragment guard (dispatched to the voice agent).
+- **Smoke:**
+  - Production (old fb43969): 53/62.
+  - Local HEAD (d78f02e, 22:56 Monday): 59/62. Main 3/6, wildcards 9/9, held-out 15/15, pink 3/3.
+  - Main misses: dinner "later" partial (possibly stale; it ran before 5f2eff0) and flight seat step (9 blocks; once no confirm target, which may be the script's matcher). **Re-run the main scenarios 10× on HEAD after the D fix round lands.** Only if a composer gap remains, A/B Sonnet 5.5 with a composer-only model var and per-model thinking config (Sonnet 5.5 rejects `thinking: disabled`; use `between_tools`).
+- **Next fixes queued:**
+  - Retry double search (reuse the search on the same `into` path).
+  - Search scope (only local, current or changing facts; the quiz shouldn't fetch vocabulary).
+  - Dev-only clock override in `.dev.vars` for testing at the talk's time.
+  - Smoke dumps of the surface, knobs and Jev probabilities for steps that should patch and don't.
+  - The step-12 wrong-API-key check (one error line + Try again).
+- **The §9.1 talk beats now depend on what the composer builds (no scripted flows). Replay is the safety net:** save good turns with Shift+R during rehearsal.
 
 ## Event (found by web search 2026-11-23; owner to confirm)
 - Next AI Tinkerers Bremen meetup: **Wednesday 2026-11-25, 18:00 CET** (18:30 demos, 20:00 networking + food). https://bremen.aitinkerers.org/p/ai-tinkerers-bremen-4
