@@ -18,7 +18,7 @@ Contract files: `src/shared/{a2ui,catalog,protocol,pointer}.ts` and `src/client/
 The Anthropic API key has reached its **account spend limit**: "You will regain access on 2026-12-01 at 00:00 UTC", which is after the talk. Every composer, widgets, html and search call fails, both locally and in production. **The owner must raise the limit** (console.anthropic.com → Settings → Limits → monthly spend limit, for the organization or workspace that owns the key) **or provide another key.** Then update the Worker secret: `printf '%s' <key> | bunx wrangler secret put ANTHROPIC_API_KEY` and `.dev.vars`. Jev (decision model) and Soniox (voice) are unaffected.
 
 ## Status at hand-off (updated 2026-11-24 ~00:00)
-- **Production:** https://brick-box.shahriarbijoy.workers.dev runs **615d559**: composer `claude-sonnet-5-5` (search, widgets and html on Haiku), live web search, the decision model with time/date/Day fixes and the silent-drop guard, replay (F1–F6, Shift+R, Shift+E), voice-glow, the Esc wave, live widgets and the voice fragment guard. Open it with `?k=<DEMO_KEY from .dev.vars>`.
+- **Production:** https://brick-box.shahriarbijoy.workers.dev runs **787b35e** (deployed 2026-11-24 ~00:35): composer `claude-sonnet-5-5` (search, widgets and html on Haiku), live web search, the decision model with time/date/Day fixes and the silent-drop guard, replay with **shipped F1–F6**, voice-glow, the Esc wave, live widgets, the voice fragment guard, and readable API errors. Open it with `?k=<DEMO_KEY from .dev.vars>`. While the spend limit holds, live turns show "Claude API: usage limit reached — access returns 2026-12-01 00:00 UTC".
 - **Everything built is reviewed.** 422 tests pass, and `bunx tsc -b` is clean. Ledger: `.superpowers/sdd/progress.md` (every task, review, ruling and parked minor).
 - **Talk-clock main scenarios: 19/20 (95%)**; see NOTES → "Main scenarios at the talk's clock". Flight is 10/10 including the seat map. "We're six, and later" patches in about 200 ms with no LLM.
 - **Remaining (owner-dependent):**
@@ -45,6 +45,25 @@ The Anthropic API key has reached its **account spend limit**: "You will regain 
 ## Open decisions
 - **UI SDK (vercel-labs/ui, ui-sdk.dev):** the owner suggested it to "not need prebuilt components". Investigated 2026-11-23. It is build-time behaviors for coding agents plus a runtime agent bridge that *operates* existing components. It has no runtime JSON renderer. Letting the runtime agent "build anything" would mean the LLM writes code, which collapses the talk's A2UI-vs-HTML contrast. **Ruling: keep the A2UI catalog with shadcn/Base UI bricks; don't install it mid-build.** The owner was asked "should the runtime agent compose (data) or write (code)?". If they choose code, that changes the thesis: revisit PLAN §0.1 / §9 with them before touching code. A later swap of the primitives would touch only `a2ui/bricks/*` and `components/ui`.
 - **Router latency from a Worker:** NOTES says the 800 ms budget holds, but that was measured from Bun with keep-alive. After deploy, measure `route.ms` from the deployed Worker, both cold and warm. If cold misses 800 ms, warm the Jev connection on page load or Space-down (the predict call already warms it). Do NOT silently raise the timeout.
+
+## Stage replay map (shipped, works offline; real Sonnet captures at the talk clock)
+| Key | Turn |
+|---|---|
+| F1 | "I want dinner after this event, pick a place nearby." (3 real places) |
+| F2 | tap a place → time + guests + Reserve |
+| F3 | "We're six, and later." → decision-model patch, compose – |
+| **Esc** | **required between F3 and F4** (both sequences start at surface s1) |
+| F4 | "I need to book a flight tomorrow." |
+| F5 | "To New York, give me options." (4 demo flights) |
+| F6 | tap a flight → seat map + Confirm seat |
+- Don't tap the live buttons after F3 ("Reserve table") or F6 ("Confirm seat") while the API is down: a tap sends a real turn.
+- The recordings' dates are fixed for Wed 25 Nov ("tonight", flight on Thu 26 Nov).
+- All six F-keys are taken by the shipped set, so Shift+R saves get no key. Swap `src/client/replays.json` if rehearsal produces better turns (Shift+E exports).
+
+## Verification done 2026-11-24 (before the spend limit hit)
+- Voice E2E on production with a synthetic mic: interim words ~200 ms apart; turn out 0.34–0.38 s after Space-up; screen built (Final D).
+- Wrong-key check: one calm error line + Try again (Final E).
+- The smoke now judges the "We're six, and later" patch by its result: 7/7 live patches correct (guests 6, time +60 min same date, nothing else). It catches the old false passes.
 
 ## Rehearsal checklist (owner, on the stage machine, Chrome)
 - Open the deployed URL with `?k=<DEMO_KEY>`. Allow the mic.
