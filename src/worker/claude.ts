@@ -1,0 +1,323 @@
+/**
+ * Claude side of a turn: the Anthropic client, the composer/html text stream, the widgets tool call,
+ * and the pure helpers that turn a token stream into composer lines.
+ * SDK: @anthropic-ai/sdk 1.12.0 (messages.stream / messages.create). Settings follow NOTES.md "Claude API":
+ * no temperature/top_p/top_k, no assistant prefill, tool_choice auto.
+ */
+import Anthropic from "@anthropic-ai/sdk";
+import {
+  A2UI_MESSAGE_KINDS,
+  A2UI_VERSION,
+  isPlainObject,
+  type A2uiMessage,
+  type JsonObject,
+} from "@shared/a2ui";
+
+export const DEFAULT_MODEL = "claude-haiku-5-5";
+export const MAX_TOKENS = 3000;
+
+/** Structural subset of the Worker Env, so tests and scripts need no wrangler types. */
+export type ClaudeEnv = { ANTHROPIC_API_KEY?: string; LLM_MODEL?: string };
+
+/**
+ * Haiku 5.5 thinks by default (adaptive). Thinking delays the first line, so the composer runs without it.
+ * See the lane W report for the measured comparison.
+ */
+export type ThinkingSetting = "disabled" | "adaptive-low" | "default";
+export const COMPOSER_THINKING: ThinkingSetting = "disabled";
+
+export type Prompt = { system?: string; cacheSystem?: boolean; user: string };
+
+export type LlmUsage = {
+  model: string;
+  input_tokens: number;
+  output_tokens: number;
+  cache_read_tokens: number;
+  cache_write_tokens: number;
+};
+
+/** Text deltas of one streamed answer; usage() resolves after the stream ended. */
+export interface TextStream extends AsyncIterable<string> {
+  usage(): Promise<LlmUsage>;
+  abort(): void;
+}
+
+export type ToolCall = { name: string; input: JsonObject };
+export type WidgetsReply = { tool: ToolCall | null; text: string; usage: LlmUsage };
+
+export interface Llm {
+  streamText(prompt: Prompt, signal: AbortSignal): TextStream;
+  callTools(prompt: Prompt, tools: Anthropic.Tool[], signal: AbortSignal): Promise<WidgetsReply>;
+}
+
+export class MissingKeyError extends Error {}
+
+// ── Anthropic implementation ──────────────────────────────────────────────────
+
+let cached: { key: string; client: Anthropic } | null = null;
+function clientFor(env: ClaudeEnv): Anthropic {
+  const key = env.ANTHROPIC_API_KEY;
+  if (!key) throw new MissingKeyError("ANTHROPIC_API_KEY is not set");
+  // One client per key keeps the HTTP connection warm across turns in the same isolate.
+  if (cached?.key !== key) cached = { key, client: new Anthropic({ apiKey: key, maxRetries: 1 }) };
+  return cached.client;
+}
+
+function thinkingParams(setting: ThinkingSetting): { thinking?: Anthropic.ThinkingConfigParam; output_config?: Anthropic.OutputConfig } {
+  if (setting === "disabled") return { thinking: { type: "disabled" } };
+  if (setting === "adaptive-low") return { thinking: { type: "adaptive" }, output_config: { effort: "low" } };
+  return {};
+}
+
+function systemParam(prompt: Prompt): Anthropic.TextBlockParam[] | undefined {
+  if (!prompt.system) return undefined;
+  return [
+    prompt.cacheSystem
+      ? { type: "text", text: prompt.system, cache_control: { type: "ephemeral" } }
+      : { type: "text", text: prompt.system },
+  ];
+}
+
+function toUsage(msg: Anthropic.Message): LlmUsage {
+  return {
+    model: msg.model,
+    input_tokens: msg.usage.input_tokens,
+    output_tokens: msg.usage.output_tokens,
+    cache_read_tokens: msg.usage.cache_read_input_tokens ?? 0,
+    cache_write_tokens: msg.usage.cache_creation_input_tokens ?? 0,
+  };
+}
+
+export function anthropicLlm(env: ClaudeEnv, thinking: ThinkingSetting = COMPOSER_THINKING): Llm {
+  const model = env.LLM_MODEL || DEFAULT_MODEL;
+  return {
+    streamText(prompt, signal) {
+      const client = clientFor(env);
+      const start = (setting: ThinkingSetting) =>
+        client.messages.stream(
+          {
+            model,
+            max_tokens: MAX_TOKENS,
+            system: systemParam(prompt),
+            messages: [{ role: "user", content: prompt.user }],
+            ...thinkingParams(setting),
+          },
+          { signal },
+        );
+      let stream = start(thinking);
+      return {
+        async *[Symbol.asyncIterator]() {
+          let yielded = false;
+          try {
+            for await (const ev of stream) {
+              if (ev.type === "content_block_delta" && ev.delta.type === "text_delta") {
+                yielded = true;
+                yield ev.delta.text;
+              }
+            }
+          } catch (err) {
+            // Insurance: if the API ever rejects thinking:disabled, rerun once with adaptive/low.
+            if (yielded || thinking !== "disabled" || !(err instanceof Anthropic.BadRequestError)) throw err;
+            stream = start("adaptive-low");
+            for await (const ev of stream) {
+              if (ev.type === "content_block_delta" && ev.delta.type === "text_delta") yield ev.delta.text;
+            }
+          }
+        },
+        async usage() {
+          return toUsage(await stream.finalMessage());
+        },
+        abort() {
+          stream.abort();
+        },
+      };
+    },
+
+    async callTools(prompt, tools, signal) {
+      const client = clientFor(env);
+      const msg = await client.messages.create(
+        {
+          model,
+          max_tokens: MAX_TOKENS,
+          system: systemParam(prompt),
+          messages: [{ role: "user", content: prompt.user }],
+          tools,
+          tool_choice: { type: "auto" },
+          ...thinkingParams(thinking),
+        },
+        { signal },
+      );
+      let tool: ToolCall | null = null;
+      let text = "";
+      for (const block of msg.content) {
+        if (block.type === "tool_use" && !tool) {
+          tool = { name: block.name, input: isPlainObject(block.input) ? (block.input as JsonObject) : {} };
+        } else if (block.type === "text") {
+          text += block.text;
+        }
+      }
+      return { tool, text: text.trim(), usage: toUsage(msg) };
+    },
+  };
+}
+
+/** A short line for the error event: what failed and what to check, never the raw payload. */
+export function describeLlmError(err: unknown): string {
+  if (err instanceof MissingKeyError) return "Claude API: ANTHROPIC_API_KEY is not set";
+  if (err instanceof Anthropic.AuthenticationError) return "Claude API: authentication failed (check ANTHROPIC_API_KEY)";
+  if (err instanceof Anthropic.PermissionDeniedError) return "Claude API: permission denied for this key";
+  if (err instanceof Anthropic.NotFoundError) return "Claude API: model not found (check LLM_MODEL)";
+  if (err instanceof Anthropic.RateLimitError) return "Claude API: rate limited, try again in a moment";
+  if (err instanceof Anthropic.OverloadedError) return "Claude API: overloaded, try again";
+  if (err instanceof Anthropic.BadRequestError) return `Claude API: bad request (${clip(err.message, 140)})`;
+  if (err instanceof Anthropic.InternalServerError) return `Claude API: server error ${err.status}`;
+  if (err instanceof Anthropic.APIConnectionTimeoutError) return "Claude API: request timed out";
+  if (err instanceof Anthropic.APIConnectionError) return "Claude API: connection failed";
+  if (err instanceof Anthropic.APIError) return `Claude API: error ${err.status ?? ""}`.trim();
+  return `Composer failed: ${clip(err instanceof Error ? err.message : String(err), 140)}`;
+}
+
+function clip(s: string, n: number): string {
+  return s.length > n ? s.slice(0, n - 1) + "…" : s;
+}
+
+// ── Line splitter ─────────────────────────────────────────────────────────────
+
+/** Splits a text stream into complete lines. Chunks may cut lines anywhere; CRLF is accepted. */
+export class LineSplitter {
+  private buf = "";
+
+  push(chunk: string): string[] {
+    this.buf += chunk;
+    const parts = this.buf.split("\n");
+    this.buf = parts.pop() ?? "";
+    return parts.map(stripCr);
+  }
+
+  /** The trailing line without a newline, if any. */
+  flush(): string[] {
+    const rest = stripCr(this.buf);
+    this.buf = "";
+    return rest.trim() ? [rest] : [];
+  }
+}
+
+function stripCr(line: string): string {
+  return line.endsWith("\r") ? line.slice(0, -1) : line;
+}
+
+// ── Line classification ───────────────────────────────────────────────────────
+
+export type ComposerLine =
+  /** Blank line or a markdown fence the model added by accident: dropped, not counted. */
+  | { kind: "ignore" }
+  | { kind: "a2ui"; msg: A2uiMessage }
+  | { kind: "data"; source: string; args: JsonObject; into: string }
+  | { kind: "caption"; text: string }
+  /** Counted in usage.skipped_lines. */
+  | { kind: "invalid"; reason: string };
+
+const FENCE_ONLY = /^```[\w-]*$/;
+const KINDS = new Set<string>(A2UI_MESSAGE_KINDS);
+
+export function classifyLine(raw: string): ComposerLine {
+  let line = raw.trim();
+  if (!line || FENCE_ONLY.test(line)) return { kind: "ignore" };
+  // A fence glued to the object: ```json{"a2ui":...} or {...}```
+  line = line.replace(/^```[\w-]*\s*/, "").replace(/\s*```$/, "");
+  if (!line) return { kind: "ignore" };
+  if (!line.startsWith("{")) return { kind: "invalid", reason: "not a JSON object" };
+  let obj: unknown;
+  try {
+    obj = JSON.parse(line);
+  } catch {
+    return { kind: "invalid", reason: "invalid JSON" };
+  }
+  if (!isPlainObject(obj)) return { kind: "invalid", reason: "not a JSON object" };
+
+  if ("a2ui" in obj) {
+    const msg = checkEnvelope(obj.a2ui);
+    return msg ? { kind: "a2ui", msg } : { kind: "invalid", reason: "bad A2UI envelope" };
+  }
+  if ("data" in obj) {
+    const d = obj.data;
+    if (!isPlainObject(d) || typeof d.source !== "string" || typeof d.into !== "string") {
+      return { kind: "invalid", reason: "bad data line" };
+    }
+    // "/" would replace the whole data model, wiping the inputs' values.
+    if (!d.into.startsWith("/") || d.into === "/") return { kind: "invalid", reason: "data.into must be a path like /places" };
+    const args = isPlainObject(d.args) ? (d.args as JsonObject) : {};
+    return { kind: "data", source: d.source, args, into: d.into };
+  }
+  if ("caption" in obj) {
+    return typeof obj.caption === "string" && obj.caption.trim()
+      ? { kind: "caption", text: obj.caption.trim() }
+      : { kind: "invalid", reason: "bad caption" };
+  }
+  // Lenient: a bare A2UI message without the {"a2ui": ...} wrapper.
+  const bare = checkEnvelope(obj);
+  return bare ? { kind: "a2ui", msg: bare } : { kind: "invalid", reason: "unknown line kind" };
+}
+
+/** Light check only (the client validates fully): version "1.0", exactly one known key, an object with a surfaceId. */
+export function checkEnvelope(v: unknown): A2uiMessage | null {
+  if (!isPlainObject(v) || v.version !== A2UI_VERSION) return null;
+  const keys = Object.keys(v).filter((k) => k !== "version");
+  if (keys.length !== 1 || !KINDS.has(keys[0])) return null;
+  const body = v[keys[0]];
+  if (!isPlainObject(body) || typeof body.surfaceId !== "string") return null;
+  return v as A2uiMessage;
+}
+
+// ── HTML fence stripping (html mode) ──────────────────────────────────────────
+
+/**
+ * Drops markdown fence lines (```html ... ```) from a streamed HTML document while still
+ * forwarding everything else as soon as it arrives. Only the start of a line that could
+ * still become a fence is held back.
+ */
+export class FenceStripper {
+  private line = "";
+  /** The current line is known not to be a fence and has been forwarded. */
+  private passthrough = false;
+
+  push(text: string): string {
+    let out = "";
+    for (const ch of text) {
+      if (this.passthrough) {
+        out += ch;
+        if (ch === "\n") this.passthrough = false;
+        continue;
+      }
+      this.line += ch;
+      if (ch === "\n") {
+        if (!isFenceLine(this.line)) out += this.line;
+        this.line = "";
+        continue;
+      }
+      const t = this.line.trimStart();
+      if (t && !"```".startsWith(t.slice(0, 3))) {
+        out += this.line;
+        this.line = "";
+        this.passthrough = true;
+      } else if (t.length > 3 && !/^```[\w-]*\s*$/.test(t)) {
+        // ``` followed by something that is not a language tag: real content.
+        out += this.line;
+        this.line = "";
+        this.passthrough = true;
+      }
+    }
+    return out;
+  }
+
+  end(): string {
+    const rest = this.line;
+    this.line = "";
+    this.passthrough = false;
+    return isFenceLine(rest) ? "" : rest;
+  }
+}
+
+function isFenceLine(line: string): boolean {
+  return /^\s*```[\w-]*\s*$/.test(line);
+}
