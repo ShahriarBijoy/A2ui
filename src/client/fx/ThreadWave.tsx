@@ -143,12 +143,22 @@ function createWaveControl(setArmed: (on: boolean) => void) {
       return;
     }
     busy = true;
+    const before = store.getState().thread;
     performance.mark("bb-wave-esc");
     // Also flushes the aborted turn's last render, so the picture shows the thread as it now stands.
     flushSync(() => setArmed(true));
     const ready = await picturesReady(h);
     if (handle !== h) {
       clear();
+      return;
+    }
+    if (store.getState().thread !== before) {
+      // The thread moved while it was being pictured: a second Esc already cleared it, or a turn began
+      // (a voice turn finalising, a hands-free endpoint). Clearing now would wipe that newer turn while its
+      // stream runs on into nothing, so the newer intent wins: no wave, no clear.
+      performance.mark("bb-wave-skipped");
+      busy = false;
+      setArmed(false);
       return;
     }
     if (!ready) {
