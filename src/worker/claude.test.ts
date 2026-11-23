@@ -252,6 +252,80 @@ describe("composer refusal fallback (Sonnet 5.5)", () => {
   });
 });
 
+describe("thinking 400 retry", () => {
+  const sse = (events: object[]) => events.map((e) => `event: ${(e as { type: string }).type}\ndata: ${JSON.stringify(e)}\n\n`).join("");
+  const errBody = (message: string) => JSON.stringify({ type: "error", error: { type: "invalid_request_error", message } });
+  const okBody = sse([
+    { type: "message_start", message: { id: "m", type: "message", role: "assistant", model: "claude-sonnet-5-5", content: [], stop_reason: null, stop_sequence: null, usage: { input_tokens: 1, output_tokens: 0 } } },
+    { type: "content_block_start", index: 0, content_block: { type: "text", text: "" } },
+    { type: "content_block_delta", index: 0, delta: { type: "text_delta", text: "ok" } },
+    { type: "content_block_stop", index: 0 },
+    { type: "message_delta", delta: { stop_reason: "end_turn", stop_sequence: null }, usage: { output_tokens: 1 } },
+    { type: "message_stop" },
+  ]);
+  async function go(first: string) {
+    let calls = 0;
+    const fetch = async () => {
+      calls++;
+      if (calls === 1) return new Response(first, { status: 400, headers: { "content-type": "application/json" } });
+      return new Response(okBody, { status: 200, headers: { "content-type": "text/event-stream" } });
+    };
+    const client = new Anthropic({ apiKey: "t", maxRetries: 0, fetch: fetch as unknown as typeof globalThis.fetch });
+    const stream = anthropicLlm({ LLM_MODEL: "claude-sonnet-5-5" }, "disabled", { client }).streamText({ system: "S", user: "U" }, new AbortController().signal);
+    let text = "";
+    let error: unknown = null;
+    try {
+      for await (const d of stream) text += d;
+    } catch (e) {
+      error = e;
+    }
+    return { calls: () => calls, text, error };
+  }
+
+  test("a 400 about thinking retries once", async () => {
+    const r = await go(errBody("thinking: disabled is not supported for this model"));
+    expect(r.calls()).toBe(2);
+    expect(r.text).toBe("ok");
+    expect(r.error).toBeNull();
+  });
+  test("a usage-limit 400 fails once without a retry", async () => {
+    const r = await go(errBody("You have reached your specified API usage limits. You will regain access on 2026-12-01 at 00:00 UTC."));
+    expect(r.calls()).toBe(1);
+    expect(r.error).toBeInstanceOf(Anthropic.BadRequestError);
+  });
+  test("any other 400 fails once without a retry", async () => {
+    const r = await go(errBody("messages: field required"));
+    expect(r.calls()).toBe(1);
+    expect(r.error).toBeInstanceOf(Anthropic.BadRequestError);
+  });
+});
+
+describe("describeLlmError messages", () => {
+  const apiErr = (status: number, message: string) =>
+    Anthropic.APIError.generate(status, { type: "error", error: { type: "x", message } }, `${status} raw`, new Headers());
+  test("usage limit with a date", () => {
+    const e = apiErr(400, "You have reached your specified API usage limits. You will regain access on 2026-12-01 at 00:00 UTC.");
+    expect(describeLlmError(e)).toBe("Claude API: usage limit reached — access returns 2026-12-01 00:00 UTC");
+  });
+  test("usage limit without a date invents none", () => {
+    expect(describeLlmError(apiErr(400, "API usage limit reached"))).toBe("Claude API: usage limit reached");
+  });
+  test("auth, 429, 529", () => {
+    expect(describeLlmError(apiErr(401, "invalid x-api-key"))).toContain("authentication failed");
+    expect(describeLlmError(apiErr(429, "slow down"))).toContain("rate limited");
+    expect(describeLlmError(apiErr(529, "Overloaded"))).toContain("overloaded");
+  });
+  test("generic 400 shows the message, not JSON, capped", () => {
+    expect(describeLlmError(apiErr(400, "messages: field required"))).toBe("Claude API: bad request (messages: field required)");
+    const long = describeLlmError(apiErr(400, "x".repeat(400)));
+    expect(long).not.toContain("{");
+    expect(long.length).toBeLessThan(200);
+  });
+  test("network error", () => {
+    expect(describeLlmError(new Anthropic.APIConnectionError({ message: "fetch failed" }))).toBe("Claude API: connection failed");
+  });
+});
+
 describe("describeLlmError", () => {
   test("missing key and unknown errors", () => {
     expect(describeLlmError(new MissingKeyError("x"))).toBe("Claude API: ANTHROPIC_API_KEY is not set");

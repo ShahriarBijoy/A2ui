@@ -247,8 +247,8 @@ export function anthropicLlm(env: ClaudeEnv, thinking: ThinkingSetting = COMPOSE
             }
           } catch (err) {
             // Insurance: if the API rejects the thinking-off setting, rerun once with adaptive/low, never silently.
-            if (yielded || (thinking !== "disabled" && thinking !== "between-tools") || !(err instanceof Anthropic.BadRequestError)) throw err;
-            console.warn(`composer: thinking "${thinking}" rejected by ${model} (${err.message}); rerunning once with adaptive thinking at effort low`);
+            if (yielded || (thinking !== "disabled" && thinking !== "between-tools") || !isThinkingRejection(err)) throw err;
+            console.warn(`composer: thinking "${thinking}" rejected by ${model} (${clip(apiMessage(err), 160)}); rerunning once with adaptive thinking at effort low`);
             ran = "adaptive-low";
             stream = start("adaptive-low");
             for await (const ev of stream) {
@@ -300,18 +300,46 @@ export function anthropicLlm(env: ClaudeEnv, thinking: ThinkingSetting = COMPOSE
 
 /** A short line for the error event: what failed and what to check, never the raw payload. */
 export function describeLlmError(err: unknown, fallbackPrefix = "Composer failed"): string {
+  if (err instanceof Anthropic.APIError) {
+    const limit = usageLimitLine(apiMessage(err));
+    if (limit) return limit;
+  }
   if (err instanceof MissingKeyError) return "Claude API: ANTHROPIC_API_KEY is not set";
   if (err instanceof Anthropic.AuthenticationError) return "Claude API: authentication failed (check ANTHROPIC_API_KEY)";
   if (err instanceof Anthropic.PermissionDeniedError) return "Claude API: permission denied for this key";
   if (err instanceof Anthropic.NotFoundError) return "Claude API: model not found (check LLM_MODEL)";
   if (err instanceof Anthropic.RateLimitError) return "Claude API: rate limited, try again in a moment";
   if (err instanceof Anthropic.OverloadedError) return "Claude API: overloaded, try again";
-  if (err instanceof Anthropic.BadRequestError) return `Claude API: bad request (${clip(err.message, 140)})`;
+  if (err instanceof Anthropic.BadRequestError) return `Claude API: bad request (${clip(apiMessage(err), 160)})`;
   if (err instanceof Anthropic.InternalServerError) return `Claude API: server error ${err.status}`;
   if (err instanceof Anthropic.APIConnectionTimeoutError) return "Claude API: request timed out";
   if (err instanceof Anthropic.APIConnectionError) return "Claude API: connection failed";
   if (err instanceof Anthropic.APIError) return `Claude API: error ${err.status ?? ""}`.trim();
   return `${fallbackPrefix}: ${clip(err instanceof Error ? err.message : String(err), 140)}`;
+}
+
+/** The API's human message (body.error.message); err.message is "400 {raw json}", which is useless on screen. */
+function apiMessage(err: InstanceType<typeof Anthropic.APIError>): string {
+  const body: unknown = err.error;
+  if (isPlainObject(body)) {
+    const inner = body.error;
+    if (isPlainObject(inner) && typeof inner.message === "string" && inner.message) return inner.message;
+    if (typeof body.message === "string" && body.message) return body.message;
+  }
+  return err.message;
+}
+
+/** Only a 400 that names the thinking parameter justifies the adaptive retry; anything else would just fail twice. */
+function isThinkingRejection(err: unknown): err is InstanceType<typeof Anthropic.BadRequestError> {
+  return err instanceof Anthropic.BadRequestError && /thinking/i.test(apiMessage(err));
+}
+
+/** The regain date is parsed from the message, never invented. */
+function usageLimitLine(message: string): string | null {
+  if (!/usage limit|regain access/i.test(message)) return null;
+  const m = /regain access on (\d{4}-\d{2}-\d{2})(?: at (\d{2}:\d{2}))?\s*(UTC)?/i.exec(message);
+  if (!m) return "Claude API: usage limit reached";
+  return `Claude API: usage limit reached — access returns ${m[1]}${m[2] ? " " + m[2] : ""} UTC`;
 }
 
 function clip(s: string, n: number): string {
