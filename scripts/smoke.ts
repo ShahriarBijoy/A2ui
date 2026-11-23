@@ -16,10 +16,10 @@
  */
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import type { Action, CheckRule, JsonValue } from "@shared/a2ui";
+import type { A2uiMessage, Action, CheckRule, JsonValue } from "@shared/a2ui";
 import { isChildTemplate, isPlainObject } from "@shared/a2ui";
 import { getAt } from "@shared/pointer";
-import type { Mode, TurnEvent } from "@shared/protocol";
+import type { Knob, Mode, TurnEvent, TurnRequest } from "@shared/protocol";
 import { SCENARIOS, type ScenarioExpect, type ScenarioStep } from "@shared/scenarios";
 import { evalChecks } from "../src/client/a2ui/evaluate";
 import { templateState } from "../src/client/a2ui/template";
@@ -200,6 +200,8 @@ function sameJson(a: JsonValue | undefined, b: unknown): boolean {
 // ── One turn ──────────────────────────────────────────────────────────────────
 
 type StepResult = {
+  /** Classification aid printed under the line (route, knobs sent, composer lines, surface). */
+  diag: string[];
   job: Job;
   run: number;
   step: number;
@@ -245,6 +247,7 @@ function evaluate(job: Job, run: number, step: number, st: StoreApi, agent: Agen
   // Demo sources answer in 0 ms; only live web searches belong in the search columns.
   const searches = fetches.filter((f) => f.source === "search");
   const result: StepResult = {
+    diag: [],
     job,
     run,
     step,
@@ -310,6 +313,62 @@ function evaluate(job: Job, run: number, step: number, st: StoreApi, agent: Agen
   return result;
 }
 
+// ── Diagnostics (to classify misses: composer, router or the smoke matcher) ──────
+
+function short(v: unknown, n = 70): string {
+  const s = JSON.stringify(v) ?? String(v);
+  return s.length > n ? s.slice(0, n - 1) + "…" : s;
+}
+
+function describeMsg(msg: A2uiMessage): string {
+  if ("createSurface" in msg) return `createSurface ${msg.createSurface.surfaceId}`;
+  if ("deleteSurface" in msg) return `deleteSurface ${msg.deleteSurface.surfaceId}`;
+  if ("updateDataModel" in msg) return `updateDataModel ${msg.updateDataModel.surfaceId} ${msg.updateDataModel.path ?? "/"} ${short(msg.updateDataModel.value)}`;
+  return `updateComponents ${msg.updateComponents.surfaceId} ${msg.updateComponents.components.map((c) => `${String(c.id)}/${String(c.component)}`).join(",")}`;
+}
+
+function describeKnob(k: Knob): string {
+  if (k.type === "bool") return `${k.label} [${k.component} bool] current=${k.current}`;
+  const keys = k.options.map((o) => o.key);
+  const shown = keys.length > 10 ? `${keys.slice(0, 10).join(",")},… (${keys.length})` : keys.join(",");
+  return `${k.label} [${k.component} ${k.type}] path=${k.path} current=${short(k.current, 40)} options=${shown}`;
+}
+
+function describeData(data: JsonValue): string {
+  if (!isPlainObject(data)) return short(data);
+  return Object.entries(data)
+    .map(([k, v]) => (Array.isArray(v) ? `${k}[${v.length}]` : `${k}=${short(v, 60)}`))
+    .join(", ");
+}
+
+/** The route event and Jev's reason, the knobs the request carried, what the composer/knob lines wrote, and the surface. */
+function diagnose(st: StoreApi, surfaceId: string | null | undefined, agent: AgentItem | null, request: TurnRequest | null): string[] {
+  const s = st.getState();
+  const out: string[] = [];
+  if (agent) {
+    const events = s.recordings[agent.turnId]?.events ?? [];
+    const route = events.find((e) => e.ev.type === "route")?.ev;
+    out.push(
+      route?.type === "route"
+        ? `route: kind=${route.kind} decision=${route.decision} patches=${route.patches} engine=${route.engine} ${route.ms} ms; reason: ${route.reason}`
+        : "route: none (the turn was not routed)",
+    );
+    const lines = events.flatMap(({ ev }) => (ev.type === "a2ui" && ev.origin !== "data" ? [`${ev.origin}: ${describeMsg(ev.msg)}`] : []));
+    if (lines.length) out.push(`lines: ${lines.join(" | ")}`);
+    if (agent.caption) out.push(`caption: ${agent.caption}`);
+  }
+  if (request) {
+    const knobs = request.surface?.knobs ?? [];
+    out.push(request.surface ? `knobs sent (surface ${request.surface.id}): ${knobs.length ? knobs.map(describeKnob).join("; ") : "none"}` : "knobs sent: no surface");
+  }
+  const surface = surfaceId ? s.surfaces[surfaceId] : undefined;
+  if (surface) {
+    out.push(`surface ${surface.id}: ${Object.entries(surface.components).map(([id, c]) => `${id}/${typeOf(c)}${c.status === "refused" ? "(refused)" : ""}`).join(", ")}`);
+    out.push(`data ${surface.id}: ${describeData(surface.data)}`);
+  }
+  return out;
+}
+
 // ── Formatting ────────────────────────────────────────────────────────────────
 
 const ms = (v: number | null) => (v === null ? "–" : v >= 1000 ? `${(v / 1000).toFixed(2)} s` : `${v} ms`);
@@ -337,6 +396,7 @@ function printResult(r: StepResult): void {
   if (r.route) parts.push(`route ${r.route}`);
   const why = [...r.reasons, ...r.notes];
   console.log(`${head} ${lineLabel(r)} · ${parts.join(" · ")}${why.length ? ` · ${why.join("; ")}` : ""}`);
+  for (const d of r.diag) console.log(`    diag ${d}`);
 }
 
 function median(values: number[]): number | null {
@@ -436,10 +496,20 @@ function gitHead(): string {
 async function runJob(job: Job, run: number, opts: Options, key: string, results: StepResult[]): Promise<void> {
   const st = createStore();
   st.setMode(job.mode);
+  /** The body the turn client sent, kept for the diagnostics (its knobs). */
+  let lastRequest: TurnRequest | null = null;
   const client = createTurnClient({
     store: st,
     // The browser's apiFetch, against another origin.
     fetch: (path, init) => {
+      if (typeof init.body === "string") {
+        try {
+          lastRequest = JSON.parse(init.body) as TurnRequest;
+        } catch (err) {
+          console.warn("smoke: could not read the request body for diagnostics", err);
+          lastRequest = null;
+        }
+      }
       const headers = new Headers(init.headers);
       headers.set("x-demo-key", key);
       if (init.body && !headers.has("content-type")) headers.set("content-type", "application/json");
@@ -452,7 +522,7 @@ async function runJob(job: Job, run: number, opts: Options, key: string, results
     const notes: string[] = [];
     if (blocked) {
       const r: StepResult = {
-        job, run, step: i, status: "not run", reasons: [blocked], notes, firstUi: null, screen: null, data: null, done: null,
+        diag: [], job, run, step: i, status: "not run", reasons: [blocked], notes, firstUi: null, screen: null, data: null, done: null,
         outTokens: null, searchMs: null, records: null, blocks: null, route: null, expectOk: null, model: null,
       };
       results.push(r);
@@ -460,6 +530,7 @@ async function runJob(job: Job, run: number, opts: Options, key: string, results
       continue;
     }
     const before = lastAgent(st);
+    lastRequest = null;
     if ("say" in step) {
       await client.sendTurn({ input: { type: "utterance", text: step.say }, display: step.say, via: "text" });
     } else {
@@ -468,6 +539,7 @@ async function runJob(job: Job, run: number, opts: Options, key: string, results
       const target = surface ? findTapTarget(surface, step.tap) : null;
       if (!surface || !target) {
         const r: StepResult = {
+          diag: diagnose(st, surface?.id, before, null),
           job, run, step: i, status: "fail", reasons: [`no OptionCard/Button action starting with "${step.tap}" on the newest surface`], notes,
           firstUi: null, screen: null, data: null, done: null, outTokens: null, searchMs: null, records: null, blocks: null, route: null, expectOk: null, model: null,
         };
@@ -486,12 +558,16 @@ async function runJob(job: Job, run: number, opts: Options, key: string, results
     const agent = lastAgent(st);
     if (!agent || agent === before) throw new Error("the turn client started no turn");
     const r = evaluate(job, run, i, st, agent, step.expect, notes);
+    const patchMiss = step.expect?.patchOnly === true && (r.route !== "patch" || r.reasons.some((x) => x.startsWith("LLM was called")));
+    if (job.mode === "a2ui" && (patchMiss || r.expectOk === false)) {
+      r.diag = diagnose(st, agent.surfaceId ?? agent.updatedSurfaceId ?? st.getState().newestSurfaceId, agent, lastRequest);
+    }
     results.push(r);
     printResult(r);
     if (opts.raw) {
       mkdirSync(opts.raw, { recursive: true });
       const rec = st.getState().recordings[agent.turnId];
-      writeFileSync(join(opts.raw, `${job.mode}-${job.id}-run${run + 1}-step${i + 1}.json`), JSON.stringify({ input: agent.retry.input, ...rec }, null, 1));
+      writeFileSync(join(opts.raw, `${job.mode}-${job.id}-run${run + 1}-step${i + 1}.json`), JSON.stringify({ input: agent.retry.input, request: lastRequest, diag: r.diag, ...rec }, null, 1));
     }
     if (agent.status === "error" && /^HTTP 40[13]/.test(agent.error ?? "")) {
       throw new Error(`stopping: ${agent.error} (check DEMO_KEY)`);
