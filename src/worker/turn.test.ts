@@ -616,7 +616,66 @@ describe("runTurn: live search data lines", () => {
     expect(prompts).toHaveLength(2);
     expect(calls).toBe(1);
     expect(events.filter((e) => e.type === "fetch")).toHaveLength(1);
+    // The retry's List is on s3: the reused search must fill s3, not the current surface s2.
+    const data = events.filter((e) => e.type === "a2ui" && e.origin === "data");
+    expect(data).toHaveLength(1);
+    expect(valueOf(data[0])).toMatchObject({ surfaceId: "s3", path: "/results" });
     expect(events.find((e) => e.type === "usage")).toMatchObject({ first_ui_ms: expect.any(Number) });
+    expect(events.at(-1)).toEqual({ type: "done" });
+  });
+
+  /** Attempt 1 writes only the search line and a caption; the retry builds s3 and repeats the line. */
+  async function retriedSearch(opts: { searchMs: number; captionDelayMs: number }) {
+    let attempt = 0;
+    const llm: Llm = {
+      streamText() {
+        attempt++;
+        const first = attempt === 1;
+        return {
+          async *[Symbol.asyncIterator]() {
+            if (first) {
+              yield `${SEARCH}\n`;
+              await new Promise((r) => setTimeout(r, opts.captionDelayMs));
+              yield '{"caption":"x"}\n';
+            } else {
+              yield `${CREATE}\n${SEARCH}\n${ROOT}\n{"caption":"y"}\n`;
+            }
+          },
+          async result() {
+            return { usage, stopReason: "end_turn" };
+          },
+          abort() {},
+        };
+      },
+      async callTools() {
+        throw new Error("unused");
+      },
+    };
+    let calls = 0;
+    const search = async () => {
+      calls++;
+      await new Promise((r) => setTimeout(r, opts.searchMs));
+      return found(2);
+    };
+    const events = await collect(request({ decision: false }), deps({ llm, search }));
+    return { events, calls, data: events.filter((e) => e.type === "a2ui" && e.origin === "data") };
+  }
+
+  test("a reused search that finished before attempt 1's caption still fills the retry's surface", async () => {
+    const { events, calls, data } = await retriedSearch({ searchMs: 0, captionDelayMs: 20 });
+    expect(calls).toBe(1);
+    expect(data).toHaveLength(1);
+    expect(valueOf(data[0]).surfaceId).toBe("s3");
+    // Held until the retry's createSurface, then data and its fetch event, once.
+    expect(events.map(label)).toEqual(["llm:createSurface", "data:updateDataModel", "fetch", "llm:updateComponents", "caption", "usage", "done"]);
+  });
+
+  test("a reused search that finishes after the retry's createSurface fills the retry's surface", async () => {
+    const { calls, data, events } = await retriedSearch({ searchMs: 40, captionDelayMs: 0 });
+    expect(calls).toBe(1);
+    expect(data).toHaveLength(1);
+    expect(valueOf(data[0]).surfaceId).toBe("s3");
+    expect(events.filter((e) => e.type === "fetch")).toHaveLength(1);
     expect(events.at(-1)).toEqual({ type: "done" });
   });
 

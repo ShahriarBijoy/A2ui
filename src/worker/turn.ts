@@ -447,6 +447,8 @@ async function composeA2ui(req: TurnRequest, deps: TurnDeps, send: Emit, signal:
     }
   };
   const fallbackSurface = () => createdSurface ?? req.surface?.id ?? req.nextSurfaceId;
+  /** Nothing shown and nothing about to be: held demo data is a screen once flushed, a held search result is not. */
+  const noScreen = () => firstUi === null && !pending.some((p) => p.ui);
   /** Resolved data goes to this turn's new surface, waits for it while the model still writes, else the fallback. */
   const deliver = async (into: string, records: JsonValue, after: TurnEvent, ui: boolean) => {
     if (!createdSurface && holding) {
@@ -470,7 +472,8 @@ async function composeA2ui(req: TurnRequest, deps: TurnDeps, send: Emit, signal:
       warn(`composer line repaired (closing brackets): ${line.slice(0, 160)}`);
     }
     if (c.kind === "caption") {
-      await flushPending(fallbackSurface());
+      // With no screen yet a retry may follow; held data then waits for the retry's surface (streamOnce).
+      if (!noScreen()) await flushPending(fallbackSurface());
       caption = c.text;
       return;
     }
@@ -523,7 +526,12 @@ async function composeA2ui(req: TurnRequest, deps: TurnDeps, send: Emit, signal:
     await deliver(into, res.records, after, true);
   };
 
-  const streamOnce = async (p: Prompt): Promise<LlmResult> => {
+  // Without thinking the composer occasionally answers a tap with a caption only (measured ~1 in 10
+  // confirm taps). One retry costs ~1.5 s; an unchanged screen on stage costs more. A refusal or a
+  // max_tokens stop would only repeat, so those are not retried.
+  const retryable = (r: LlmResult) => noScreen() && r.stopReason !== "refusal" && r.stopReason !== "max_tokens";
+
+  const streamOnce = async (p: Prompt, mayRetry: boolean): Promise<LlmResult> => {
     const stream = deps.llm.streamText(p, signal);
     const splitter = new LineSplitter();
     const it = stream[Symbol.asyncIterator]();
@@ -538,8 +546,13 @@ async function composeA2ui(req: TurnRequest, deps: TurnDeps, send: Emit, signal:
       // After a max_tokens stop the unterminated last line is cut off: it must parse as written.
       const cutOff = result.stopReason === "max_tokens";
       for (const line of splitter.flush()) await handle(line, { repair: !cutOff });
-      holding = false;
-      await flushPending(fallbackSurface());
+      // When a retry follows, data still waiting for a surface (and a reused search that has not
+      // answered yet) keeps waiting for the retry's createSurface: on the old surface the retry's List
+      // would never fill.
+      if (!(mayRetry && retryable(result))) {
+        holding = false;
+        await flushPending(fallbackSurface());
+      }
       if (firstUi !== null && caption !== null) await send({ type: "caption", text: caption });
       caption = null;
       return result;
@@ -552,14 +565,11 @@ async function composeA2ui(req: TurnRequest, deps: TurnDeps, send: Emit, signal:
     }
   };
 
-  const first = await streamOnce(prompt);
+  const first = await streamOnce(prompt, true);
   let usage = first.usage;
   let stopReason = first.stopReason;
-  // Without thinking the composer occasionally answers a tap with a caption only (measured ~1 in 10
-  // confirm taps). One retry costs ~1.5 s; an unchanged screen on stage costs more. A refusal or a
-  // max_tokens stop would only repeat, so those are not retried.
-  if (firstUi === null && stopReason !== "refusal" && stopReason !== "max_tokens") {
-    const retry = await streamOnce({ ...prompt, user: `${prompt.user}\n${COMPOSER_RETRY_NOTE}` });
+  if (retryable(first)) {
+    const retry = await streamOnce({ ...prompt, user: `${prompt.user}\n${COMPOSER_RETRY_NOTE}` }, false);
     usage = addUsage(usage, retry.usage);
     stopReason = retry.stopReason;
   }
