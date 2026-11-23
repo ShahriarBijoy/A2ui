@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import type { Knob, RouteResult, TurnEvent, TurnRequest } from "@shared/protocol";
 import type { Llm, LlmUsage, Prompt, TextStream, WidgetsReply } from "./claude";
+import { COMPOSER_RETRY_NOTE } from "./prompts";
 import { encodeEvent, parseTurnRequest, patchCaption, runTurn, SSE_HEADERS, sseResponse, widgetEvent, type TurnDeps } from "./turn";
 import { generateFlights } from "./data/flights";
 
@@ -302,10 +303,31 @@ describe("runTurn: compose path (a2ui)", () => {
     expect(events.map((e) => e.type)).toEqual(["a2ui", "usage", "done"]);
   });
 
-  test("an answer without any A2UI line ends with an error after the usage", async () => {
-    const events = await collect(request({ decision: false }), deps({ llm: fakeLlm(['{"caption":"only words"}\n']) }));
-    expect(events.map((e) => e.type)).toEqual(["caption", "usage", "error", "done"]);
-    expect(events[2]).toEqual({ type: "error", message: "The composer returned no screen" });
+  test("a caption-only answer is retried once with a note; usage sums both calls", async () => {
+    const answers = ['{"caption":"only words"}\n', MINIMAL];
+    const prompts: Prompt[] = [];
+    const llm: Llm = {
+      streamText(p) {
+        prompts.push(p);
+        return fakeStream([answers[prompts.length - 1]]);
+      },
+      async callTools() {
+        throw new Error("unused");
+      },
+    };
+    const events = await collect(request({ decision: false }), deps({ llm }));
+    expect(events.map((e) => e.type)).toEqual(["caption", "a2ui", "caption", "usage", "done"]);
+    expect(prompts).toHaveLength(2);
+    expect(prompts[1].user).toBe(`${prompts[0].user}\n${COMPOSER_RETRY_NOTE}`);
+    expect(events[3]).toMatchObject({ input_tokens: 20, output_tokens: 40, cache_read_tokens: 10 });
+  });
+
+  test("still no A2UI line after the retry → usage, then error", async () => {
+    const llm = fakeLlm(['{"caption":"only words"}\n']);
+    const events = await collect(request({ decision: false }), deps({ llm }));
+    expect(events.map((e) => e.type)).toEqual(["caption", "caption", "usage", "error", "done"]);
+    expect(events[3]).toEqual({ type: "error", message: "The composer returned no screen" });
+    expect(llm.prompts).toHaveLength(2);
   });
 });
 

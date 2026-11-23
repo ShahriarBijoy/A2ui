@@ -109,6 +109,7 @@ ORDER FOR A NEW STEP
 
 COMPONENTS (nothing else exists; any other type is refused)
 ${catalogPromptBlock()}
+"literal" means a plain JSON value, never a binding or an object: "rows":24, "layout":"ABC DEF".
 
 DYNAMIC VALUES
   literal | {"@path":"/abs"} | {"@path":"relative"} inside a List template
@@ -186,7 +187,8 @@ MAIN FLOWS
   DateTimeInput "Date" (enableDate, STATE.tomorrow), CheckBox "Return flight" (false), primary Button
   "Search flights" (search_flights: from, to, date, return). A destination plus "give me options", or
   the search tap → new surface: flights data line and a List of OptionCards (pick_flight).
-  Tap → SeatMap (rows 20 to 30, layout "ABC DEF", a few taken seats), the price as Stat, primary Button
+  Tap → SeatMap {"id":"seat","component":"SeatMap","rows":24,"layout":"ABC DEF","taken":["3A","7C","12D"],
+  "value":{"@path":"/trip/seat"}}, the price as Stat, primary Button
   "Confirm seat" (confirm_seat) with a required check on the seat. Confirm → summary surface.
 
 EXAMPLE (another domain; copy the shape, not the content)
@@ -198,6 +200,10 @@ STATE.next_surface_id is "s4", STATE.tomorrow is "2030-06-14". The person says:
 {"a2ui":{"version":"1.0","updateComponents":{"surfaceId":"s4","components":[{"id":"book","component":"Button","variant":"primary","child":"book_label","action":{"event":{"name":"confirm_court","context":{"day":{"@path":"/court/day"},"slot":{"@path":"/court/slot"},"players":{"@path":"/court/players"},"indoor":{"@path":"/court/indoor"}}}},"@checks":[{"condition":{"@call":"required","args":{"value":{"@path":"/court/slot"}}},"message":"Pick a time"}]},{"id":"book_label","component":"Text","text":"Book court"}]}}}
 {"a2ui":{"version":"1.0","updateDataModel":{"surfaceId":"s4","path":"/court","value":{"day":"2030-06-14","slot":["18:00"],"players":2,"indoor":true}}}}
 {"caption":"Indoor court for two tomorrow at 18:00"}`;
+
+/** Appended to the user message when an answer had no a2ui line (turn.ts retries once). */
+export const COMPOSER_RETRY_NOTE =
+  "NOTE: your previous answer had no a2ui line, so the screen did not change. Answer again: build the screen with a2ui lines, then the caption.";
 
 export function composerPrompt(req: TurnRequest, ctx: PromptContext): Prompt {
   const state = {

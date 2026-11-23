@@ -24,10 +24,19 @@ import {
   type WidgetName,
 } from "@shared/protocol";
 import type Anthropic from "@anthropic-ai/sdk";
-import { classifyLine, describeLlmError, FenceStripper, LineSplitter, type Llm, type ToolCall } from "./claude";
+import {
+  classifyLine,
+  describeLlmError,
+  FenceStripper,
+  LineSplitter,
+  type Llm,
+  type LlmUsage,
+  type Prompt,
+  type ToolCall,
+} from "./claude";
 import { findPlaces, placeQuery, resolveData, type DataDefaults } from "./data";
 import { generateFlights, isIsoDate } from "./data/flights";
-import { composerPrompt, htmlPrompt, widgetsPrompt, type PromptContext } from "./prompts";
+import { COMPOSER_RETRY_NOTE, composerPrompt, htmlPrompt, widgetsPrompt, type PromptContext } from "./prompts";
 
 export type Emit = (ev: TurnEvent) => void | Promise<void>;
 
@@ -312,8 +321,6 @@ function dataDefaults(ctx: PromptContext): DataDefaults {
 async function composeA2ui(req: TurnRequest, deps: TurnDeps, send: Emit, signal: AbortSignal): Promise<void> {
   const prompt = composerPrompt(req, deps.context);
   const t0 = deps.now();
-  const stream = deps.llm.streamText(prompt, signal);
-  const splitter = new LineSplitter();
   let firstUi: number | null = null;
   let skipped = 0;
   let createdSurface: string | null = null;
@@ -374,29 +381,48 @@ async function composeA2ui(req: TurnRequest, deps: TurnDeps, send: Emit, signal:
     }
   };
 
-  const it = stream[Symbol.asyncIterator]();
-  try {
-    for (;;) {
-      const r = await abortable(it.next(), signal);
-      if (r.done) break;
-      for (const line of splitter.push(r.value)) await handle(line);
+  const streamOnce = async (p: Prompt): Promise<LlmUsage> => {
+    const stream = deps.llm.streamText(p, signal);
+    const splitter = new LineSplitter();
+    const it = stream[Symbol.asyncIterator]();
+    try {
+      for (;;) {
+        const r = await abortable(it.next(), signal);
+        if (r.done) break;
+        for (const line of splitter.push(r.value)) await handle(line);
+      }
+      for (const line of splitter.flush()) await handle(line);
+      await flushPending(fallbackSurface());
+      return await abortable(stream.usage(), signal);
+    } catch (err) {
+      stream.abort();
+      throw err;
     }
-    for (const line of splitter.flush()) await handle(line);
-    await flushPending(fallbackSurface());
-    const usage = await abortable(stream.usage(), signal);
-    await send({
-      type: "usage",
-      ...usage,
-      first_ui_ms: firstUi,
-      compose_ms: Math.round(deps.now() - t0),
-      skipped_lines: skipped,
-    });
-    // A caption-only answer leaves the screen unchanged; an error gives the speaker "Try again" (U15).
-    if (firstUi === null) await send({ type: "error", message: "The composer returned no screen" });
-  } catch (err) {
-    stream.abort();
-    throw err;
-  }
+  };
+
+  let usage = await streamOnce(prompt);
+  // Without thinking the composer occasionally answers a tap with a caption only (measured ~1 in 10
+  // confirm taps). One retry costs ~1.5 s; an unchanged screen on stage costs more.
+  if (firstUi === null) usage = addUsage(usage, await streamOnce({ ...prompt, user: `${prompt.user}\n${COMPOSER_RETRY_NOTE}` }));
+  await send({
+    type: "usage",
+    ...usage,
+    first_ui_ms: firstUi,
+    compose_ms: Math.round(deps.now() - t0),
+    skipped_lines: skipped,
+  });
+  // Still nothing: an error gives the speaker "Try again" (U15).
+  if (firstUi === null) await send({ type: "error", message: "The composer returned no screen" });
+}
+
+function addUsage(a: LlmUsage, b: LlmUsage): LlmUsage {
+  return {
+    model: b.model,
+    input_tokens: a.input_tokens + b.input_tokens,
+    output_tokens: a.output_tokens + b.output_tokens,
+    cache_read_tokens: a.cache_read_tokens + b.cache_read_tokens,
+    cache_write_tokens: a.cache_write_tokens + b.cache_write_tokens,
+  };
 }
 
 /** The client rejects a createSurface whose catalogId does not end with the catalog path; fix a mangled id. */
