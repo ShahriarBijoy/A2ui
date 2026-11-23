@@ -105,7 +105,9 @@ function detail(knobs: Knob[], answers: JevAnswers | undefined): string {
   knobs.forEach((k, i) => {
     if (k.type === "choice") {
       const a = answers["k" + i];
-      if (a?.type === "choice") parts.push(k.label + " " + top(a.probabilities));
+      const t = answers["k" + i + "t"];
+      if (a?.type === "choice") parts.push(k.label + (t ? " date " : " ") + top(a.probabilities));
+      if (t?.type === "choice") parts.push(k.label + " time " + top(t.probabilities));
     } else if (k.type === "bool") {
       const a = answers["k" + i];
       if (a?.type === "noul") parts.push(k.label + " noul " + a.noul.toFixed(2));
@@ -406,6 +408,36 @@ console.log("\n10. Time chips at the edges (18:00..21:00) + Guests stepper 4");
 for (const [cur, text, exp] of edgeLines) {
   process.stdout.write("[" + cur + "] ");
   await runLine(dinner, { booking: { place: "Placeholder Bistro", time: [cur], guests: 4 } }, text, exp);
+}
+
+// ── 11. Date + time in one DateTimeInput (talk-clock smoke run) ───────────────
+// "later" must change the time on the same date; only a named day changes the date.
+const both: CatalogComponent[] = [
+  { id: "when", component: "DateTimeInput", label: "Date and time", enableDate: true, enableTime: true, value: { "@path": "/booking/when" } },
+  { id: "guests", component: "Stepper", label: "Guests", min: 1, max: 12, value: { "@path": "/booking/guests" } },
+];
+const fri = nextWeekday(5);
+const base2 = day(2) === fri ? day(3) : day(2);
+const plus1 = (isoDay: string) => {
+  const [y, m, d] = isoDay.split("-").map(Number);
+  return iso(new Date(y, m - 1, d + 1));
+};
+const W = "/booking/when";
+const bothLines: [string, string, Expect][] = [
+  ["19:00", "We're six, and later.", { patches: { [G]: [6], [W]: [base2 + "T20:00"] } }],
+  ["19:00", "later", { patches: { [W]: [base2 + "T20:00"] } }],
+  ["19:00", "make it Friday", { patches: { [W]: [fri + "T19:00"] } }],
+  ["19:00", "at nine on Friday", { patches: { [W]: [fri + "T21:00"] } }],
+  ["19:00", "at nine", { patches: { [W]: [base2 + "T21:00"] } }],
+  ["19:00", "half past seven", { patches: { [W]: [base2 + "T19:30"] } }],
+  ["19:00", "the day after", { patches: { [W]: [plus1(base2) + "T19:00"] } }],
+  ["19:00", "book it", { compose: true }],
+  ["23:00", "later", { patches: { [W]: [plus1(base2) + "T00:00"] } }],
+];
+console.log("\n11. Date + time DateTimeInput (" + base2 + ") + Guests stepper 4");
+for (const [time, text, exp] of bothLines) {
+  process.stdout.write("[" + time + "] ");
+  await runLine(both, { booking: { when: base2 + "T" + time, guests: 4 } }, text, exp);
 }
 
 globalThis.fetch = realFetch;

@@ -186,13 +186,11 @@ function dateTimeKnob(
   }
   if (!hasDate && hasTime) return timeKnob(base, curTime ? Number(curTime[1]) * 60 + Number(curTime[2]) : null);
   if (!hasDate) return null;
-  // Date + time: the date is the knob, the time is carried over unchanged.
-  let keepTime = "";
   if (hasTime) {
-    if (!curTime) return null;
-    keepTime = "T" + curTime[1] + ":" + curTime[2];
+    if (!curTime || !curDate) return null;
+    return dateTimeBothKnob(base, curDate[0], Number(curTime[1]) * 60 + Number(curTime[2]), now);
   }
-  return dateKnob(base, curDate ? curDate[0] : null, keepTime, now);
+  return dateKnob(base, curDate ? curDate[0] : null, now);
 }
 
 function timeKnob(base: BaseFields, curMin: number | null): ChoiceKnob | null {
@@ -219,24 +217,80 @@ function timeKnob(base: BaseFields, curMin: number | null): ChoiceKnob | null {
   };
 }
 
-function dateKnob(base: BaseFields, curIso: string | null, keepTime: string, now: Date): ChoiceKnob | null {
+function dateKnob(base: BaseFields, curIso: string | null, now: Date): ChoiceKnob | null {
+  return {
+    ...base,
+    type: "choice",
+    current: curIso,
+    currentLabel: curIso ? dateLabel(curIso, now) : "not set",
+    options: dateOptions(curIso, now, ""),
+  };
+}
+
+/** today..today+14 except the current date; `suffix` carries a time part ("T19:00") unchanged. */
+function dateOptions(curIso: string | null, now: Date, suffix: string): KnobOption[] {
   const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
   const options: KnobOption[] = [];
   for (let i = 0; i <= DATE_DAYS_AHEAD; i++) {
     const d = new Date(today.getFullYear(), today.getMonth(), today.getDate() + i);
     const iso = isoDate(d);
     if (iso === curIso) continue;
-    options.push({ key: shortDate(d), label: longDate(d) + " (" + relativeDays(i) + ")", value: iso + keepTime });
+    options.push({ key: shortDate(d), label: longDate(d) + " (" + relativeDays(i) + ")", value: iso + suffix });
   }
-  let currentLabel = "not set";
-  if (curIso) {
-    const [y, m, dd] = curIso.split("-").map(Number);
-    const d = new Date(y, m - 1, dd);
-    const diff = Math.round((d.getTime() - today.getTime()) / 86_400_000);
-    currentLabel = longDate(d) + " (" + relativeDays(diff) + ")";
-    if (keepTime) currentLabel += ", " + keepTime.slice(1);
+  return options;
+}
+
+function dateLabel(iso: string, now: Date): string {
+  const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+  const [y, m, dd] = iso.split("-").map(Number);
+  const d = new Date(y, m - 1, dd);
+  return longDate(d) + " (" + relativeDays(Math.round((d.getTime() - today.getTime()) / 86_400_000)) + ")";
+}
+
+/**
+ * Date + time: one knob (one path) with two option sets. Date options keep the time; time slots
+ * (±6 h, circular) keep the date, crossing midnight into the next/previous date. buildRouteRequest
+ * asks one question per part. As a date-only knob, "We're six, and later." moved the date to the
+ * next day and "at nine on Friday" silently dropped the nine (smoke run + reproduction).
+ */
+function dateTimeBothKnob(base: BaseFields, curIso: string, curMin: number, now: Date): ChoiceKnob {
+  const time = hhmm(curMin);
+  const [y, mo, d] = curIso.split("-").map(Number);
+  const slots: { m: number; diff: number }[] = [];
+  for (let m = 0; m < 24 * 60; m += 30) {
+    if (m === curMin) continue;
+    const diff = ((m - curMin + 720 + 1440) % 1440) - 720;
+    if (Math.abs(diff) <= TIME_WINDOW_MIN) slots.push({ m, diff });
   }
-  return { ...base, type: "choice", current: curIso ? curIso + keepTime : null, currentLabel, options };
+  slots.sort((a, b) => a.diff - b.diff);
+  const timeOptions: KnobOption[] = slots.map(({ m, diff }) => {
+    const shift = curMin + diff < 0 ? -1 : curMin + diff >= 24 * 60 ? 1 : 0;
+    const date = isoDate(new Date(y, mo - 1, d + shift));
+    const day = shift > 0 ? ", next day" : shift < 0 ? ", previous day" : "";
+    return { key: hhmm(m), label: hhmm(m) + " (" + relativeMinutes(diff) + day + ")", value: date + "T" + hhmm(m) };
+  });
+  return {
+    ...base,
+    type: "choice",
+    current: curIso + "T" + time,
+    currentLabel: dateLabel(curIso, now) + ", " + time,
+    options: [...dateOptions(curIso, now, "T" + time), ...timeOptions],
+  };
+}
+
+const DATETIME_RE = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}$/;
+const TIME_KEY_RE = /^\d{2}:\d{2}$/;
+
+/** A date+time knob (see dateTimeBothKnob): its options split into date options and time slots by key. */
+function isDateTimeKnob(knob: ChoiceKnob): boolean {
+  return knob.component === "DateTimeInput" && typeof knob.current === "string" && DATETIME_RE.test(knob.current);
+}
+
+function splitDateTime(knob: ChoiceKnob): { dates: KnobOption[]; times: KnobOption[] } {
+  return {
+    dates: knob.options.filter((o) => !TIME_KEY_RE.test(o.key)),
+    times: knob.options.filter((o) => TIME_KEY_RE.test(o.key)),
+  };
 }
 
 function seatKnob(
@@ -348,6 +402,11 @@ export function knobQuestionId(index: number, option?: number): string {
   return option === undefined ? "k" + index : "k" + index + "_" + option;
 }
 
+/** Question id of the time part of a date+time knob (k<i> is its date part). */
+export function knobTimeQuestionId(index: number): string {
+  return "k" + index + "t";
+}
+
 export function buildRouteRequest(utterance: string, knobs: Knob[]): RouteRequest {
   const screen: JsonObject = {};
   const questions: JevQuestions = {
@@ -355,7 +414,9 @@ export function buildRouteRequest(utterance: string, knobs: Knob[]): RouteReques
   };
   knobs.forEach((knob, i) => {
     screen[uniqueKey(screen, knob.label)] = knobCurrentLabel(knob);
-    if (knob.type === "choice") {
+    if (knob.type === "choice" && isDateTimeKnob(knob)) {
+      Object.assign(questions, dateTimeQuestions(knob, i));
+    } else if (knob.type === "choice") {
       const criteria: Record<string, string> = { [UNCHANGED]: "No change asked for " + knob.label };
       for (const o of knob.options) {
         if (o.key !== UNCHANGED && !Object.hasOwn(criteria, o.key)) criteria[o.key] = o.label;
@@ -383,6 +444,37 @@ export function buildRouteRequest(utterance: string, knobs: Knob[]): RouteReques
   });
   if (knobs.length > 0) questions[GUARD_QUESTION] = guardQuestion(knobs);
   return { state: { utterance, screen }, questions };
+}
+
+/** Two questions over one path: which date (only a named day changes it) and which time (later/earlier, "at nine"). */
+function dateTimeQuestions(knob: ChoiceKnob, index: number): JevQuestions {
+  const { dates, times } = splitDateTime(knob);
+  const curDate = (knob.current as string).slice(0, 10);
+  const curTime = (knob.current as string).slice(11, 16);
+  const dateCriteria: Record<string, string> = { [UNCHANGED]: "No change asked for the date" };
+  for (const o of dates) if (!Object.hasOwn(dateCriteria, o.key)) dateCriteria[o.key] = o.label;
+  const timeCriteria: Record<string, string> = { [UNCHANGED]: "No change asked for the time" };
+  for (const o of times) if (!Object.hasOwn(timeCriteria, o.key)) timeCriteria[o.key] = o.label;
+  const [y, m, d] = curDate.split("-").map(Number);
+  const dayAfter = dates.find((o) => String(o.value).startsWith(isoDate(new Date(y, m - 1, d + 1))));
+  const dateHint =
+    " Only a named day changes the date (such as 'on Friday', 'tomorrow' or 'the day after')." +
+    (dayAfter ? " If the speaker says the day after, pick " + dayAfter.key + "." : "") +
+    " Later, earlier or a time of day alone leave the date unchanged.";
+  const timeHint = relativeHint({ ...knob, current: curTime, options: times }, "time").text + " A day name alone (such as 'on Friday') leaves the time unchanged.";
+  const dateLabelText = knob.currentLabel.slice(0, knob.currentLabel.lastIndexOf(", "));
+  return {
+    [knobQuestionId(index)]: {
+      type: "choice",
+      instructions: "What should the date of '" + knob.label + "' be after this request? Current date: " + dateLabelText + "." + dateHint,
+      criteria: dateCriteria,
+    },
+    [knobTimeQuestionId(index)]: {
+      type: "choice",
+      instructions: "What should the time of '" + knob.label + "' be after this request? Current time: " + curTime + "." + timeHint,
+      criteria: timeCriteria,
+    },
+  };
 }
 
 type Flavour = "time" | "date" | "number" | "plain";
@@ -508,38 +600,67 @@ export function answersToRoute(answers: JevAnswers, knobs: Knob[], ms: number, e
   };
 }
 
+type Pick =
+  | { status: "unchanged" }
+  | { status: "partial"; sentinel: string | null }
+  | { status: "changed"; option: KnobOption; p: number };
+
+function pickOption(options: KnobOption[], ans: JevAnswer | undefined, threshold: number): Pick {
+  if (!ans || ans.type !== "choice") return { status: "unchanged" };
+  const probs = ans.probabilities;
+  const pUnchanged = probs[UNCHANGED] ?? 0;
+  let best: KnobOption | null = null;
+  let bestP = -1;
+  for (const o of options) {
+    const p = probs[o.key];
+    if (typeof p === "number" && p > bestP) {
+      best = o;
+      bestP = p;
+    }
+  }
+  const top = argmax(probs);
+  // Speaker asked to change it (low P(unchanged), or a change is the top answer) but no option is clear.
+  const askedToChange = pUnchanged < 1 - threshold || (top !== null && top !== UNCHANGED);
+  if (best === null || bestP < threshold) {
+    if (!askedToChange) return { status: "unchanged" };
+    // A sentinel ("later" past the last chip) is not an option: name it so the inspector says why.
+    const sentinel = top !== null && top !== UNCHANGED && !options.some((o) => o.key === top) ? top : null;
+    return { status: "partial", sentinel };
+  }
+  if (top === UNCHANGED) return { status: "unchanged" };
+  return { status: "changed", option: best, p: bestP };
+}
+
 function knobOutcome(knob: Knob, index: number, answers: JevAnswers): KnobOutcome {
   const threshold = LIMITS.routeKnobThreshold;
-  if (knob.type === "choice") {
-    const ans = answers[knobQuestionId(index)];
-    if (!ans || ans.type !== "choice") return { status: "unchanged" };
-    const probs = ans.probabilities;
-    const pUnchanged = probs[UNCHANGED] ?? 0;
-    let bestKey: string | null = null;
-    let bestP = -1;
-    for (const o of knob.options) {
-      const p = probs[o.key];
-      if (typeof p === "number" && p > bestP) {
-        bestKey = o.key;
-        bestP = p;
-      }
-    }
-    const top = argmax(probs);
-    // Speaker asked to change it (low P(unchanged), or a change is the top answer) but no option is clear.
-    const askedToChange = pUnchanged < 1 - threshold || (top !== null && top !== UNCHANGED);
-    if (bestKey === null || bestP < threshold) {
-      if (!askedToChange) return { status: "unchanged" };
-      // A sentinel ("later" past the last chip) is not an option: name it so the inspector says why.
-      const sentinel = top !== null && top !== UNCHANGED && !knob.options.some((o) => o.key === top);
-      return { status: "partial", label: knob.label + (sentinel ? " (no " + top + " option)" : "") };
-    }
-    if (top === UNCHANGED) return { status: "unchanged" };
-    const option = knob.options.find((o) => o.key === bestKey);
-    if (!option) return { status: "unchanged" };
+  if (knob.type === "choice" && isDateTimeKnob(knob)) {
+    const { dates, times } = splitDateTime(knob);
+    const d = pickOption(dates, answers[knobQuestionId(index)], threshold);
+    const t = pickOption(times, answers[knobTimeQuestionId(index)], threshold);
+    if (d.status === "partial") return { status: "partial", label: knob.label + " (date)" };
+    if (t.status === "partial") return { status: "partial", label: knob.label + " (time)" };
+    if (d.status === "unchanged" && t.status === "unchanged") return { status: "unchanged" };
+    let value: string;
+    if (d.status === "changed" && t.status === "changed") value = String(d.option.value).slice(0, 10) + "T" + t.option.key;
+    else if (t.status === "changed") value = String(t.option.value);
+    else if (d.status === "changed") value = String(d.option.value);
+    else return { status: "unchanged" };
+    const parts = [d.status === "changed" ? d.option.key : null, t.status === "changed" ? t.option.key : null].filter(Boolean);
+    const confidence = Math.min(d.status === "changed" ? d.p : 1, t.status === "changed" ? t.p : 1);
     return {
       status: "changed",
-      patch: { knobId: knob.id, path: knob.path, value: option.value, confidence: bestP },
-      display: knob.label + " → " + option.key,
+      patch: { knobId: knob.id, path: knob.path, value, confidence },
+      display: knob.label + " → " + parts.join(" "),
+    };
+  }
+  if (knob.type === "choice") {
+    const pick = pickOption(knob.options, answers[knobQuestionId(index)], threshold);
+    if (pick.status === "unchanged") return { status: "unchanged" };
+    if (pick.status === "partial") return { status: "partial", label: knob.label + (pick.sentinel ? " (no " + pick.sentinel + " option)" : "") };
+    return {
+      status: "changed",
+      patch: { knobId: knob.id, path: knob.path, value: pick.option.value, confidence: pick.p },
+      display: knob.label + " → " + pick.option.key,
     };
   }
   // Nouls are P(the speaker asks to flip it): flip at ≥ 0.6, keep at ≤ 0.4, in between is half an edit.

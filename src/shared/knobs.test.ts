@@ -160,6 +160,22 @@ describe("deriveKnobs", () => {
     expect(c.options.find((o) => o.key === "Wed 25 Nov")?.value).toBe("2026-11-25T08:15");
   });
 
+  test("date+time input: date options keep the time, time slots keep the date and cross midnight", () => {
+    const [k] = deriveKnobs(
+      [{ id: "w", component: "DateTimeInput", label: "When", enableDate: true, enableTime: true, value: { "@path": "/when" } }],
+      { when: "2026-11-25T23:00" },
+      NOW,
+    );
+    const c = choice(k);
+    expect(c.current).toBe("2026-11-25T23:00");
+    expect(c.currentLabel).toBe("Wednesday 25 November 2026 (in 2 days), 23:00");
+    expect(c.options.find((o) => o.key === "Fri 27 Nov")?.value).toBe("2026-11-27T23:00");
+    expect(c.options.some((o) => o.key === "Wed 25 Nov")).toBe(false);
+    expect(c.options.find((o) => o.key === "00:00")).toEqual({ key: "00:00", label: "00:00 (1 h later, next day)", value: "2026-11-26T00:00" });
+    expect(c.options.find((o) => o.key === "17:00")?.value).toBe("2026-11-25T17:00");
+    expect(c.options.some((o) => o.key === "23:00")).toBe(false);
+  });
+
   test("seat map: free seats only, current and taken excluded, window/aisle labels", () => {
     const [k] = deriveKnobs(
       [{ id: "seat", component: "SeatMap", rows: 3, layout: "AB CD", taken: ["1A", "3D"], value: { "@path": "/seat" } }],
@@ -361,6 +377,48 @@ describe("buildRouteRequest", () => {
     expect(nearEnd.instructions).toEndWith("Current value: 20:30. If the speaker only says earlier without a time, pick 19:30 (one hour earlier)." + COUNT);
     expect(nearEnd.criteria.later).toBeUndefined();
     expect(Object.keys(buildRouteRequest("hello", []).questions)).toEqual(["kind"]);
+  });
+
+  test("date+time knob → a date question (k<i>) and a time question (k<i>t) over the same path", () => {
+    const knobs = deriveKnobs(
+      [{ id: "w", component: "DateTimeInput", label: "When", enableDate: true, enableTime: true, value: { "@path": "/when" } }],
+      { when: "2026-11-25T19:00" },
+      NOW,
+    );
+    const { questions } = buildRouteRequest("we're six, and later", knobs);
+    expect(Object.keys(questions)).toEqual(["kind", "k0", "k0t", "guard"]);
+    const date = questions.k0;
+    const time = questions.k0t;
+    if (date.type !== "choice" || time.type !== "choice") throw new Error("both parts should be choices");
+    expect(date.instructions).toBe(
+      "What should the date of 'When' be after this request? Current date: Wednesday 25 November 2026 (in 2 days). Only a named day changes the date (such as 'on Friday', 'tomorrow' or 'the day after'). If the speaker says the day after, pick Thu 26 Nov. Later, earlier or a time of day alone leave the date unchanged.",
+    );
+    expect(Object.keys(date.criteria).every((key) => !/^\d{2}:\d{2}$/.test(key))).toBe(true);
+    expect(date.criteria.unchanged).toBe("No change asked for the date");
+    expect(time.instructions).toBe(
+      "What should the time of 'When' be after this request? Current time: 19:00. If the speaker only says later without a time, pick 20:00 (one hour later). If the speaker only says earlier without a time, pick 18:00 (one hour earlier). A count of people, such as 'we're six', is not a time. A day name alone (such as 'on Friday') leaves the time unchanged.",
+    );
+    expect(Object.keys(time.criteria).filter((key) => key !== "unchanged").every((key) => /^\d{2}:\d{2}$/.test(key))).toBe(true);
+  });
+
+  test("date+time answers combine into one patch: time only keeps the date, date only keeps the time, both, wrap, partial", () => {
+    const comp: CatalogComponent[] = [
+      { id: "w", component: "DateTimeInput", label: "When", enableDate: true, enableTime: true, value: { "@path": "/when" } },
+    ];
+    const at = (when: string) => deriveKnobs(comp, { when }, NOW);
+    const k = (edit: number): JevAnswers[string] => ({ type: "choice", choice: "edit", confidence: 1, probabilities: { edit, new: 1 - edit, other: 0 } });
+    const c = (probs: Record<string, number>): JevAnswers[string] => ({ type: "choice", choice: "x", confidence: 1, probabilities: probs });
+    const g: JevAnswers[string] = { type: "noul", noul: 0.1 };
+    const route = (when: string, date: Record<string, number>, time: Record<string, number>) =>
+      answersToRoute({ kind: k(0.95), k0: c(date), k0t: c(time), guard: g }, at(when), 1, "jev");
+    expect(route("2026-11-25T19:00", { unchanged: 0.98 }, { "20:00": 0.97, unchanged: 0.03 }).patches[0].value).toBe("2026-11-25T20:00");
+    expect(route("2026-11-25T19:00", { "Fri 27 Nov": 0.99 }, { unchanged: 0.99 }).patches[0].value).toBe("2026-11-27T19:00");
+    const both = route("2026-11-25T19:00", { "Fri 27 Nov": 0.97 }, { "21:00": 0.95 });
+    expect(both.patches).toEqual([{ knobId: "/when", path: "/when", value: "2026-11-27T21:00", confidence: 0.95 }]);
+    expect(both.reason).toBe("edit 0.95: When → Fri 27 Nov 21:00");
+    expect(route("2026-11-25T23:00", { unchanged: 0.99 }, { "00:00": 0.99 }).patches[0].value).toBe("2026-11-26T00:00");
+    const partial = route("2026-11-25T19:00", { unchanged: 0.2, "Fri 27 Nov": 0.4, "Sat 28 Nov": 0.4 }, { "21:00": 0.95 });
+    expect(partial).toMatchObject({ decision: "compose", reason: "partial edit: When (date)" });
   });
 
   test("date knobs get the date relative-word hint", () => {
