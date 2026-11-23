@@ -214,6 +214,75 @@ describe("fix round 1", () => {
   });
 });
 
+describe("phase 2", () => {
+  const fetchEv = (over: Partial<Extract<TurnEvent, { type: "fetch" }>> = {}): TurnEvent => ({
+    type: "fetch",
+    source: "search",
+    query: "italian near the venue",
+    ok: true,
+    records: 4,
+    ms: 3100,
+    searches: 2,
+    input_tokens: 900,
+    output_tokens: 120,
+    ...over,
+  });
+
+  test("fetch events: metrics.fetches in order, a search counts as an LLM call with its tokens, recorded", () => {
+    const s = createStore();
+    const t = s.beginTurn(utter("italian nearby"));
+    s.applyTurnEvent(t, fetchEv());
+    s.applyTurnEvent(t, fetchEv({ query: "second", ok: false, records: 0, error: "no results", input_tokens: 50, output_tokens: 10 }));
+    const st = s.getState();
+    const metrics = agentOf(s, t)?.metrics;
+    expect(metrics?.fetches?.map((f) => f.query)).toEqual(["italian near the venue", "second"]);
+    expect(metrics?.fetches?.[1]).toMatchObject({ ok: false, error: "no results" });
+    expect(metrics?.fetches?.[0]).not.toHaveProperty("type");
+    expect(metrics?.llmCalled).toBe(true);
+    expect(st.totals).toMatchObject({ llmCalls: 2, inputTokens: 950, outputTokens: 130 });
+    expect(st.recordings[t].events.map((e) => e.ev.type)).toEqual(["fetch", "fetch"]);
+    // The wire log stays A2UI-only.
+    expect(st.wire).toEqual([]);
+  });
+
+  test("a demo-source fetch is not an LLM call; missing token counts add nothing", () => {
+    const s = createStore();
+    const t = s.beginTurn(utter("flights"));
+    s.applyTurnEvent(t, fetchEv({ source: "flights", input_tokens: undefined, output_tokens: undefined, searches: undefined }));
+    expect(s.getState().totals).toMatchObject({ llmCalls: 0, inputTokens: 0, outputTokens: 0 });
+    expect(agentOf(s, t)?.metrics.llmCalled).toBe(false);
+    expect(agentOf(s, t)?.metrics.fetches).toHaveLength(1);
+  });
+
+  test("a late fetch does not flip a done or failed turn back", () => {
+    const s = createStore();
+    const t1 = s.beginTurn(utter("a"));
+    s.applyTurnEvent(t1, { type: "done" });
+    s.applyTurnEvent(t1, fetchEv());
+    expect(agentOf(s, t1)?.status).toBe("done");
+    const t2 = s.beginTurn(utter("b"));
+    s.applyTurnEvent(t2, { type: "error", message: "boom" });
+    s.applyTurnEvent(t2, fetchEv());
+    expect(agentOf(s, t2)).toMatchObject({ status: "error", error: "boom" });
+    expect(s.getState().activeTurnId).toBe(t2);
+  });
+
+  test("deleteSurface prunes the promotion record, so the id can become the newest again", () => {
+    const s = createStore();
+    const root = { version: "1.0" as const, updateComponents: { surfaceId: "s1", components: [{ id: "root", component: "Divider" }] } };
+    const t1 = s.beginTurn(utter("a"));
+    s.applyTurnEvent(t1, a2ui(root));
+    expect(s.getState().newestSurfaceId).toBe("s1");
+    s.applyTurnEvent(t1, a2ui({ version: "1.0", deleteSurface: { surfaceId: "s1" } }));
+    expect(s.getState().newestSurfaceId).toBeNull();
+    s.applyTurnEvent(t1, { type: "done" });
+    const t2 = s.beginTurn(utter("b"));
+    s.applyTurnEvent(t2, a2ui(root));
+    expect(s.getState().newestSurfaceId).toBe("s1");
+    expect(agentOf(s, t2)?.surfaceId).toBe("s1");
+  });
+});
+
 describe("buildTurnRequest", () => {
   test("derives the thread (user, tap, agent), snapshots the newest surface, picks a fresh surface id", () => {
     const s = createStore();

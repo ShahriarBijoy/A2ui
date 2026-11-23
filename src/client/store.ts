@@ -237,7 +237,11 @@ export function createStore(): StoreApi {
       promotedSurfaceIds.add(res.surfaceId);
       newestSurfaceId = res.surfaceId;
     }
-    if (res.kind === "deleteSurface" && newestSurfaceId === res.surfaceId) newestSurfaceId = null;
+    if (res.kind === "deleteSurface") {
+      // A deleted id that comes back is a new step and must be promotable again.
+      promotedSurfaceIds.delete(res.surfaceId);
+      if (newestSurfaceId === res.surfaceId) newestSurfaceId = null;
+    }
 
     const totals = res.refused > 0 ? { ...s.totals, refusals: s.totals.refusals + res.refused } : s.totals;
     return {
@@ -389,6 +393,29 @@ export function createStore(): StoreApi {
             },
           };
           break;
+        case "fetch": {
+          // A live search is a Claude call; demo sources (places, flights) are not, so they add no call.
+          const search = ev.source === "search";
+          a = {
+            ...a,
+            metrics: {
+              ...a.metrics,
+              fetches: [...(a.metrics.fetches ?? []), omitType(ev)],
+              llmCalled: a.metrics.llmCalled || search,
+            },
+          };
+          s = {
+            ...s,
+            totals: {
+              ...s.totals,
+              llmCalls: s.totals.llmCalls + (search ? 1 : 0),
+              inputTokens: s.totals.inputTokens + finite(ev.input_tokens),
+              outputTokens: s.totals.outputTokens + finite(ev.output_tokens),
+            },
+          };
+          // Status untouched: a late fetch never turns a done or failed turn back into streaming.
+          break;
+        }
         case "error":
           a = { ...a, status: "error", error: ev.message };
           break;
