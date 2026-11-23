@@ -90,18 +90,21 @@ function TranscriptLine({ transcript, voice, handsFree }: { transcript: Transcri
     line = <span className="truncate text-destructive">{error}</span>;
   } else if (heard) {
     // Keep the newest words in view; the line never wraps, so the bar never grows.
-    const max = 140;
+    const max = 400;
     const finalShown = tailText(transcript.final, max);
     const interimShown = tailText(transcript.interim, Math.max(20, max - finalShown.length));
+    // rtl box + ltr isolate: short text sits left, long text overflows to the left, so the newest words stay visible.
     line = (
-      <span className={cn("truncate", !listening && "text-muted-foreground")}>
-        <span>{finalShown}</span>
-        {transcript.interim && (
-          <span className="text-muted-foreground/70">
-            {transcript.final ? " " : ""}
-            {interimShown}
-          </span>
-        )}
+      <span dir="rtl" className={cn("min-w-0 flex-1 truncate text-left", !listening && "text-muted-foreground")}>
+        <span dir="ltr" className="[unicode-bidi:isolate]">
+          <span>{finalShown}</span>
+          {transcript.interim && (
+            <span className="text-muted-foreground/70">
+              {transcript.final ? " " : ""}
+              {interimShown}
+            </span>
+          )}
+        </span>
       </span>
     );
   } else if (listening) {

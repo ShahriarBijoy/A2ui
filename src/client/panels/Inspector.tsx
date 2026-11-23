@@ -113,8 +113,8 @@ function WireRow({ entry }: { entry: WireEntry }) {
       </button>
       {open && (
         <div className="px-3.5 pb-2.5 pl-8">
-          <div className="max-h-80 overflow-auto rounded-md border bg-card px-3 py-2">
-            <JsonView value={entry.json} className="text-[0.6875rem]" />
+          <div className="max-h-[26rem] overflow-auto rounded-md border bg-card px-3 py-2">
+            <JsonView value={entry.json} className="text-[0.75rem]" />
           </div>
         </div>
       )}

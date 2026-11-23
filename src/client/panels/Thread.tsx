@@ -56,7 +56,12 @@ export function Thread({ thread, surfaces, newestSurfaceId, decision, replaying 
           {timeline.length === 0 ? (
             <EmptyState />
           ) : (
-            <div ref={contentRef} className="mx-auto flex w-full max-w-[46rem] flex-col gap-8 px-10 pt-4 pb-10">
+            // During a replay the surfaces stay at full strength for the audience, but taps cannot interfere.
+            <div
+              ref={contentRef}
+              inert={replaying}
+              className="mx-auto flex w-full max-w-[46rem] flex-col gap-8 px-10 pt-4 pb-10"
+            >
               {timeline.map((e) => {
                 if (e.kind === "user") return <UserLine key={e.item.id} item={e.item} />;
                 if (e.kind === "surface") {
@@ -64,7 +69,7 @@ export function Thread({ thread, surfaces, newestSurfaceId, decision, replaying 
                     <div key={`surface-${e.surfaceId}`} className="flex flex-col items-start gap-2">
                       <Surface
                         surfaceId={e.surfaceId}
-                        interactive={e.surfaceId === interactiveId && !replaying}
+                        interactive={e.surfaceId === interactiveId}
                         onAction={sendAction}
                       />
                       <p className="font-mono text-[0.75rem] text-muted-foreground">applied directly · {e.surfaceId}</p>
@@ -84,7 +89,7 @@ export function Thread({ thread, surfaces, newestSurfaceId, decision, replaying 
                     item={item}
                     surfaceExists={item.surfaceId ? item.surfaceId in surfaces : false}
                     surfaceOwned={item.surfaceId ? owners.get(item.surfaceId) === item.id : false}
-                    interactive={item.surfaceId !== undefined && item.surfaceId === interactiveId && !replaying}
+                    interactive={item.surfaceId !== undefined && item.surfaceId === interactiveId}
                     awaitingRoute={awaitingRoute}
                   />
                 );

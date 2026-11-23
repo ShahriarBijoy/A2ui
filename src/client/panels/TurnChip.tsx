@@ -1,3 +1,4 @@
+import { Fragment } from "react";
 import { chipParts, type ChipTone } from "@/format";
 import { cn } from "@/lib/utils";
 import type { AgentItem } from "@/state";
@@ -13,21 +14,20 @@ const TONE: Record<ChipTone, string> = {
 export function TurnChip({ item }: { item: AgentItem }) {
   const parts = chipParts(item);
   return (
-    <p className="min-h-[1.6em] font-mono text-[0.8rem] leading-[1.6] text-muted-foreground" aria-label="Turn metrics">
+    <p className="min-h-[1.6em] max-w-full font-mono text-[0.8rem] leading-[1.6] text-muted-foreground" aria-label="Turn metrics">
       {item.replay && (
         <span className="mr-2 inline-block rounded-[0.3rem] border border-input px-1.5 text-[0.7rem] uppercase tracking-[0.12em] text-foreground">
           replay
         </span>
       )}
       {parts.map((p, i) => (
-        <span key={p.key} title={p.title} className="whitespace-nowrap">
-          {i > 0 && (
-            <span aria-hidden className="px-1.5 text-input">
-              ·
-            </span>
-          )}
-          <span className={cn(TONE[p.tone])}>{p.text}</span>
-        </span>
+        <Fragment key={p.key}>
+          {/* Plain spaces around the dot are the line-break opportunities; each value itself never splits. */}
+          {i > 0 && <span aria-hidden className="text-input">{" · "}</span>}
+          <span title={p.title} className={cn("whitespace-nowrap", TONE[p.tone])}>
+            {p.text}
+          </span>
+        </Fragment>
       ))}
     </p>
   );
