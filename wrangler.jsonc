@@ -14,7 +14,7 @@
     "LLM_MODEL": "claude-haiku-5-5",
     "JEV_MODEL": "jev-latest",
     "JEV_URL": "https://api.typesafe.ai/v1/systemone",
-    "VENUE_NAME": "TODO venue",
+    "VENUE_NAME": "JAAI (Just Add AI), Überseestadt",
     "VENUE_CITY": "Bremen"
   },
   "observability": { "enabled": true }

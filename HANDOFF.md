@@ -24,6 +24,12 @@ Contract files: `src/shared/{a2ui,catalog,protocol,pointer}.ts` and `src/client/
 - **S (stage shell, step 4 + UX):** landed (99349f0..0e83338, 27 tests). Headless checks pass at 1920 and 1280. **Review was running**; see `lane-S-review.md`.
 - Measured numbers are in NOTES.md → Measurements.
 
+## Fix rounds in flight at hand-off (check reports and git log)
+- R round 1: clearThread resets `replaying`; SSE client tests; **pending-list skeletons only while the owning turn streams**, then empty state or nothing.
+- W round 1 (step A): one caption per turn; check stop_reason on every call; count repaired lines; scenario steering removed; held-out lines re-run.
+- S round 1: the wire row stays in place on expand; `isTypingTarget` predicate so Slider and read-only focus doesn't kill Space and shortcuts. U8/U2 deviations accepted by ruling.
+- After those pass their scoped re-reviews: land the contract additions (fetch event, search source, `repaired_lines`), then dispatch phase 2 (W live search, S components), then deploy.
+
 ## Integration TODO (after the reviews and their fix rounds)
 1. Wire `GET /api/warm` → `warmJev(env)` in `src/worker/index.ts`. Call it from the client on page load and on Space-down (cold Jev was 810 ms against an 800 ms budget).
 2. Voice: add a minimum-length guard so one-word fragments like "I'" are not sent as turns (seen in lane S's live session).
@@ -45,7 +51,8 @@ Contract files: `src/shared/{a2ui,catalog,protocol,pointer}.ts` and `src/client/
 - Next AI Tinkerers Bremen meetup: **Wednesday 2026-11-25, 18:00 CET** (18:30 demos, 20:00 networking + food). https://bremen.aitinkerers.org/p/ai-tinkerers-bremen-4
 - Location says "exact location details will be provided later". The venue sponsor logo is **Just Add AI (JAAI)**, HQ Konsul-Smidt-Straße 8p, 28217 Bremen (Überseestadt / Europahafen). This is an inference.
 - **If this is the talk, the deadline is 2 days: apply PLAN's cut order up front.** Priorities: deploy → replay (never cut) → rehearsal → smoke numbers.
-- Real places near JAAI: a research agent writes `.superpowers/sdd/places-research.md`. Copy its JSON into `src/worker/data/places.json` after a sanity check, and set VENUE_NAME="JAAI, Überseestadt" (or the confirmed venue) and VENUE_CITY="Bremen".
+- **Owner direction (2026-11-23): no fixed data and no scripted flows.** Anyone can ask anything; the UI renders on the fly with skeletons while live data loads. `places.json` is NOT used for the product; places come from live web search (see `.superpowers/sdd/phase2-W-live-search-brief.md`). The research in `places-research.md` is only background.
+- The owner likes **voice-glow** (VoiceBeam) and **distortion-waves** (DistortionWave) from libraries.dev; see `phase2-S-components-brief.md`.
 
 ## Waiting on the owner
 - (Keys: ANTHROPIC_API_KEY and SONIOX_API_KEY were added to `.dev.vars` and verified live on 2026-11-23: Claude answered, Soniox temp key minted 201.)
