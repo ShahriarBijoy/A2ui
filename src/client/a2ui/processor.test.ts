@@ -1,7 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import type { SurfaceState } from "@/state";
 import { DINNER_STEP_2, FLIGHT_SEAT_MAP, REFUSED } from "./fixtures";
-import { applyMessage } from "./processor";
+import { applyMessage, DEFAULT_CHECK_MESSAGE } from "./processor";
 
 const CAT = "https://example.test/catalog/brick-box/v1";
 const v = "1.0" as const;
@@ -164,6 +164,52 @@ describe("updateComponents", () => {
     const { results, surfaces } = run([{ version: v, updateComponents: { surfaceId: "s4", components: [{ id: "root", component: "Divider" }] } }]);
     expect(results[0].created).toBe(true);
     expect(surfaces.s4.catalogId).toBe("");
+  });
+});
+
+describe("lenient @checks", () => {
+  const button = (checks: unknown) => ({
+    id: "go",
+    component: "Button",
+    child: "go_label",
+    action: { event: { name: "go" } },
+    "@checks": checks,
+  });
+  const required = { "@call": "required", args: { value: { "@path": "/seat" } } };
+  const apply = (checks: unknown) =>
+    applyMessage({}, { version: v, updateComponents: { surfaceId: "s1", components: [button(checks)] } }, { now: 1, turnId: "t1" });
+
+  test("a check without a message is kept with a default message, no error", () => {
+    const res = apply([{ condition: required }]);
+    expect(res.errors).toEqual([]);
+    const entry = res.surfaces.s1.components.go;
+    expect(entry.status).toBe("ok");
+    if (entry.status === "ok") expect(entry.def["@checks"]).toEqual([{ condition: required, message: DEFAULT_CHECK_MESSAGE }]);
+  });
+  test("a check without a condition is dropped (with an error); the Button and other checks stay", () => {
+    const res = apply([{ message: "no condition" }, { condition: required, message: "Pick a seat" }]);
+    expect(res.errors).toEqual([
+      { code: "VALIDATION_FAILED", surfaceId: "s1", path: "/components/0/@checks/0/condition", message: "A check needs a condition" },
+    ]);
+    expect(res.refused).toBe(0);
+    expect(res.acceptedTypes).toEqual(["Button"]);
+    const entry = res.surfaces.s1.components.go;
+    expect(entry.status).toBe("ok");
+    if (entry.status === "ok") expect(entry.def["@checks"]).toEqual([{ condition: required, message: "Pick a seat" }]);
+  });
+  test("a check calling an unknown function is dropped, not the Button", () => {
+    const res = apply([{ condition: { "@call": "and", args: { values: [{ "@call": "isAdmin" }] } }, message: "x" }]);
+    expect(res.errors[0]?.path).toBe("/components/0/@checks/0/condition/args/values/0/@call");
+    const entry = res.surfaces.s1.components.go;
+    expect(entry.status).toBe("ok");
+    if (entry.status === "ok") expect(entry.def["@checks"]).toEqual([]);
+  });
+  test("@checks that is not a list is removed with an error", () => {
+    const res = apply({ condition: required });
+    expect(res.errors[0]?.path).toBe("/components/0/@checks");
+    const entry = res.surfaces.s1.components.go;
+    expect(entry.status).toBe("ok");
+    if (entry.status === "ok") expect(entry.def).not.toHaveProperty("@checks");
   });
 });
 

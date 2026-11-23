@@ -206,18 +206,20 @@ function updateComponents(
       refuse("/component", "Not in the catalog", "Unknown component " + JSON.stringify(type));
       return;
     }
-    const badCall = findUnknownCall(c);
+    // A bad check drops only that check (with its error); the Button is usually the screen's primary action.
+    const comp = sanitizeChecks(c, surfaceId, base, errors);
+    const badCall = findUnknownCall(comp);
     if (badCall) {
       refuse(badCall.path, "Unknown function", "Unknown function " + JSON.stringify(badCall.name));
       return;
     }
-    const problem = validateProps(type, c);
+    const problem = validateProps(type, comp);
     if (problem) {
       refuse("/" + problem.prop, problem.message, problem.message);
       return;
     }
     const wasOk = prev.components[id]?.status === "ok";
-    components[id] = { status: "ok", def: c as unknown as CatalogComponent, firstSeen };
+    components[id] = { status: "ok", def: comp as unknown as CatalogComponent, firstSeen };
     if (!wasOk && !counted.has(id)) {
       counted.add(id);
       acceptedTypes.push(type);
@@ -312,32 +314,70 @@ function changedLeaves(before: JsonValue | undefined, after: JsonValue | undefin
 
 // ── Validation ───────────────────────────────────────────────────────────────
 
-/** Pointer (relative to the component) of the first "@call" naming a function the renderer does not have. */
-function findUnknownCall(component: Raw): { name: string; path: string } | null {
-  const walk = (value: unknown, tokens: string[]): { name: string; path: string } | null => {
-    if (Array.isArray(value)) {
-      for (let i = 0; i < value.length; i++) {
-        const hit = walk(value[i], [...tokens, String(i)]);
-        if (hit) return hit;
-      }
-      return null;
-    }
-    if (!isPlainObject(value)) return null;
-    if (isFunctionCall(value) && !isFunctionName(value["@call"])) {
-      return { name: value["@call"], path: formatPointer([...tokens, "@call"]) };
-    }
-    for (const [key, v] of Object.entries(value)) {
-      const hit = walk(v, [...tokens, key]);
+type UnknownCall = { name: string; path: string };
+
+/** First "@call" under value naming a function the renderer does not have; path is relative to the walk's start. */
+function walkUnknownCall(value: unknown, tokens: string[]): UnknownCall | null {
+  if (Array.isArray(value)) {
+    for (let i = 0; i < value.length; i++) {
+      const hit = walkUnknownCall(value[i], [...tokens, String(i)]);
       if (hit) return hit;
     }
     return null;
-  };
-  for (const [key, v] of Object.entries(component)) {
-    if (key === "id" || key === "component") continue;
-    const hit = walk(v, [key]);
+  }
+  if (!isPlainObject(value)) return null;
+  if (isFunctionCall(value) && !isFunctionName(value["@call"])) {
+    return { name: value["@call"], path: formatPointer([...tokens, "@call"]) };
+  }
+  for (const [key, v] of Object.entries(value)) {
+    const hit = walkUnknownCall(v, [...tokens, key]);
     if (hit) return hit;
   }
   return null;
+}
+
+/** Pointer (relative to the component) of the first unknown "@call" in its props. */
+function findUnknownCall(component: Raw): UnknownCall | null {
+  for (const [key, v] of Object.entries(component)) {
+    if (key === "id" || key === "component") continue;
+    const hit = walkUnknownCall(v, [key]);
+    if (hit) return hit;
+  }
+  return null;
+}
+
+export const DEFAULT_CHECK_MESSAGE = "Please complete this step";
+
+/**
+ * Lenient "@checks": a check without a message gets a default one; a check whose condition is
+ * missing or calls an unknown function is dropped with a VALIDATION_FAILED error for that check.
+ * Returns the component with the cleaned list (or without "@checks" when it was not a list).
+ */
+function sanitizeChecks(c: Raw, surfaceId: string, base: string, errors: A2uiError[]): Raw {
+  const raw = c["@checks"];
+  if (raw === undefined) return c;
+  if (!Array.isArray(raw)) {
+    errors.push(err(surfaceId, base + "/@checks", "@checks must be a list of {condition, message}"));
+    const rest = { ...c };
+    delete rest["@checks"];
+    return rest;
+  }
+  const kept: { condition: unknown; message: string }[] = [];
+  raw.forEach((check: unknown, j: number) => {
+    const at = base + "/@checks/" + j;
+    if (!isPlainObject(check) || check.condition === undefined || check.condition === null) {
+      errors.push(err(surfaceId, at + "/condition", "A check needs a condition"));
+      return;
+    }
+    const bad = walkUnknownCall(check.condition, []);
+    if (bad) {
+      errors.push(err(surfaceId, at + "/condition" + bad.path, "Unknown function " + JSON.stringify(bad.name)));
+      return;
+    }
+    const message = typeof check.message === "string" && check.message.trim() !== "" ? check.message : DEFAULT_CHECK_MESSAGE;
+    kept.push({ condition: check.condition, message });
+  });
+  return { ...c, "@checks": kept };
 }
 
 function isChildList(v: unknown): boolean {
@@ -348,12 +388,6 @@ function isAction(v: unknown): boolean {
   if (!isPlainObject(v) || !isPlainObject(v.event)) return false;
   const { name, context } = v.event;
   return typeof name === "string" && name !== "" && (context === undefined || isPlainObject(context));
-}
-
-function isChecks(v: unknown): boolean {
-  return (
-    Array.isArray(v) && v.every((c) => isPlainObject(c) && "condition" in c && typeof c.message === "string")
-  );
 }
 
 /**
@@ -420,7 +454,6 @@ function validateProps(type: BrickName, c: Raw): { prop: string; message: string
     case "Divider":
       break;
   }
-  if (c["@checks"] !== undefined && !isChecks(c["@checks"])) return missing("@checks");
   if (c.weight !== undefined && typeof c.weight !== "number") return missing("weight");
   return null;
 }
