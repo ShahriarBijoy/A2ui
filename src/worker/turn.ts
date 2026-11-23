@@ -5,15 +5,17 @@
  */
 import {
   A2UI_VERSION,
+  isChildTemplate,
   isPathBinding,
   isPlainObject,
   messageSurfaceId,
   type A2uiMessage,
   type JsonObject,
   type JsonValue,
+  type WireComponent,
 } from "@shared/a2ui";
 import { CATALOG_PATH } from "@shared/catalog";
-import { getAt } from "@shared/pointer";
+import { formatPointer, getAt, parsePointer } from "@shared/pointer";
 import {
   LIMITS,
   MODES,
@@ -38,7 +40,7 @@ import {
 } from "./claude";
 import { resolveData, type DataDefaults } from "./data";
 import { generateFlights, isIsoDate } from "./data/flights";
-import { COMPOSER_RETRY_NOTE, composerPrompt, htmlPrompt, widgetsPrompt, type PromptContext } from "./prompts";
+import { COMPOSER_RETRY_NOTE, composerPrompt, composerUnreachableNote, htmlPrompt, widgetsPrompt, type PromptContext } from "./prompts";
 import { placeQuery, recordsToPlaces, restaurantProps, restaurantSearch } from "./restaurants";
 import { parseSearchArgs, SEARCH_TIMEOUT_MS, type SearchOutcome, type SearchRequest } from "./search";
 
@@ -431,9 +433,21 @@ async function composeA2ui(req: TurnRequest, deps: TurnDeps, send: Emit, signal:
    * sent at once it would land on the old surface (and createSurface resets the new one), so it waits
    * for the next A2UI message and goes to that message's surface. `after` is its fetch event.
    */
-  let pending: { into: string; records: JsonValue; after: TurnEvent; ui: boolean }[] = [];
+  let pending: { into: string; records: JsonValue; after: TurnEvent | null; ui: boolean; requeued?: boolean }[] = [];
   /** The caption is held until the attempt ends: it is sent once, and only if a screen exists. */
   let caption: string | null = null;
+  /** Components sent by the current attempt, per surface (createSurface starts a surface over). */
+  let sent = new Map<string, { created: boolean; comps: Map<string, WireComponent> }>();
+  /** Data paths the current attempt requested. */
+  let intos = new Set<string>();
+  /** Data already emitted: a retry that rebuilds the step gets it again on its own surface. */
+  const delivered: { into: string; records: JsonValue; ui: boolean }[] = [];
+  /** Unreachable Lists (and their templates) whose requested data shows nowhere; set when an attempt ends. */
+  let unshown: string[] = [];
+  /** surfaceId + " " + absolute path → the input type bound there: the request's knobs, then this turn's components. */
+  const bound = new Map<string, string>();
+  const boundKey = (surfaceId: string, path: string) => `${surfaceId} ${path}`;
+  if (req.surface) for (const k of req.surface.knobs) bound.set(boundKey(req.surface.id, k.path), k.component);
 
   /** `ui: false` for live search results: they arrive seconds later and are not the first UI. */
   const emitA2ui = async (msg: A2uiMessage, origin: "llm" | "data", ui = true) => {
@@ -444,25 +458,110 @@ async function composeA2ui(req: TurnRequest, deps: TurnDeps, send: Emit, signal:
     version: A2UI_VERSION,
     updateDataModel: { surfaceId, path: into, value: records },
   });
+  /** `after` is the data line's fetch event; a copy carried into a retry has none (it was sent once). */
+  const emitData = async (surfaceId: string, into: string, records: JsonValue, after: TurnEvent | null, ui: boolean) => {
+    await emitA2ui(dataMsg(surfaceId, into, records), "data", ui);
+    delivered.push({ into, records, ui });
+    if (after) await send(after);
+  };
   const flushPending = async (surfaceId: string) => {
     const held = pending;
     pending = [];
-    for (const p of held) {
-      await emitA2ui(dataMsg(surfaceId, p.into, p.records), "data", p.ui);
-      await send(p.after);
-    }
+    for (const p of held) await emitData(surfaceId, p.into, p.records, p.after, p.ui);
   };
   const fallbackSurface = () => createdSurface ?? req.surface?.id ?? req.nextSurfaceId;
   /** Nothing shown and nothing about to be: held demo data is a screen once flushed, a held search result is not. */
   const noScreen = () => firstUi === null && !pending.some((p) => p.ui);
   /** Resolved data goes to this turn's new surface, waits for it while the model still writes, else the fallback. */
   const deliver = async (into: string, records: JsonValue, after: TurnEvent, ui: boolean) => {
+    // A copy carried over from the attempt before gives way to a fresh delivery for the same path.
+    pending = pending.filter((p) => !(p.requeued && p.into === into));
     if (!createdSurface && holding) {
       pending.push({ into, records, after, ui });
       return;
     }
-    await emitA2ui(dataMsg(createdSurface ?? fallbackSurface(), into, records), "data", ui);
-    await send(after);
+    await emitData(createdSurface ?? fallbackSurface(), into, records, after, ui);
+  };
+  const track = (msg: A2uiMessage) => {
+    if ("createSurface" in msg) {
+      const id = msg.createSurface.surfaceId;
+      sent.set(id, { created: true, comps: new Map() });
+      for (const k of [...bound.keys()]) if (k.startsWith(`${id} `)) bound.delete(k);
+    } else if ("updateComponents" in msg) {
+      const id = msg.updateComponents.surfaceId;
+      let entry = sent.get(id);
+      if (!entry) {
+        entry = { created: false, comps: new Map() };
+        sent.set(id, entry);
+      }
+      for (const c of msg.updateComponents.components) {
+        if (!isPlainObject(c) || typeof c.id !== "string") continue;
+        entry.comps.set(c.id, c);
+        if (isPathBinding(c.value) && c.value["@path"].startsWith("/")) bound.set(boundKey(id, c.value["@path"]), String(c.component));
+      }
+    }
+  };
+  /** Input values in the shape their bound input expects, when this turn knows the input (a knob or a component sent now). */
+  const normalize = (msg: A2uiMessage): A2uiMessage => {
+    if (!("updateDataModel" in msg)) return msg;
+    const { surfaceId, path = "/", value } = msg.updateDataModel;
+    let fixed = 0;
+    const walk = (p: string, v: JsonValue): JsonValue => {
+      const type = bound.get(boundKey(surfaceId, p));
+      if (type) {
+        const next = normalizeInputValue(type, v);
+        if (next !== v) fixed++;
+        return next;
+      }
+      if (!isPlainObject(v)) return v;
+      const tokens = parsePointer(p);
+      const out: JsonObject = {};
+      for (const [k, child] of Object.entries(v)) out[k] = walk(formatPointer([...tokens, k]), child as JsonValue);
+      return out;
+    };
+    let next: JsonValue;
+    try {
+      next = walk(path, value);
+    } catch {
+      // A malformed pointer is the client's to reject; leave the message as written.
+      return msg;
+    }
+    if (fixed === 0) return msg;
+    warn(`composer value shape fixed (${fixed} input value(s)): ${JSON.stringify(msg.updateDataModel).slice(0, 160)}`);
+    return { version: A2UI_VERSION, updateDataModel: { ...msg.updateDataModel, value: next } };
+  };
+  /**
+   * Logs components that no chain from root reaches (the client never draws them) and returns the
+   * unreachable Lists, with their templates, whose requested data no reachable component shows.
+   */
+  const checkReachability = (): string[] => {
+    const lost: string[] = [];
+    let count = 0;
+    const reachable: WireComponent[] = [];
+    const orphanLists: { surfaceId: string; list: WireComponent }[] = [];
+    for (const [surfaceId, entry] of sent) {
+      const seeds = ["root", ...(!entry.created && req.surface?.id === surfaceId ? req.surface.components.map((c) => c.id) : [])];
+      const gone = new Set(unreachableIds(entry.comps, seeds));
+      if (gone.size > 0) {
+        count += gone.size;
+        lost.push(`${surfaceId}: ${[...gone].join(", ")}`);
+      }
+      for (const [id, c] of entry.comps) {
+        if (!gone.has(id)) reachable.push(c);
+        else if (c.component === "List") orphanLists.push({ surfaceId, list: c });
+      }
+    }
+    if (count > 0) warn(`composer sent ${count} component(s) not reachable from root (orphans ${count}): ${lost.join("; ")}`);
+    const out: string[] = [];
+    for (const { surfaceId, list } of orphanLists) {
+      const t = list.children;
+      if (!isChildTemplate(t) || !intos.has(t.path)) continue;
+      if (reachable.some((c) => bindsPath(c, t.path))) continue;
+      // An older List on the request surface may already show this path; its binding is not in the snapshot.
+      if (!sent.get(surfaceId)?.created && req.surface?.id === surfaceId && req.surface.components.some((c) => c.component === "List")) continue;
+      out.push(list.id, t.componentId);
+    }
+    return out;
   };
   const skip = (reason: string, line: string) => {
     skipped++;
@@ -486,7 +585,8 @@ async function composeA2ui(req: TurnRequest, deps: TurnDeps, send: Emit, signal:
     if (c.kind === "a2ui") {
       const checks = fixChecks(fixCatalogId(c.msg, deps.context.catalogId));
       if (checks.fixed > 0) warn(`composer @checks fixed (${checks.fixed} bare condition): ${line.slice(0, 160)}`);
-      const msg = checks.msg;
+      track(checks.msg);
+      const msg = normalize(checks.msg);
       if ("createSurface" in msg) {
         createdSurface = msg.createSurface.surfaceId;
         await emitA2ui(msg, "llm");
@@ -502,6 +602,7 @@ async function composeA2ui(req: TurnRequest, deps: TurnDeps, send: Emit, signal:
     if (c.source === "search") {
       const parsed = parseSearchArgs(args);
       if (!parsed.ok) return skip(parsed.error, line);
+      intos.add(into);
       const key = `search ${into} ${JSON.stringify(parsed.req)}`;
       // A retry that repeats the line reuses the search already running.
       if (live.has(key)) return;
@@ -528,6 +629,7 @@ async function composeA2ui(req: TurnRequest, deps: TurnDeps, send: Emit, signal:
     const tData = deps.now();
     const res = resolveData({ source: c.source, args }, dataDefaults(deps.context));
     if (!res.ok) return skip(res.error, line);
+    intos.add(into);
     const after: TurnEvent = { type: "fetch", source: res.source, query: res.query, ok: true, records: res.records.length, ms: Math.round(deps.now() - tData) };
     await deliver(into, res.records, after, true);
   };
@@ -535,7 +637,8 @@ async function composeA2ui(req: TurnRequest, deps: TurnDeps, send: Emit, signal:
   // Without thinking the composer occasionally answers a tap with a caption only (measured ~1 in 10
   // confirm taps). One retry costs ~1.5 s; an unchanged screen on stage costs more. A refusal or a
   // max_tokens stop would only repeat, so those are not retried.
-  const retryable = (r: LlmResult) => noScreen() && r.stopReason !== "refusal" && r.stopReason !== "max_tokens";
+  // A List whose data was requested but that root never reaches is a screen without its content: same retry.
+  const retryable = (r: LlmResult) => (noScreen() || unshown.length > 0) && r.stopReason !== "refusal" && r.stopReason !== "max_tokens";
 
   const streamOnce = async (p: Prompt, mayRetry: boolean): Promise<LlmResult> => {
     const stream = deps.llm.streamText(p, signal);
@@ -552,14 +655,17 @@ async function composeA2ui(req: TurnRequest, deps: TurnDeps, send: Emit, signal:
       // After a max_tokens stop the unterminated last line is cut off: it must parse as written.
       const cutOff = result.stopReason === "max_tokens";
       for (const line of splitter.flush()) await handle(line, { repair: !cutOff });
+      unshown = checkReachability();
+      const willRetry = mayRetry && retryable(result);
       // When a retry follows, data still waiting for a surface (and a reused search that has not
       // answered yet) keeps waiting for the retry's createSurface: on the old surface the retry's List
       // would never fill.
-      if (!(mayRetry && retryable(result))) {
+      if (!willRetry) {
         holding = false;
         await flushPending(fallbackSurface());
       }
-      if (firstUi !== null && caption !== null) await send({ type: "caption", text: caption });
+      // A retried attempt's caption describes a screen that is about to be rebuilt.
+      if (!willRetry && firstUi !== null && caption !== null) await send({ type: "caption", text: caption });
       caption = null;
       return result;
     } catch (err) {
@@ -575,7 +681,18 @@ async function composeA2ui(req: TurnRequest, deps: TurnDeps, send: Emit, signal:
   let usage = first.usage;
   let stopReason = first.stopReason;
   if (retryable(first)) {
-    const retry = await streamOnce({ ...prompt, user: `${prompt.user}\n${COMPOSER_RETRY_NOTE}` }, false);
+    let note = COMPOSER_RETRY_NOTE;
+    if (!noScreen()) {
+      note = composerUnreachableNote(unshown);
+      // The retry rebuilds the step, maybe on a surface that starts over: data waits for the retry's
+      // first message again, and what attempt 1 already delivered goes along.
+      createdSurface = null;
+      pending = [...pending, ...delivered.map((d) => ({ ...d, after: null, requeued: true }))];
+    }
+    sent = new Map();
+    intos = new Set();
+    unshown = [];
+    const retry = await streamOnce({ ...prompt, user: `${prompt.user}\n${note}` }, false);
     usage = addUsage(usage, retry.usage);
     stopReason = retry.stopReason;
   }
@@ -643,6 +760,77 @@ export function fixChecks(msg: A2uiMessage): { msg: A2uiMessage; fixed: number }
   });
   if (fixed === 0) return { msg, fixed };
   return { msg: { version: A2UI_VERSION, updateComponents: { ...msg.updateComponents, components } }, fixed };
+}
+
+/** Ids a component names as its children: child, children (ids, or a template's componentId), tabs[].child. */
+export function childIds(c: WireComponent): string[] {
+  const out: string[] = [];
+  if (typeof c.child === "string") out.push(c.child);
+  const kids = c.children;
+  if (Array.isArray(kids)) {
+    for (const k of kids) if (typeof k === "string") out.push(k);
+  } else if (isChildTemplate(kids)) {
+    out.push(kids.componentId);
+  }
+  if (Array.isArray(c.tabs)) for (const t of c.tabs) if (isPlainObject(t) && typeof t.child === "string") out.push(t.child);
+  return out;
+}
+
+/** Ids in `comps` that no child/children/tabs chain reaches from the seeds: the client never draws them. */
+export function unreachableIds(comps: ReadonlyMap<string, WireComponent>, seeds: Iterable<string>): string[] {
+  const reached = new Set<string>();
+  const stack = [...seeds];
+  for (let id = stack.pop(); id !== undefined; id = stack.pop()) {
+    if (reached.has(id)) continue;
+    reached.add(id);
+    const c = comps.get(id);
+    if (c) stack.push(...childIds(c));
+  }
+  return [...comps.keys()].filter((id) => !reached.has(id));
+}
+
+/** True when a value binds the data path `into` or a path under it (a List template or an @path). */
+export function bindsPath(v: unknown, into: string): boolean {
+  if (Array.isArray(v)) return v.some((x) => bindsPath(x, into));
+  if (!isPlainObject(v)) return false;
+  if (isChildTemplate(v) && v.path === into) return true;
+  if (isPathBinding(v)) return v["@path"] === into || v["@path"].startsWith(`${into}/`);
+  return Object.values(v).some((x) => bindsPath(x, into));
+}
+
+/**
+ * One input value in the shape its brick reads (prompts.ts INPUTS AND VALUES). Only unambiguous
+ * fixes: ["20:00"] for a DateTimeInput, "19:00" for a ChoicePicker, "6" for a Stepper. A TextField
+ * of variant "number" stores numbers (the brick writes them), so numbers stay numbers there.
+ */
+export function normalizeInputValue(type: string, v: JsonValue): JsonValue {
+  const single = Array.isArray(v) && v.length === 1 && (typeof v[0] === "string" || typeof v[0] === "number") ? v[0] : undefined;
+  switch (type) {
+    case "ChoicePicker":
+      if (typeof v === "string") return [v];
+      if (typeof v === "number") return [String(v)];
+      return v;
+    case "DateTimeInput":
+    case "SeatMap":
+      if (single !== undefined) return String(single);
+      if (typeof v === "number") return String(v);
+      return v;
+    case "TextField":
+      return single !== undefined ? single : v;
+    case "Stepper":
+    case "Slider": {
+      const x = single ?? v;
+      if (typeof x === "number") return x;
+      if (typeof x === "string" && x.trim() !== "" && Number.isFinite(Number(x))) return Number(x);
+      return v;
+    }
+    case "CheckBox":
+      if (v === "true") return true;
+      if (v === "false") return false;
+      return v;
+    default:
+      return v;
+  }
 }
 
 /** Data args should be literals; an absolute {"@path"} is read from the current surface's data. */

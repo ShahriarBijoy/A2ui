@@ -65,6 +65,16 @@ describe("composer prompt", () => {
     expect(COMPOSER_SYSTEM_PROMPT).not.toMatch(/\b2026-\d{2}-\d{2}\b/);
   });
 
+  test("structure rules: reachable ids, new content is a new step, value shapes, STATE defaults, not-available screen", () => {
+    const flat = COMPOSER_SYSTEM_PROMPT.replace(/\s+/g, " ");
+    expect(flat).toContain("every id you send must appear in the child, children or tabs of a component that is itself reachable from \"root\", or it will not render");
+    expect(flat).toContain("A request for a new kind of content to choose from (options, results, a list of items) is a new step");
+    expect(flat).toContain("ChoicePicker a string array");
+    expect(flat).toContain("When the person did not say one but STATE implies it, use it");
+    expect(flat).toContain("still gets a screen, always");
+    expect(flat).toContain("Never answer it with a caption alone");
+  });
+
   test("the venue address goes into STATE only when configured", () => {
     expect(JSON.parse(composerPrompt(req, ctx).user.split("\n")[1])).not.toHaveProperty("venue_address");
     const withAddress = promptContext({ venue: "Venue", city: "Bremen", address: " Konsul-Smidt-Straße 8p ", catalogId: "c" });

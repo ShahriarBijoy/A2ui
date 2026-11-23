@@ -2,8 +2,23 @@ import { describe, expect, test } from "bun:test";
 import type { Knob, RouteResult, TurnEvent, TurnRequest } from "@shared/protocol";
 import type { Llm, LlmUsage, Prompt, TextStream, WidgetsReply } from "./claude";
 import type { SearchOutcome, SearchRequest } from "./search";
-import { COMPOSER_RETRY_NOTE } from "./prompts";
-import { encodeEvent, fixChecks, MAX_SEARCHES_PER_TURN, parseTurnRequest, patchCaption, runTurn, SSE_HEADERS, sseResponse, widgetEvent, type TurnDeps } from "./turn";
+import { COMPOSER_RETRY_NOTE, composerUnreachableNote } from "./prompts";
+import {
+  bindsPath,
+  childIds,
+  encodeEvent,
+  fixChecks,
+  MAX_SEARCHES_PER_TURN,
+  normalizeInputValue,
+  parseTurnRequest,
+  patchCaption,
+  runTurn,
+  SSE_HEADERS,
+  sseResponse,
+  unreachableIds,
+  widgetEvent,
+  type TurnDeps,
+} from "./turn";
 import { generateFlights } from "./data/flights";
 
 /** Smallest real answer: one A2UI line and a caption. */
@@ -413,7 +428,8 @@ describe("runTurn: stop reasons, repairs, captions", () => {
     const events = await collect(request({ decision: false }), deps({ llm: fakeLlm([`${create}\n${line}\n`]), warn: (m) => void warnings.push(m) }));
     const sent = (events[1] as unknown as { msg: { updateComponents: { components: { "@checks": unknown }[] } } }).msg.updateComponents.components[0];
     expect(sent["@checks"]).toEqual([good, { condition: { "@call": "required", args: { value: { "@path": "/f/to" } } }, message: "To" }]);
-    expect(warnings).toEqual([expect.stringContaining("composer @checks fixed (1 bare condition)")]);
+    // The lone Button is not under a root, so the reachability log names it too.
+    expect(warnings).toEqual([expect.stringContaining("composer @checks fixed (1 bare condition)"), expect.stringContaining("(orphans 1): s3: go")]);
     // Well-formed messages pass through untouched (same object).
     const ok = { version: "1.0" as const, updateComponents: { surfaceId: "s3", components: [{ ...button, "@checks": [good] }] } };
     expect(fixChecks(ok)).toEqual({ msg: ok, fixed: 0 });
@@ -737,6 +753,129 @@ describe("runTurn: live search data lines", () => {
     const events = await p;
     expect(events.map(label)).toEqual(["llm:createSurface", "caption", "usage", "done"]);
     expect(signal!.aborted).toBe(true);
+  });
+});
+
+describe("runTurn: reachability and value shapes", () => {
+  const CREATE = '{"a2ui":{"version":"1.0","createSurface":{"surfaceId":"s3","catalogId":"http://test/catalog/brick-box/v1"}}}';
+  const comps = (surfaceId: string, list: object[]) => JSON.stringify({ a2ui: { version: "1.0", updateComponents: { surfaceId, components: list } } });
+  const data = (surfaceId: string, path: string, value: unknown) => JSON.stringify({ a2ui: { version: "1.0", updateDataModel: { surfaceId, path, value } } });
+  const SEARCH = '{"data":{"source":"search","args":{"query":"bookshops in Lisbon","fields":["name"]},"into":"/results"}}';
+  const LIST = { id: "list", component: "List", children: { path: "/results", componentId: "item" } };
+  const ITEM = { id: "item", component: "OptionCard", title: { "@path": "name" } };
+  const found: SearchOutcome = { ok: true, records: [{ id: "r1", name: "A", source: "https://example.org/a" }], dropped: 0, searches: 1, inputTokens: 1, outputTokens: 1 };
+  function scripted(answers: string[]): Llm & { prompts: Prompt[] } {
+    const prompts: Prompt[] = [];
+    return {
+      prompts,
+      streamText(p) {
+        prompts.push(p);
+        return fakeStream([answers[Math.min(prompts.length, answers.length) - 1]]);
+      },
+      async callTools() {
+        throw new Error("unused");
+      },
+    };
+  }
+  const kindOf = (e: TurnEvent) => (e.type === "a2ui" ? `${e.origin}:${Object.keys(e.msg)[1]}` : e.type);
+
+  test("a List left outside root while its data was requested is retried once with the ids; the retry's surface gets the data", async () => {
+    const first = [CREATE, comps("s3", [{ id: "root", component: "Card", child: "main" }, { id: "main", component: "Column", children: ["title"] }, { id: "title", component: "Text", text: "## Shops" }]), SEARCH, comps("s3", [LIST]), comps("s3", [ITEM]), '{"caption":"x"}'];
+    const second = [CREATE, comps("s3", [{ id: "root", component: "Card", child: "main" }, { id: "main", component: "Column", children: ["title", "list"] }, { id: "title", component: "Text", text: "## Shops" }, LIST]), SEARCH, comps("s3", [ITEM]), '{"caption":"y"}'];
+    const llm = scripted([first.join("\n") + "\n", second.join("\n") + "\n"]);
+    let calls = 0;
+    const warnings: string[] = [];
+    const events = await collect(request({ decision: false }), deps({ llm, search: async () => (calls++, found), warn: (m) => void warnings.push(m) }));
+    expect(llm.prompts).toHaveLength(2);
+    expect(llm.prompts[1].user).toBe(`${llm.prompts[0].user}\n${composerUnreachableNote(["list", "item"])}`);
+    expect(warnings).toContainEqual(expect.stringContaining("(orphans 2): s3: list, item"));
+    // The repeated search line reuses the running search: one call, one fetch event.
+    expect(calls).toBe(1);
+    expect(events.filter((e) => e.type === "fetch")).toHaveLength(1);
+    // The retry re-creates s3 (the client starts it over), so the data must come after that createSurface.
+    const labels = events.map(kindOf);
+    const lastCreate = labels.lastIndexOf("llm:createSurface");
+    const lastData = labels.lastIndexOf("data:updateDataModel");
+    expect(lastData).toBeGreaterThan(lastCreate);
+    expect((events[lastData] as { msg: { updateDataModel: { surfaceId: string; path: string } } }).msg.updateDataModel).toMatchObject({ surfaceId: "s3", path: "/results" });
+    // One caption per turn: attempt 1's described the screen that was rebuilt.
+    expect(events.filter((e) => e.type === "caption")).toEqual([{ type: "caption", text: "y" }]);
+    expect(events.at(-1)).toEqual({ type: "done" });
+  });
+
+  test("an unreachable component without requested data is logged, not retried", async () => {
+    const answer = [CREATE, comps("s3", [{ id: "root", component: "Card", child: "t" }, { id: "t", component: "Text", text: "hi" }, { id: "stray", component: "Text", text: "lost" }]), '{"caption":"x"}'];
+    const llm = scripted([answer.join("\n") + "\n"]);
+    const warnings: string[] = [];
+    await collect(request({ decision: false }), deps({ llm, warn: (m) => void warnings.push(m) }));
+    expect(llm.prompts).toHaveLength(1);
+    expect(warnings).toEqual([expect.stringContaining("composer sent 1 component(s) not reachable from root (orphans 1): s3: stray")]);
+  });
+
+  test("an in-place update is reachable through the surface's existing ids when the parent is re-sent", async () => {
+    const surface = { id: "s2", components: [{ id: "root", component: "Card" }, { id: "main", component: "Column" }], data: {}, knobs: [] };
+    const warnings: string[] = [];
+    const resent = comps("s2", [{ id: "main", component: "Column", children: ["extra"] }, { id: "extra", component: "Text", text: "new" }]);
+    await collect(request({ decision: false, surface }), deps({ llm: scripted([`${resent}\n{"caption":"x"}\n`]), warn: (m) => void warnings.push(m) }));
+    expect(warnings).toEqual([]);
+    const alone = comps("s2", [{ id: "extra", component: "Text", text: "new" }]);
+    await collect(request({ decision: false, surface }), deps({ llm: scripted([`${alone}\n{"caption":"x"}\n`]), warn: (m) => void warnings.push(m) }));
+    expect(warnings).toEqual([expect.stringContaining("(orphans 1): s2: extra")]);
+  });
+
+  test("childIds, unreachableIds and bindsPath follow child, children, templates and tabs", () => {
+    const c = (o: object) => o as { id: string; component: string };
+    expect(childIds(c({ id: "t", component: "Tabs", tabs: [{ title: "A", child: "a" }, { title: "B", child: "b" }] }))).toEqual(["a", "b"]);
+    expect(childIds(c(LIST))).toEqual(["item"]);
+    const map = new Map([LIST, ITEM, { id: "root", component: "Card", child: "list" }, { id: "x", component: "Text" }].map((o) => [o.id, c(o)]));
+    expect(unreachableIds(map, ["root"])).toEqual(["x"]);
+    expect(unreachableIds(map, [])).toEqual(["list", "item", "root", "x"]);
+    expect(bindsPath(LIST, "/results")).toBe(true);
+    expect(bindsPath({ title: { "@path": "/results/0/name" } }, "/results")).toBe(true);
+    expect(bindsPath({ title: { "@path": "/resultsX" } }, "/results")).toBe(false);
+  });
+
+  test("input values are written in their input's shape when this turn knows the input", async () => {
+    const timeKnob: Knob = {
+      type: "choice",
+      id: "/dinner/time",
+      componentId: "time",
+      component: "DateTimeInput",
+      path: "/dinner/time",
+      label: "Time",
+      current: "19:00",
+      currentLabel: "19:00",
+      options: [{ key: "20:00", label: "20:00", value: "20:00" }],
+    };
+    const surface = { id: "s2", components: [{ id: "time", component: "DateTimeInput" }], data: { dinner: { time: "19:00" } }, knobs: [timeKnob] };
+    const answer = [
+      data("s2", "/dinner/time", ["20:00"]),
+      CREATE,
+      comps("s3", [{ id: "root", component: "Card", child: "c" }, { id: "c", component: "Column", children: ["p", "g"] }, { id: "p", component: "ChoicePicker", options: [{ label: "19:00", value: "19:00" }], value: { "@path": "/b/time" } }, { id: "g", component: "Stepper", value: { "@path": "/b/guests" } }]),
+      data("s3", "/b", { time: "19:00", guests: "2", note: ["x"] }),
+      '{"caption":"x"}',
+    ];
+    const warnings: string[] = [];
+    const events = await collect(request({ decision: false, surface }), deps({ llm: scripted([answer.join("\n") + "\n"]), warn: (m) => void warnings.push(m) }));
+    const values = events.flatMap((e) => (e.type === "a2ui" && "updateDataModel" in e.msg ? [e.msg.updateDataModel] : []));
+    expect(values[0]).toEqual({ surfaceId: "s2", path: "/dinner/time", value: "20:00" });
+    // Unknown paths (note) are left as written.
+    expect(values[1]).toEqual({ surfaceId: "s3", path: "/b", value: { time: ["19:00"], guests: 2, note: ["x"] } });
+    expect(warnings.filter((w) => w.startsWith("composer value shape fixed"))).toHaveLength(2);
+  });
+
+  test("normalizeInputValue fixes only unambiguous shapes", () => {
+    expect(normalizeInputValue("ChoicePicker", "a")).toEqual(["a"]);
+    expect(normalizeInputValue("ChoicePicker", ["a", "b"])).toEqual(["a", "b"]);
+    expect(normalizeInputValue("DateTimeInput", ["2030-06-14"])).toBe("2030-06-14");
+    expect(normalizeInputValue("SeatMap", ["12C"])).toBe("12C");
+    expect(normalizeInputValue("TextField", [42])).toBe(42);
+    expect(normalizeInputValue("TextField", 42)).toBe(42);
+    expect(normalizeInputValue("Stepper", "6")).toBe(6);
+    expect(normalizeInputValue("Slider", [30])).toBe(30);
+    expect(normalizeInputValue("Stepper", "six")).toBe("six");
+    expect(normalizeInputValue("CheckBox", "true")).toBe(true);
+    expect(normalizeInputValue("Text", ["x"])).toEqual(["x"]);
   });
 });
 
