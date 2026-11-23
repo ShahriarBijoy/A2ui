@@ -103,7 +103,7 @@ export type Flight = {
   price_eur: number;
   demo: true;
 };
-export type DataSource = "places" | "flights";
+export type DataSource = "places" | "flights" | "search";
 
 /** Props of the two hand-built widgets in "widgets" mode. */
 export type RestaurantWidgetProps = { places: Place[]; kind?: string; max_walk_min?: number };
@@ -130,6 +130,21 @@ export type TurnEvent =
       compose_ms: number;
       /** Lines that failed to parse and were skipped. */
       skipped_lines: number;
+      /** Lines whose closing brackets were repaired before parsing. */
+      repaired_lines?: number;
+    }
+  | {
+      /** One resolved data line (live search or demo source), emitted after its updateDataModel. Measured values only. */
+      type: "fetch";
+      source: DataSource;
+      query: string;
+      ok: boolean;
+      records: number;
+      ms: number;
+      searches?: number;
+      input_tokens?: number;
+      output_tokens?: number;
+      error?: string;
     }
   | { type: "error"; message: string }
   | { type: "done" };

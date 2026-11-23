@@ -34,12 +34,15 @@ export type SurfaceState = {
 
 export type UsageMetrics = Omit<Extract<TurnEvent, { type: "usage" }>, "type">;
 export type RouteMetrics = Omit<Extract<TurnEvent, { type: "route" }>, "type">;
+export type FetchMetrics = Omit<Extract<TurnEvent, { type: "fetch" }>, "type">;
 
 export type TurnMetrics = {
   /** performance.now() at beginTurn. */
   startedAt: number;
   route?: RouteMetrics;
   usage?: UsageMetrics;
+  /** One entry per resolved data line (live web search etc.), in arrival order. */
+  fetches?: FetchMetrics[];
   /** Client-measured ms from beginTurn to the first visible component, widget or html. */
   clientFirstUiMs?: number;
   /** True once any LLM output (a2ui from llm, widget, text, html, usage) arrived. */
