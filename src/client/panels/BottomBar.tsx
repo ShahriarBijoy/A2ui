@@ -5,6 +5,8 @@ import { Kbd } from "@/components/ui/kbd";
 import { Switch } from "@/components/ui/switch";
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
 import { formatTokens, tailText } from "@/format";
+import { VoiceGlow } from "@/fx/VoiceGlow";
+import type { GlowPhase } from "@/fx/voiceSweep";
 import { MODE_KEYS } from "@/keyboard";
 import { cn } from "@/lib/utils";
 import type { SessionTotals, Transcript } from "@/state";
@@ -19,6 +21,7 @@ type Props = {
   decision: boolean;
   handsFree: boolean;
   totals: SessionTotals;
+  glow: GlowPhase;
   onMode: (mode: Mode) => void;
   onDecision: (on: boolean) => void;
   onHandsFree: (on: boolean) => void;
@@ -34,39 +37,48 @@ const MODE_ITEMS: readonly { mode: Mode; label: string }[] = [
 export function BottomBar(props: Props) {
   const { transcript, voice, mode, decision, handsFree, totals } = props;
   return (
-    <footer className="grid h-[6.25rem] shrink-0 grid-rows-2 gap-y-1 border-t bg-card/60 px-5 py-2">
-      <div className="flex min-w-0 items-center gap-6">
-        <TranscriptLine transcript={transcript} voice={voice} handsFree={handsFree} />
-        <Totals totals={totals} />
-      </div>
-      <div className="flex min-w-0 items-center gap-5">
-        <TextFallback onSend={props.onSend} />
-        <ToggleGroup
-          aria-label="Answer mode"
-          value={[mode]}
-          onValueChange={(v: string[]) => {
-            // Pressing the active segment would leave no mode; keep the current one.
-            const next = MODES.find((m) => m === v[0]);
-            if (next) props.onMode(next);
-          }}
-          variant="outline"
-          spacing={0}
-          className="shrink-0 bg-background"
-        >
-          {MODE_ITEMS.map((m) => (
-            <ToggleGroupItem
-              key={m.mode}
-              value={m.mode}
-              aria-label={`${m.label} mode (key ${MODE_KEYS[m.mode]})`}
-              className="h-9 gap-2 px-3.5 text-[0.875rem] motion-reduce:transition-none aria-pressed:bg-primary aria-pressed:text-primary-foreground aria-pressed:hover:bg-primary"
-            >
-              {m.label}
-              <Kbd className="bg-transparent font-mono text-[0.6875rem] text-current opacity-60">{MODE_KEYS[m.mode]}</Kbd>
-            </ToggleGroupItem>
-          ))}
-        </ToggleGroup>
-        <Toggle label="Decision model" hint="D" checked={decision} onChange={props.onDecision} />
-        <Toggle label="Hands-free" checked={handsFree} onChange={props.onHandsFree} />
+    <footer className="grid h-[6.25rem] shrink-0 grid-cols-[minmax(0,1fr)_auto] gap-x-6 border-t bg-card/60 px-5 py-2">
+      {/* One composer box (heard words over the typed fallback), so the voice glow has an edge to rise from. */}
+      <VoiceGlow phase={props.glow} className="h-full min-w-0">
+        <div className="grid h-full grid-rows-2 rounded-xl border bg-background transition-[border-color,box-shadow] duration-150 focus-within:border-ring focus-within:ring-3 focus-within:ring-ring/50 motion-reduce:transition-none">
+          <div className="flex min-w-0 items-center px-3.5">
+            <TranscriptLine transcript={transcript} voice={voice} handsFree={handsFree} />
+          </div>
+          <TextFallback onSend={props.onSend} />
+        </div>
+      </VoiceGlow>
+      <div className="grid grid-rows-2 gap-y-1">
+        <div className="flex items-center justify-end">
+          <Totals totals={totals} />
+        </div>
+        <div className="flex items-center justify-end gap-5">
+          <ToggleGroup
+            aria-label="Answer mode"
+            value={[mode]}
+            onValueChange={(v: string[]) => {
+              // Pressing the active segment would leave no mode; keep the current one.
+              const next = MODES.find((m) => m === v[0]);
+              if (next) props.onMode(next);
+            }}
+            variant="outline"
+            spacing={0}
+            className="shrink-0 bg-background"
+          >
+            {MODE_ITEMS.map((m) => (
+              <ToggleGroupItem
+                key={m.mode}
+                value={m.mode}
+                aria-label={`${m.label} mode (key ${MODE_KEYS[m.mode]})`}
+                className="h-9 gap-2 px-3.5 text-[0.875rem] motion-reduce:transition-none aria-pressed:bg-primary aria-pressed:text-primary-foreground aria-pressed:hover:bg-primary"
+              >
+                {m.label}
+                <Kbd className="bg-transparent font-mono text-[0.6875rem] text-current opacity-60">{MODE_KEYS[m.mode]}</Kbd>
+              </ToggleGroupItem>
+            ))}
+          </ToggleGroup>
+          <Toggle label="Decision model" hint="D" checked={decision} onChange={props.onDecision} />
+          <Toggle label="Hands-free" checked={handsFree} onChange={props.onHandsFree} />
+        </div>
       </div>
     </footer>
   );
@@ -166,14 +178,15 @@ function TextFallback({ onSend }: { onSend: (text: string) => void }) {
     setText("");
   };
   return (
-    <form onSubmit={submit} className="flex min-w-0 flex-1 items-center gap-2">
+    <form onSubmit={submit} className="flex min-w-0 items-center border-t border-border/80">
       <Input
         value={text}
         onChange={(e) => setText(e.target.value)}
         placeholder="Or type a request and press Enter"
         aria-label="Type a request"
         maxLength={400}
-        className="h-9 min-w-0 flex-1 bg-background text-[0.9375rem] md:text-[0.9375rem]"
+        // The composer box draws the border and the focus ring; the field is a borderless row inside it.
+        className="h-full min-w-0 flex-1 rounded-none border-0 bg-transparent px-3.5 text-[0.9375rem] focus-visible:ring-0 md:text-[0.9375rem]"
       />
     </form>
   );

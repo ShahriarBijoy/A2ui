@@ -1,6 +1,7 @@
 import { lazy, Suspense } from "react";
 import { ChevronRightIcon } from "lucide-react";
 import { useKeyboardShortcuts, type Shortcut } from "@/keyboard";
+import { glowPhase } from "@/fx/voiceSweep";
 import { BottomBar, type VoiceStatus } from "@/panels/BottomBar";
 import { BrickPool } from "@/panels/BrickPool";
 import { Inspector } from "@/panels/Inspector";
@@ -89,6 +90,7 @@ function BottomBarPanel({ voice }: { voice: VoiceStatus }) {
   const decision = useStore((s) => s.decision);
   const handsFree = useStore((s) => s.handsFree);
   const totals = useStore((s) => s.totals);
+  const glow = useStore(glowPhase);
   return (
     <BottomBar
       transcript={transcript}
@@ -97,6 +99,7 @@ function BottomBarPanel({ voice }: { voice: VoiceStatus }) {
       decision={decision}
       handsFree={handsFree}
       totals={totals}
+      glow={glow}
       onMode={store.setMode}
       onDecision={store.setDecision}
       onHandsFree={store.setHandsFree}

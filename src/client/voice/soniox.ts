@@ -17,6 +17,7 @@ import { apiFetch } from "../apiBase";
 import type { SonioxKeyResponse } from "../../shared/protocol";
 import type { StoreApi, UserItem } from "../state";
 import type { PredictScheduler } from "./predictClient";
+import { TappedMicrophoneSource } from "./micTap";
 import { realTimers, TranscriptAssembler, type Timers, type TokenLike } from "./transcript";
 
 export const SONIOX_MODEL = "stt-rt-v6";
@@ -154,6 +155,8 @@ function getClient(): SonioxClient {
 
 export const startSonioxRecording: StartRecording = (opts, cb) => {
   const rec = getClient().realtime.record({
+    // The SDK's default microphone source, tapped so the bottom bar's glow can follow the same stream.
+    source: new TappedMicrophoneSource(),
     model: SONIOX_MODEL,
     language_hints: LANGUAGE_HINTS,
     context: {
