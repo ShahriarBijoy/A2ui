@@ -118,14 +118,49 @@ function systemParam(prompt: Prompt): Anthropic.TextBlockParam[] | undefined {
   ];
 }
 
-function toUsage(msg: Anthropic.Message): LlmUsage {
+type UsageFields = { input_tokens: number; output_tokens: number; cache_read_input_tokens?: number | null; cache_creation_input_tokens?: number | null };
+
+/** One model attempt in usage.iterations (beta): the declined attempt and the fallback that answered. */
+function isAttempt(v: unknown): v is UsageFields & { type: "message" | "fallback_message" } {
+  return isPlainObject(v) && (v.type === "message" || v.type === "fallback_message") && typeof v.input_tokens === "number" && typeof v.output_tokens === "number";
+}
+
+/**
+ * The model that wrote the answer: after a refusal fallback, the last fallback block names it
+ * (top-level model is the producer too, but the block is explicit on mid-stream switches).
+ */
+export function servedBy(msg: { model: string; content: ReadonlyArray<unknown> }): string {
+  let model = msg.model;
+  for (const block of msg.content) {
+    if (isPlainObject(block) && block.type === "fallback" && isPlainObject(block.to) && typeof block.to.model === "string") model = block.to.model;
+  }
+  return model;
+}
+
+/**
+ * Usage of one answer. After a refusal fallback, top-level usage covers only the attempt that
+ * answered, so every attempt in usage.iterations is summed: the declined partial is billed too.
+ */
+export function toUsage(msg: { model: string; content: ReadonlyArray<unknown>; usage: UsageFields }): LlmUsage {
+  const its: unknown = (msg.usage as { iterations?: unknown }).iterations;
+  const attempts = Array.isArray(its) ? its.filter(isAttempt) : [];
+  const parts: UsageFields[] = attempts.some((a) => a.type === "fallback_message") ? attempts : [msg.usage];
+  const sum = (f: (u: UsageFields) => number | null | undefined) => parts.reduce((n, u) => n + (f(u) ?? 0), 0);
   return {
-    model: msg.model,
-    input_tokens: msg.usage.input_tokens,
-    output_tokens: msg.usage.output_tokens,
-    cache_read_tokens: msg.usage.cache_read_input_tokens ?? 0,
-    cache_write_tokens: msg.usage.cache_creation_input_tokens ?? 0,
+    model: servedBy(msg),
+    input_tokens: sum((u) => u.input_tokens),
+    output_tokens: sum((u) => u.output_tokens),
+    cache_read_tokens: sum((u) => u.cache_read_input_tokens),
+    cache_write_tokens: sum((u) => u.cache_creation_input_tokens),
   };
+}
+
+/** Server-side refusal fallback (claude-api skill: Sonnet 5.5 prefers the "default" form under this beta). */
+export const SERVER_FALLBACK_BETA = "server-side-fallback-2026-07-01";
+
+/** The composer opts into server-side refusal fallback where the model supports the "default" form. */
+export function composerRefusalFallbackFor(model: string): boolean {
+  return model.startsWith("claude-sonnet-5-5");
 }
 
 /**
@@ -172,22 +207,32 @@ export function toSearchReply(msg: Anthropic.Message): SearchReply {
   };
 }
 
-export function anthropicLlm(env: ClaudeEnv, thinking: ThinkingSetting = COMPOSER_THINKING): Llm {
+export type LlmOptions = {
+  /** Server-side refusal fallback on streamText (beta endpoint, fallbacks: "default"). The composer only. */
+  refusalFallback?: boolean;
+  /** Tests inject a client with a fake fetch; production uses the per-key cached client. */
+  client?: Anthropic;
+};
+
+export function anthropicLlm(env: ClaudeEnv, thinking: ThinkingSetting = COMPOSER_THINKING, opts: LlmOptions = {}): Llm {
   const model = env.LLM_MODEL || DEFAULT_MODEL;
   return {
     streamText(prompt, signal) {
-      const client = clientFor(env);
-      const start = (setting: ThinkingSetting) =>
-        client.messages.stream(
-          {
-            model,
-            max_tokens: MAX_TOKENS,
-            system: systemParam(prompt),
-            messages: [{ role: "user", content: prompt.user }],
-            ...thinkingParams(setting),
-          },
-          { signal },
-        );
+      const client = opts.client ?? clientFor(env);
+      const start = (setting: ThinkingSetting) => {
+        const params = {
+          model,
+          max_tokens: MAX_TOKENS,
+          system: systemParam(prompt),
+          messages: [{ role: "user" as const, content: prompt.user }],
+          ...thinkingParams(setting),
+        };
+        // A declined request is re-run on the fallback model inside the same stream: a mid-stream switch keeps
+        // the partial text and continues from it, so the text deltas stay one composer answer.
+        return opts.refusalFallback
+          ? client.beta.messages.stream({ ...params, betas: [SERVER_FALLBACK_BETA], fallbacks: "default" }, { signal })
+          : client.messages.stream(params, { signal });
+      };
       let stream = start(thinking);
       let ran = thinking;
       return {
@@ -213,7 +258,11 @@ export function anthropicLlm(env: ClaudeEnv, thinking: ThinkingSetting = COMPOSE
         },
         async result() {
           const msg = await stream.finalMessage();
-          return { usage: toUsage(msg), stopReason: msg.stop_reason ?? null, thinking: ran };
+          const usage = toUsage(msg);
+          if (usage.model !== msg.model || (opts.refusalFallback && usage.model !== model)) {
+            console.warn(`composer: ${model} declined; ${usage.model} answered (server-side refusal fallback)`);
+          }
+          return { usage, stopReason: msg.stop_reason ?? null, thinking: ran };
         },
         abort() {
           stream.abort();
@@ -222,7 +271,7 @@ export function anthropicLlm(env: ClaudeEnv, thinking: ThinkingSetting = COMPOSE
     },
 
     async callTools(prompt, tools, signal) {
-      const client = clientFor(env);
+      const client = opts.client ?? clientFor(env);
       const msg = await client.messages.create(
         {
           model,

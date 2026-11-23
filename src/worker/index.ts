@@ -5,7 +5,7 @@
 import { Hono } from "hono";
 import { CATALOG_PATH, catalogJson } from "@shared/catalog";
 import { LIMITS } from "@shared/protocol";
-import { anthropicLlm, anthropicWebSearch, composerThinkingFor } from "./claude";
+import { anthropicLlm, anthropicWebSearch, composerRefusalFallbackFor, composerThinkingFor } from "./claude";
 import { predictBricks } from "./predict";
 import { promptContext } from "./prompts";
 import { route } from "./router";
@@ -58,7 +58,13 @@ app.post("/api/turn", async (c) => {
   const deps: TurnDeps = {
     route: (req, signal) => route(req, env, signal),
     llm: anthropicLlm(env),
-    ...(composerModel ? { composerLlm: anthropicLlm({ ANTHROPIC_API_KEY: env.ANTHROPIC_API_KEY, LLM_MODEL: composerModel }, composerThinkingFor(composerModel)) } : {}),
+    ...(composerModel
+      ? {
+          composerLlm: anthropicLlm({ ANTHROPIC_API_KEY: env.ANTHROPIC_API_KEY, LLM_MODEL: composerModel }, composerThinkingFor(composerModel), {
+            refusalFallback: composerRefusalFallbackFor(composerModel),
+          }),
+        }
+      : {}),
     context,
     search: (req, signal) => runSearch(req, webSearch, context, signal),
     now: () => performance.now(),

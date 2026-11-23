@@ -1,5 +1,6 @@
 import { describe, expect, test } from "bun:test";
-import { composerThinkingFor, thinkingParams, checkEnvelope, classifyLine, describeLlmError, FenceStripper, LineSplitter, MissingKeyError, repairBrackets } from "./claude";
+import { anthropicLlm, composerRefusalFallbackFor, SERVER_FALLBACK_BETA, toUsage, composerThinkingFor, thinkingParams, checkEnvelope, classifyLine, describeLlmError, FenceStripper, LineSplitter, MissingKeyError, repairBrackets } from "./claude";
+import Anthropic from "@anthropic-ai/sdk";
 
 describe("LineSplitter", () => {
   test("joins lines split across chunks", () => {
@@ -182,6 +183,72 @@ describe("composer thinking per model", () => {
     expect(thinkingParams("between-tools")).toEqual({ thinking: { type: "between_tools" } });
     expect(thinkingParams("adaptive-low")).toEqual({ thinking: { type: "adaptive" }, output_config: { effort: "low" } });
     expect(thinkingParams("default")).toEqual({});
+  });
+});
+
+describe("composer refusal fallback (Sonnet 5.5)", () => {
+  const sse = (events: object[]) => events.map((e) => `event: ${(e as { type: string }).type}\ndata: ${JSON.stringify(e)}\n\n`).join("");
+  const start = { type: "message_start", message: { id: "msg_1", type: "message", role: "assistant", model: "claude-sonnet-5-5", content: [], stop_reason: null, stop_sequence: null, usage: { input_tokens: 10, output_tokens: 0, cache_read_input_tokens: 5, cache_creation_input_tokens: 0 } } };
+  const textBlock = (index: number, text: string) => [
+    { type: "content_block_start", index, content_block: { type: "text", text: "" } },
+    { type: "content_block_delta", index, delta: { type: "text_delta", text } },
+    { type: "content_block_stop", index },
+  ];
+  const attempt = (type: "message" | "fallback_message", model: string, input: number, output: number) => ({ type, model, input_tokens: input, output_tokens: output, cache_read_input_tokens: 5, cache_creation_input_tokens: 0, cache_creation: null });
+  function fakeClient(body: string) {
+    const seen: { url: string; headers: Headers; body: Record<string, unknown> }[] = [];
+    const fetch = async (url: string | URL | Request, init?: RequestInit) => {
+      seen.push({ url: String(url), headers: new Headers(init?.headers), body: JSON.parse(String(init?.body)) as Record<string, unknown> });
+      return new Response(body, { status: 200, headers: { "content-type": "text/event-stream" } });
+    };
+    return { seen, client: new Anthropic({ apiKey: "test", maxRetries: 0, fetch: fetch as unknown as typeof globalThis.fetch }) };
+  }
+  async function run(body: string) {
+    const { seen, client } = fakeClient(body);
+    const llm = anthropicLlm({ LLM_MODEL: "claude-sonnet-5-5" }, "between-tools", { refusalFallback: true, client });
+    const stream = llm.streamText({ system: "S", user: "U" }, new AbortController().signal);
+    let text = "";
+    for await (const d of stream) text += d;
+    return { seen, text, result: await stream.result() };
+  }
+
+  test("only claude-sonnet-5-5 opts in", () => {
+    expect(composerRefusalFallbackFor("claude-sonnet-5-5")).toBe(true);
+    expect(composerRefusalFallbackFor("claude-haiku-5-5")).toBe(false);
+  });
+
+  test("a mid-stream fallback keeps one text stream; the request uses the beta endpoint with fallbacks default; usage sums both attempts", async () => {
+    const body = sse([
+      start,
+      ...textBlock(0, '{"caption":"pa'),
+      { type: "content_block_start", index: 1, content_block: { type: "fallback", from: { model: "claude-sonnet-5-5" }, to: { model: "claude-sonnet-5" } } },
+      { type: "content_block_stop", index: 1 },
+      ...textBlock(2, 'rt"}\n'),
+      { type: "message_delta", delta: { stop_reason: "end_turn", stop_sequence: null }, usage: { output_tokens: 4, iterations: [attempt("message", "claude-sonnet-5-5", 10, 3), attempt("fallback_message", "claude-sonnet-5", 12, 4)] } },
+      { type: "message_stop" },
+    ]);
+    const { seen, text, result } = await run(body);
+    expect(seen).toHaveLength(1);
+    expect(seen[0].url).toContain("/v1/messages");
+    expect(seen[0].headers.get("anthropic-beta")).toContain(SERVER_FALLBACK_BETA);
+    expect(seen[0].body).toMatchObject({ model: "claude-sonnet-5-5", fallbacks: "default", thinking: { type: "between_tools" }, stream: true });
+    // The continuation joins the partial line: the line splitter sees one valid line.
+    expect(text).toBe('{"caption":"part"}\n');
+    expect(result.stopReason).toBe("end_turn");
+    expect(result.usage).toEqual({ model: "claude-sonnet-5", input_tokens: 22, output_tokens: 7, cache_read_tokens: 10, cache_write_tokens: 0 });
+  });
+
+  test("a whole-chain refusal still ends as stop_reason refusal", async () => {
+    const body = sse([start, { type: "message_delta", delta: { stop_reason: "refusal", stop_sequence: null }, usage: { output_tokens: 0 } }, { type: "message_stop" }]);
+    const { text, result } = await run(body);
+    expect(text).toBe("");
+    expect(result.stopReason).toBe("refusal");
+    expect(result.usage.model).toBe("claude-sonnet-5-5");
+  });
+
+  test("toUsage reports a plain answer as is", () => {
+    const msg = { model: "claude-haiku-5-5", content: [{ type: "text" }], usage: { input_tokens: 3, output_tokens: 2, cache_read_input_tokens: 1, cache_creation_input_tokens: null } };
+    expect(toUsage(msg)).toEqual({ model: "claude-haiku-5-5", input_tokens: 3, output_tokens: 2, cache_read_tokens: 1, cache_write_tokens: 0 });
   });
 });
 
