@@ -374,8 +374,9 @@ export function createVoiceController(deps: VoiceDeps): VoiceController {
 
   const complete = (s: Session) => {
     if (s.done) return;
-    // If the cap fired before every token was final, the interim words are still better than dropping them.
-    const text = s.finalizing ? s.asm.fullText() : "";
+    // Also reached when a new press preempts the trailing window or the cap fires before every token is final:
+    // interim words are better than dropping speech.
+    const text = s.asm.fullText();
     end(s);
     phase = "idle";
     store.setTranscript({ final: text, interim: "", listening: false });

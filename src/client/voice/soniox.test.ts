@@ -110,6 +110,19 @@ describe("push to talk", () => {
     expect(t.turns).toEqual(["Hi there now"]);
   });
 
+  test("press, release, press within 200 ms still sends the first utterance", () => {
+    const t = setup();
+    t.ctl.keyDown();
+    t.handle.connected = true;
+    t.cb().onConnected();
+    t.cb().onTokens([f("Book"), f(" a table")]);
+    t.ctl.keyUp();
+    t.clock.advance(100);
+    t.ctl.keyDown();
+    expect(t.turns).toEqual(["Book a table"]);
+    expect(t.state.transcript.listening).toBe(true);
+  });
+
   test("a silent press sends nothing", () => {
     const t = setup();
     t.ctl.keyDown();
