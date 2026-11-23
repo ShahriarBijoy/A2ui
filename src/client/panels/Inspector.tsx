@@ -40,7 +40,7 @@ export function Inspector({ wire, surface }: Props) {
 
 function WireLog({ wire }: { wire: WireEntry[] }) {
   const counts = useMemo(() => wireCounts(wire), [wire]);
-  const { viewportRef, contentRef } = useStickToBottom({ jumpOnNewChild: false });
+  const { viewportRef, contentRef } = useStickToBottom({ mode: "log" });
   return (
     <>
       <div className="flex shrink-0 items-center gap-4 border-y px-4 py-2 font-mono text-[0.75rem] tabular-nums text-muted-foreground">

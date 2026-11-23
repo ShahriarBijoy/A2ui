@@ -23,21 +23,46 @@ export function matchShortcut(e: KeyInfo): Shortcut | null {
   return null;
 }
 
-type Closest = { closest(selector: string): unknown };
-function hasClosest(t: unknown): t is Closest {
-  return typeof t === "object" && t !== null && typeof (t as { closest?: unknown }).closest === "function";
+/** Input types you type text into. A range (Slider thumb), checkbox or button is not one of them. */
+const TYPING_INPUT_TYPES: ReadonlySet<string> = new Set([
+  "text",
+  "search",
+  "email",
+  "url",
+  "tel",
+  "password",
+  "number",
+  "date",
+  "time",
+  "datetime-local",
+]);
+
+/**
+ * True only for editable text entry: a textarea, contenteditable, or a text-like <input> that is neither
+ * read-only nor disabled. Shared with the voice lane, so a tapped Slider or read-only field never leaves
+ * shortcuts and push-to-talk dead until focus moves.
+ */
+export function isTypingTarget(el: Element | null): boolean {
+  if (!el) return false;
+  if ((el as HTMLElement).isContentEditable) return true;
+  if (el.tagName === "TEXTAREA") {
+    const t = el as HTMLTextAreaElement;
+    return !t.readOnly && !t.disabled;
+  }
+  if (el.tagName === "INPUT") {
+    const i = el as HTMLInputElement;
+    return TYPING_INPUT_TYPES.has((i.type || "text").toLowerCase()) && !i.readOnly && !i.disabled;
+  }
+  return false;
 }
 
-const TEXT_ENTRY = "input, textarea, select, [contenteditable]:not([contenteditable='false'])";
-
-/** Same rule as the voice lane: anything you can type into swallows shortcuts and Space. */
-export function isTextEntry(target: EventTarget | null): boolean {
-  return hasClosest(target) && target.closest(TEXT_ENTRY) !== null;
+function asElement(t: EventTarget | null): Element | null {
+  return typeof Element !== "undefined" && t instanceof Element ? t : null;
 }
 
-/** A focused element inside the app (button, chip, switch, tab) that Space would otherwise activate. */
-function isFocusedControl(target: EventTarget | null): boolean {
-  return hasClosest(target) && target.closest("#root") !== null;
+/** A focused element inside the app (button, chip, switch, tab, slider thumb) that Space would otherwise activate. */
+function isFocusedControl(el: Element | null): boolean {
+  return el !== null && el.closest("#root") !== null;
 }
 
 /**
@@ -48,7 +73,8 @@ function isFocusedControl(target: EventTarget | null): boolean {
  */
 function shieldSpace(e: KeyboardEvent): void {
   if (e.code !== "Space" || !e.isTrusted) return;
-  if (isTextEntry(e.target) || !isFocusedControl(e.target)) return;
+  const el = asElement(e.target);
+  if (isTypingTarget(el) || !isFocusedControl(el)) return;
   e.preventDefault();
   e.stopPropagation();
   window.dispatchEvent(
@@ -71,9 +97,10 @@ export function useKeyboardShortcuts(onShortcut: (s: Shortcut) => void): void {
   useEffect(() => {
     const onKeyDown = (e: KeyboardEvent) => {
       if (e.defaultPrevented) return;
-      if (isTextEntry(e.target)) {
+      const el = asElement(e.target);
+      if (isTypingTarget(el)) {
         // Esc leaves the text field so the next key is a shortcut again (mouse-free use).
-        if (e.key === "Escape" && hasClosest(e.target) && "blur" in e.target) (e.target as HTMLElement).blur();
+        if (e.key === "Escape" && el instanceof HTMLElement) el.blur();
         return;
       }
       const s = matchShortcut(e);

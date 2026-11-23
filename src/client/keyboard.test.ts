@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { isTextEntry, matchShortcut, type KeyInfo } from "./keyboard";
+import { isTypingTarget, matchShortcut, type KeyInfo } from "./keyboard";
 
 const key = (k: string, extra: Partial<KeyInfo> = {}): KeyInfo => ({
   key: k,
@@ -42,14 +42,29 @@ describe("matchShortcut", () => {
   });
 });
 
-describe("isTextEntry", () => {
-  const el = (match: boolean) => ({ closest: () => (match ? {} : null) });
-  test("elements inside inputs, textareas, selects and contenteditable count", () => {
-    expect(isTextEntry(el(true) as unknown as EventTarget)).toBe(true);
+describe("isTypingTarget", () => {
+  // Plain stand-ins with the DOM properties the predicate reads (bun test has no DOM).
+  const el = (tagName: string, props: Record<string, unknown> = {}) =>
+    ({ tagName, isContentEditable: false, readOnly: false, disabled: false, ...props }) as unknown as Element;
+
+  test("editable text entry swallows shortcuts and Space", () => {
+    expect(isTypingTarget(el("INPUT", { type: "text" }))).toBe(true);
+    expect(isTypingTarget(el("TEXTAREA"))).toBe(true);
+    expect(isTypingTarget(el("DIV", { isContentEditable: true }))).toBe(true);
+    for (const type of ["search", "email", "url", "tel", "password", "number", "date", "time", "datetime-local"]) {
+      expect(isTypingTarget(el("INPUT", { type }))).toBe(true);
+    }
   });
-  test("other targets do not", () => {
-    expect(isTextEntry(el(false) as unknown as EventTarget)).toBe(false);
-    expect(isTextEntry(null)).toBe(false);
-    expect(isTextEntry({} as EventTarget)).toBe(false);
+  test("a Slider thumb, read-only field, button or checkbox does not", () => {
+    expect(isTypingTarget(el("INPUT", { type: "range" }))).toBe(false);
+    expect(isTypingTarget(el("INPUT", { type: "text", readOnly: true }))).toBe(false);
+    expect(isTypingTarget(el("INPUT", { type: "text", disabled: true }))).toBe(false);
+    expect(isTypingTarget(el("TEXTAREA", { readOnly: true }))).toBe(false);
+    expect(isTypingTarget(el("BUTTON"))).toBe(false);
+    expect(isTypingTarget(el("INPUT", { type: "checkbox" }))).toBe(false);
+    expect(isTypingTarget(el("INPUT", { type: "radio" }))).toBe(false);
+    expect(isTypingTarget(el("INPUT", { type: "button" }))).toBe(false);
+    expect(isTypingTarget(el("SELECT"))).toBe(false);
+    expect(isTypingTarget(null)).toBe(false);
   });
 });

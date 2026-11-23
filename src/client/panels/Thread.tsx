@@ -38,7 +38,7 @@ export function Thread({ thread, surfaces, newestSurfaceId, decision, replaying 
     for (const item of thread) if (item.kind === "agent" && item.surfaceId) m.set(item.surfaceId, item.id);
     return m;
   }, [thread]);
-  const { viewportRef, contentRef, atBottom, scrollToBottom } = useStickToBottom({ jumpOnNewChild: true });
+  const { viewportRef, contentRef, atBottom, scrollToBottom } = useStickToBottom({ mode: "thread" });
 
   return (
     <section aria-label="Thread" className="flex h-full min-h-0 flex-col">
@@ -315,29 +315,38 @@ function Note({ children }: { children: ReactNode }) {
 const NEAR_BOTTOM_PX = 48;
 
 /**
- * Follows new content while the reader is at the bottom and stops as soon as they scroll up.
- * With `jumpOnNewChild`, a new entry (a new turn) brings the view back down even after scrolling up.
+ * Keeps a scroll view pinned to its newest content while the reader is at the bottom.
+ * - "thread": content growth (a streaming surface) follows only while pinned; a new last child (a turn the
+ *   user just started) re-pins even after scrolling up.
+ * - "log": only a newly appended entry scrolls, and only while pinned. Other growth (a row expanding) never
+ *   scrolls; it just re-reads whether the reader is still at the bottom, so the row stays under the pointer.
  * Callback refs instead of effects: setup happens exactly when the nodes attach.
  */
-export function useStickToBottom({ jumpOnNewChild }: { jumpOnNewChild: boolean }): {
+export function useStickToBottom({ mode }: { mode: "thread" | "log" }): {
   viewportRef: RefCallback<HTMLDivElement>;
   contentRef: RefCallback<HTMLElement>;
   atBottom: boolean;
   scrollToBottom: () => void;
 } {
   const [atBottom, setAtBottom] = useState(true);
-  const live = useRef<{ viewport: HTMLDivElement | null; follow: boolean; children: number }>({
+  const live = useRef<{ viewport: HTMLDivElement | null; follow: boolean; last: Element | null; top: number }>({
     viewport: null,
     follow: true,
-    children: 0,
+    last: null,
+    top: 0,
   });
 
   const viewportRef = useCallback((el: HTMLDivElement | null) => {
     if (!el) return;
     live.current.viewport = el;
+    // Scroll events arrive a frame late, when more content may already have landed; judging "at the bottom"
+    // then would drop follow during fast streaming. Only an upward move means the reader left the bottom.
     const onScroll = () => {
-      const near = el.scrollHeight - el.scrollTop - el.clientHeight < NEAR_BOTTOM_PX;
-      live.current.follow = near;
+      const top = el.scrollTop;
+      const near = el.scrollHeight - top - el.clientHeight < NEAR_BOTTOM_PX;
+      if (near) live.current.follow = true;
+      else if (top < live.current.top) live.current.follow = false;
+      live.current.top = top;
       setAtBottom(near);
     };
     el.addEventListener("scroll", onScroll, { passive: true });
@@ -350,19 +359,31 @@ export function useStickToBottom({ jumpOnNewChild }: { jumpOnNewChild: boolean }
   const contentRef = useCallback(
     (el: HTMLElement | null) => {
       if (!el) return;
-      live.current.children = 0;
+      live.current.last = null;
       const observer = new ResizeObserver(() => {
         const vp = live.current.viewport;
         if (!vp) return;
-        const count = el.childElementCount;
-        if (jumpOnNewChild && count > live.current.children) live.current.follow = true;
-        live.current.children = count;
-        if (live.current.follow) vp.scrollTop = vp.scrollHeight;
+        // The last child's identity, not the count: the store caps the wire log, so its length stops growing.
+        const appended = el.lastElementChild !== null && el.lastElementChild !== live.current.last;
+        live.current.last = el.lastElementChild;
+        if (mode === "thread") {
+          if (appended) live.current.follow = true;
+          if (live.current.follow) vp.scrollTop = vp.scrollHeight;
+          return;
+        }
+        if (appended && live.current.follow) {
+          vp.scrollTop = vp.scrollHeight;
+          return;
+        }
+        // A row opened or closed: the view stays put, and "following" holds only if the bottom is still in view.
+        const near = vp.scrollHeight - vp.scrollTop - vp.clientHeight < NEAR_BOTTOM_PX;
+        live.current.follow = near;
+        setAtBottom(near);
       });
       observer.observe(el);
       return () => observer.disconnect();
     },
-    [jumpOnNewChild],
+    [mode],
   );
 
   const scrollToBottom = useCallback(() => {

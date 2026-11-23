@@ -12,6 +12,7 @@ import {
   type VoiceController,
 } from "./soniox";
 import { useMountEffect } from "./useMountEffect";
+import { isTypingTarget as isEditableTextEntry } from "@/keyboard";
 
 export type VoiceState = { supported: boolean; ready: boolean; listening: boolean; error?: string };
 
@@ -39,8 +40,7 @@ function loadContextTerms(): void {
 }
 
 function isTypingTarget(target: EventTarget | null): boolean {
-  if (!(target instanceof HTMLElement)) return false;
-  return target.closest("input, textarea, select, [contenteditable=''], [contenteditable='true']") !== null;
+  return target instanceof Element && isEditableTextEntry(target);
 }
 
 const supportsAudio = () =>
