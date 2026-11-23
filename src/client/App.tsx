@@ -1,6 +1,7 @@
 import { lazy, Suspense } from "react";
 import { ChevronRightIcon } from "lucide-react";
 import { useKeyboardShortcuts, type Shortcut } from "@/keyboard";
+import { clearThreadWithWave } from "@/fx/ThreadWave";
 import { glowPhase } from "@/fx/voiceSweep";
 import { BottomBar, type VoiceStatus } from "@/panels/BottomBar";
 import { BrickPool } from "@/panels/BrickPool";
@@ -24,7 +25,8 @@ function onShortcut(s: Shortcut): void {
       break;
     case "clear":
       abortTurn();
-      store.clearThread();
+      // The aborted turn is now still, so the wave can picture it before the store lets go of it.
+      void clearThreadWithWave(store.clearThread);
       break;
   }
 }

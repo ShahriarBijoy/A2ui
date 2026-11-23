@@ -4,6 +4,7 @@ import type { CatalogComponent } from "@shared/a2ui";
 import { deriveKnobs } from "@shared/knobs";
 import { Surface } from "@/a2ui/Surface";
 import { Button } from "@/components/ui/button";
+import { ThreadWave } from "@/fx/ThreadWave";
 import { buildTimeline, isTurnFinished, pickInteractiveSurface } from "@/format";
 import { cn } from "@/lib/utils";
 import type { AgentItem, SurfaceState, ThreadItem, UserItem } from "@/state";
@@ -49,54 +50,56 @@ export function Thread({ thread, surfaces, newestSurfaceId, decision, replaying 
         </p>
       </header>
       <div className="relative min-h-0 flex-1">
-        <div
-          ref={viewportRef}
-          className="h-full overflow-y-auto [overflow-anchor:none] [scrollbar-gutter:stable]"
-        >
-          {timeline.length === 0 ? (
-            <EmptyState />
-          ) : (
-            // During a replay the surfaces stay at full strength for the audience, but taps cannot interfere.
-            <div
-              ref={contentRef}
-              inert={replaying}
-              className="mx-auto flex w-full max-w-[46rem] flex-col gap-8 px-10 pt-4 pb-10"
-            >
-              {timeline.map((e) => {
-                if (e.kind === "user") return <UserLine key={e.item.id} item={e.item} />;
-                if (e.kind === "surface") {
+        <ThreadWave empty={<EmptyView />}>
+          <div
+            ref={viewportRef}
+            className="h-full overflow-y-auto [overflow-anchor:none] [scrollbar-gutter:stable]"
+          >
+            {timeline.length === 0 ? (
+              <EmptyState />
+            ) : (
+              // During a replay the surfaces stay at full strength for the audience, but taps cannot interfere.
+              <div
+                ref={contentRef}
+                inert={replaying}
+                className="mx-auto flex w-full max-w-[46rem] flex-col gap-8 px-10 pt-4 pb-10"
+              >
+                {timeline.map((e) => {
+                  if (e.kind === "user") return <UserLine key={e.item.id} item={e.item} />;
+                  if (e.kind === "surface") {
+                    return (
+                      <div key={`surface-${e.surfaceId}`} className="flex flex-col items-start gap-2">
+                        <Surface
+                          surfaceId={e.surfaceId}
+                          interactive={e.surfaceId === interactiveId}
+                          onAction={sendAction}
+                        />
+                        <p className="font-mono text-[0.75rem] text-muted-foreground">applied directly · {e.surfaceId}</p>
+                      </div>
+                    );
+                  }
+                  const item = e.item;
+                  const awaitingRoute =
+                    item.mode === "a2ui" &&
+                    decision &&
+                    routable &&
+                    item.retry.input.type === "utterance" &&
+                    !item.metrics.route;
                   return (
-                    <div key={`surface-${e.surfaceId}`} className="flex flex-col items-start gap-2">
-                      <Surface
-                        surfaceId={e.surfaceId}
-                        interactive={e.surfaceId === interactiveId}
-                        onAction={sendAction}
-                      />
-                      <p className="font-mono text-[0.75rem] text-muted-foreground">applied directly · {e.surfaceId}</p>
-                    </div>
+                    <AgentEntry
+                      key={item.id}
+                      item={item}
+                      surfaceExists={item.surfaceId ? item.surfaceId in surfaces : false}
+                      surfaceOwned={item.surfaceId ? owners.get(item.surfaceId) === item.id : false}
+                      interactive={item.surfaceId !== undefined && item.surfaceId === interactiveId}
+                      awaitingRoute={awaitingRoute}
+                    />
                   );
-                }
-                const item = e.item;
-                const awaitingRoute =
-                  item.mode === "a2ui" &&
-                  decision &&
-                  routable &&
-                  item.retry.input.type === "utterance" &&
-                  !item.metrics.route;
-                return (
-                  <AgentEntry
-                    key={item.id}
-                    item={item}
-                    surfaceExists={item.surfaceId ? item.surfaceId in surfaces : false}
-                    surfaceOwned={item.surfaceId ? owners.get(item.surfaceId) === item.id : false}
-                    interactive={item.surfaceId !== undefined && item.surfaceId === interactiveId}
-                    awaitingRoute={awaitingRoute}
-                  />
-                );
-              })}
-            </div>
-          )}
-        </div>
+                })}
+              </div>
+            )}
+          </div>
+        </ThreadWave>
         <button
           type="button"
           onClick={scrollToBottom}
@@ -125,6 +128,16 @@ function hasKnobs(surface: SurfaceState): boolean {
     // Same fallback as the store: no knobs means the turn composes, so show the skeleton at once.
     return false;
   }
+}
+
+/** The wave's second view: the cleared thread exactly as Thread draws it (same scroller, same gutter), so the
+ * hand-back to the live thread after the wave is pixel for pixel. Hidden from assistive tech: it is a picture. */
+function EmptyView() {
+  return (
+    <div aria-hidden inert className="h-full overflow-y-auto [scrollbar-gutter:stable]">
+      <EmptyState />
+    </div>
+  );
 }
 
 function EmptyState() {
