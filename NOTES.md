@@ -55,6 +55,8 @@ Read this before calling any external API. Items here override PLAN.md where the
 ## Owner direction (2026-11-23)
 - **No fixed data, no scripted flows.** `places.json` and the `places` data source were removed (7ca485c, 0b4dcff). Real-world facts come from live web search (`search` data lines; Haiku 5.5 + `web_search_20250305`, max_uses 1, ≤3 searches per turn, 12 s timeout, null for unknown fields, source URL per record). Flights remain a demo generator (badged) pending the owner's choice.
 - Live a2ui (phase 2, dev machine): first UI 0.6–0.9 s; data 4–6 s; 19 searches, 0 failures. `web_search_20260209` is unusable with Haiku 5.5 (invalid_tool_input 5/6, one 99 s run).
+- Query time context (32b33da): queries now name the day and time; whether that improves "open at that hour" is **unproven/partial** (Wed-clock probe 3/6 → 4/7 open per own sources, within noise; 3/7 still contradicted). Don't claim it as a fix.
+- Smoke held-out lines (first version) were reconstructed from summaries; exact intended wording: "Plan a 3-day trip to Lisbon in March", "Compare two phone plans for me", "I want to adopt a dog, what do I need?", "Help me pick a gift for my mum, budget 50 euros", "Book a haircut for Saturday morning".
 - Known quality limits: some sources are yelp search pages (3/25 rows); a place closing at 17:00 can appear for "dinner" when the query lacks a time; walk_min is null in practice (25/25), since sources rarely state walking time.
 
 ## Composer model A/B (2026-11-23, local, DEV_NOW=2026-11-25T18:45, HEAD 8918fc0, 10 runs per main scenario)
