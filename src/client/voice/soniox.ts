@@ -161,7 +161,7 @@ export const startSonioxRecording: StartRecording = (opts, cb) => {
     language_hints: LANGUAGE_HINTS,
     context: {
       general: [{ key: "domain", value: "voice commands for building a small booking or planning interface" }],
-      terms: [...BASE_TERMS, ...extraTerms],
+      terms: [...new Set([...BASE_TERMS, ...extraTerms])],
     },
     enable_endpoint_detection: opts.handsFree,
     ...(opts.handsFree ? { auto_reconnect: true } : {}),
