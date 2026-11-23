@@ -16,7 +16,8 @@ Contract files: `src/shared/{a2ui,catalog,protocol,pointer}.ts` and `src/client/
 
 ## Status at hand-off (updated 2026-11-23 ~20:35)
 - **All five lanes have landed.** Whole tree: `bunx tsc -b` clean, `bun test` 224 pass / 0 fail.
-- **Step 1: DONE, including deploy.** Live at **https://brick-box.shahriarbijoy.workers.dev** (open with `?k=<DEMO_KEY from .dev.vars>`). Secrets are set: DEMO_KEY, JEV_API_KEY, ANTHROPIC_API_KEY, SONIOX_API_KEY. It was deployed from a clean worktree at bb688f2, the reviewed state before phase 2. Redeploy with `bun run deploy` when the tree is green.
+- **Deployed:** https://brick-box.shahriarbijoy.workers.dev (open with `?k=<DEMO_KEY from .dev.vars>`). Latest deploy: fb43969, with live web search, voice-glow, the Esc wave and live widgets. Redeploy with `bun run deploy` from a green tree.
+- **All lanes and phases 2–3 are complete and reviewed** (ledger: `.superpowers/sdd/progress.md`). 352 tests pass.
 - **V (voice, steps 8/10 client):** complete and reviewed (2b31dbc..b60b31e). The live mic test with the owner is pending.
 - **D (decision model, steps 9/10):** complete and reviewed (5461a57..22a1cf6). 30/30 live lines, warm route ~150 ms. `warmJev` exists but is **not wired yet**.
 - **R (A2UI runtime/renderer, steps 2–3):** landed (b8bfe71..e2b8165, 55 tests); **review was running** at hand-off. See `.superpowers/sdd/lane-R-review.md` if present; if not, re-dispatch the review.

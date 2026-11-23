@@ -102,6 +102,14 @@ These are dev-machine numbers. The talk numbers come from step 13 against the de
 - Router (dinner screen, "We're six, and later."): **first (cold) call 153 ms**, then 144 / 138 / 141 ms; whole turn (SSE, route + 2 knob patches + caption + done) 166–209 ms; patch decision on 4/4 with Time → 20:00, Guests → 6. → The 810 ms cold call happened only from the dev machine. **No /api/warm needed** (warmJev stays available, unwired).
 - Compose (dinner line, decision off, first call after deploy, cache cold): first UI 751 ms, compose 1.92 s, 472 output tokens.
 
+### Production with live data (deployed fb43969, 2026-11-23 ~22:16, probe from Germany; first event times are client-observed)
+| line | first UI | screen + caption | live data | search ms | records |
+|---|---|---|---|---|---|
+| dinner after this event, nearby | 939 ms | 2.31 s | 4.96 s | 3443 | 3 (Restaurant Feuerwache, Blaufeuer, Restaurant Elisa) |
+| concerts in Hamburg next month | 669 ms | 1.96 s | 5.10 s | 3804 | 5 |
+| adopt a dog, what do I need | 706 ms | 2.40 s | (no search) | – | – |
+Prompt cache read 5193 tokens after the first call.
+
 ### Composer behaviours that differ from PLAN (lane W rulings, under review)
 - A data line written before createSurface waits and attaches to the new surface (the PLAN-literal rule put the flight list on the old form).
 - Lines with miscounted closing brackets are repaired, and repairs are not counted as skipped.
