@@ -52,6 +52,11 @@ Read this before calling any external API. Items here override PLAN.md where the
 - shadcn: `bunx --bun shadcn@latest init -t vite -b radix -p nova --no-monorepo -y` (style `radix-nova`), components via `shadcn add ... -y`.
 - Vite 8.3, Tailwind 4.3, Hono 4.13, React 19.3, Bun 1.3.8.
 
+## Owner direction (2026-11-23)
+- **No fixed data, no scripted flows.** `places.json` and the `places` data source were removed (7ca485c, 0b4dcff). Real-world facts come from live web search (`search` data lines; Haiku 5.5 + `web_search_20250305`, max_uses 1, ≤3 searches per turn, 12 s timeout, null for unknown fields, source URL per record). Flights remain a demo generator (badged) pending the owner's choice.
+- Live a2ui (phase 2, dev machine): first UI 0.6–0.9 s; data 4–6 s; 19 searches, 0 failures. `web_search_20260209` is unusable with Haiku 5.5 (invalid_tool_input 5/6, one 99 s run).
+- Known quality limits: some sources are yelp search pages (3/25 rows); a place closing at 17:00 can appear for "dinner" when the query lacks a time; walk_min is null in practice (25/25), since sources rarely state walking time.
+
 ## Rulings (decisions made without asking)
 - Fonts: Geist + Geist Mono, bundled via fontsource (no network at the venue). PLAN says "system sans": same intent, consistent rendering on the stage machine.
 - Catalog id: `<origin>/catalog/brick-box/v1`, served publicly as JSON by the Worker. The processor accepts any catalogId ending in `/catalog/brick-box/v1`.
@@ -88,7 +93,7 @@ These are dev-machine numbers. The talk numbers come from step 13 against the de
 - Prediction: median ~153–164 ms. After rewording, "I need to book a flight and choose my seat" lights 3 bricks (ChoicePicker, DateTimeInput, SeatMap 0.80), down from 11; prefixes of 3/5/7 words light 0/0/1. Live calls stay on (median < 500 ms).
 
 ### Other modes
-- Widgets: dinner → RestaurantWidget 734 ms; flight → FlightSearchWidget with 4 demo flights 931 ms; bill split → plain text 2.66 s.
+- Widgets (live, phase 3): dinner → RestaurantWidget with 5 real places from live search 5/5 (search 2.7–3.6 s, total 3.6–4.5 s); bill split → plain text 2/2. (Earlier fixed-data number of 734 ms is obsolete.) Flight → FlightSearchWidget with 4 demo flights.
 - HTML: "make the page pink and add a login box": first byte 652 ms, compose 2.9 s, 710 output tokens, obeyed. In a2ui the same line → "Not available" card with alternatives.
 - Client disconnect mid-stream ends the Worker invocation within ~720 ms; the next turn works.
 

@@ -106,7 +106,8 @@ export type Flight = {
   price_eur: number;
   demo: true;
 };
-export type DataSource = "places" | "flights" | "search";
+/** "search" = live web search (real data). "flights" = deterministic demo generator, records carry demo: true. No fixed place data (owner direction). */
+export type DataSource = "flights" | "search";
 
 /** Props of the two hand-built widgets in "widgets" mode. */
 export type RestaurantWidgetProps = { places: Place[]; kind?: string; max_walk_min?: number };
