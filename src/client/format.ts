@@ -3,7 +3,7 @@
  * Everything that turns metrics into text lives here: the turn chip must never print a number
  * that did not arrive in a measured event.
  */
-import type { AgentItem, SurfaceState, ThreadItem, UserItem, WireEntry } from "./state";
+import type { AgentItem, FetchMetrics, SurfaceState, ThreadItem, UserItem, WireEntry } from "./state";
 
 // ── Numbers ──────────────────────────────────────────────────────────────────
 /** Latency with its natural unit: "162 ms", "1.8 s", "12 s". */
@@ -64,7 +64,7 @@ export function tailText(text: string, max: number): string {
 }
 
 // ── Turn chip ────────────────────────────────────────────────────────────────
-export type ChipTone = "muted" | "strong" | "highlight";
+export type ChipTone = "muted" | "strong" | "highlight" | "failed";
 export type ChipPart = { key: string; text: string; tone: ChipTone; title?: string };
 
 export function isTurnFinished(item: AgentItem): boolean {
@@ -81,7 +81,7 @@ export function isPatchTurn(item: AgentItem): boolean {
  * In-flight stages show "…"; stages that never ran show "–" (route skipped, no LLM call).
  */
 export function chipParts(item: AgentItem): ChipPart[] {
-  const { route, usage, clientFirstUiMs, llmCalled, refused } = item.metrics;
+  const { route, usage, fetches, clientFirstUiMs, llmCalled, refused } = item.metrics;
   const finished = isTurnFinished(item);
   const parts: ChipPart[] = [];
 
@@ -105,6 +105,9 @@ export function chipParts(item: AgentItem): ChipPart[] {
     parts.push({ key: "patch", text: `decision model · ${n} ${n === 1 ? "value" : "values"}`, tone: "highlight" });
   }
 
+  // One segment per data line: they run in parallel, so a summed or longest time was never measured.
+  if (fetches) fetches.forEach((f, i) => parts.push(fetchPart(f, i)));
+
   if (usage && usage.first_ui_ms !== null) {
     parts.push({ key: "first", text: `first UI ${formatSeconds(usage.first_ui_ms)}`, tone: "muted" });
   }
@@ -112,7 +115,15 @@ export function chipParts(item: AgentItem): ChipPart[] {
     parts.push({ key: "seen", text: `seen ${formatSeconds(clientFirstUiMs)}`, tone: "muted" });
   }
   if (usage) {
-    parts.push({ key: "tok", text: `${formatTokens(usage.output_tokens)} tok`, tone: "muted" });
+    // The figure is output tokens, so only the searches' output tokens join it.
+    const fetchOut = (fetches ?? []).reduce((n, f) => n + finiteCount(f.output_tokens), 0);
+    const tok = usage.output_tokens + fetchOut;
+    parts.push({
+      key: "tok",
+      text: `${formatTokens(tok)} tok`,
+      tone: "muted",
+      title: fetchOut > 0 ? `output tokens: compose ${usage.output_tokens} + data ${fetchOut}` : undefined,
+    });
     if (usage.cache_read_tokens) {
       parts.push({ key: "cached", text: `cached ${formatTokens(usage.cache_read_tokens)}`, tone: "muted" });
     }
@@ -121,6 +132,28 @@ export function chipParts(item: AgentItem): ChipPart[] {
   if (route) parts.push({ key: "engine", text: route.engine, tone: "muted" });
   if (refused > 0) parts.push({ key: "refused", text: `${refused} refused`, tone: "strong" });
   return parts;
+}
+
+function finiteCount(n: number | undefined): number {
+  return typeof n === "number" && Number.isFinite(n) && n > 0 ? n : 0;
+}
+
+/** "search 6.2 s · 5 results", or "search failed". The label is the source: demo generators never read as a search. */
+function fetchPart(f: FetchMetrics, i: number): ChipPart {
+  const key = `fetch${i}`;
+  if (!f.ok) {
+    const why = f.error ? ` · ${f.error}` : "";
+    return { key, text: `${f.source} failed`, tone: "failed", title: `${f.query} · ${formatMs(f.ms)}${why}` };
+  }
+  const n = f.records;
+  const results = Number.isFinite(n) && n >= 0 ? ` · ${n} ${n === 1 ? "result" : "results"}` : "";
+  const searches = f.searches !== undefined ? ` · ${f.searches} web ${f.searches === 1 ? "search" : "searches"}` : "";
+  return {
+    key,
+    text: `${f.source} ${formatSeconds(f.ms)}${results}`,
+    tone: "muted",
+    title: `${f.query}${searches}`,
+  };
 }
 
 // ── Thread timeline ──────────────────────────────────────────────────────────

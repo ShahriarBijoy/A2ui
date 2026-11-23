@@ -144,6 +144,65 @@ describe("chipParts: measured values only", () => {
   });
 });
 
+describe("chipParts: live data lines", () => {
+  const search = {
+    source: "search" as const,
+    query: "dinner near the venue",
+    ok: true,
+    records: 5,
+    ms: 6240,
+    searches: 1,
+    input_tokens: 15_200,
+    output_tokens: 410,
+  };
+  test("no fetches: nothing extra", () => {
+    const item = agent({}, { route: route("compose"), usage, llmCalled: true });
+    expect(chipParts(item).some((p) => p.key.startsWith("fetch"))).toBe(false);
+    expect(texts(item)).toContain("312 tok");
+  });
+  test("a search adds its time and count after compose, and its output tokens to tok", () => {
+    const item = agent({}, { route: route("compose"), usage, llmCalled: true, fetches: [search] });
+    expect(texts(item)).toEqual([
+      "route 162 ms",
+      "compose 1.8 s",
+      "search 6.2 s · 5 results",
+      "first UI 0.6 s",
+      "722 tok",
+      "claude-haiku-5-5",
+      "jev-1.14.0",
+    ]);
+    const tok = chipParts(item).find((p) => p.key === "tok");
+    expect(tok?.title).toBe("output tokens: compose 312 + data 410");
+    expect(chipParts(item).find((p) => p.key === "fetch0")?.title).toBe("dinner near the venue · 1 web search");
+  });
+  test("one segment per data line, never a summed or longest time", () => {
+    const flights = { source: "flights" as const, query: "BRE-JFK", ok: true, records: 1, ms: 3 };
+    const item = agent({}, { usage, llmCalled: true, fetches: [search, flights] });
+    const t = texts(item);
+    expect(t).toContain("search 6.2 s · 5 results");
+    // A demo generator is labelled by its source, not as a search.
+    expect(t).toContain("flights 3 ms · 1 result");
+    expect(t).toContain("722 tok");
+  });
+  test("a failed search reads 'search failed' in the failed tone, never '0 results'", () => {
+    const failed = { source: "search" as const, query: "concerts", ok: false, records: 0, ms: 12_000, error: "timeout" };
+    const parts = chipParts(agent({}, { usage, llmCalled: true, fetches: [failed] }));
+    const p = parts.find((x) => x.key === "fetch0");
+    expect(p).toEqual({ key: "fetch0", text: "search failed", tone: "failed", title: "concerts · 12 s · timeout" });
+    expect(parts.map((x) => x.text).join(" ")).not.toContain("0 results");
+  });
+  test("a successful search with no matches says so", () => {
+    const none = { ...search, records: 0, searches: undefined, output_tokens: undefined };
+    const item = agent({}, { usage, llmCalled: true, fetches: [none] });
+    expect(texts(item)).toContain("search 6.2 s · 0 results");
+    expect(texts(item)).toContain("312 tok");
+  });
+  test("no usage: fetch tokens are not shown on their own", () => {
+    const item = agent({ status: "streaming" }, { llmCalled: true, fetches: [search] });
+    expect(texts(item)).toEqual(["route …", "compose …", "search 6.2 s · 5 results"]);
+  });
+});
+
 const surface = (id: string, firstSeen: number[]): SurfaceState => ({
   id,
   catalogId: "",
