@@ -7,7 +7,7 @@ import type { Mode } from "./protocol";
 export type ScenarioStep =
   /** Something the speaker says (or types). */
   | { say: string; expect?: ScenarioExpect }
-  /** Tap the first OptionCard / primary Button whose action name matches. */
+  /** Tap the first OptionCard / primary Button whose action name STARTS WITH this prefix (the composer names actions generically, e.g. pick_restaurant). */
   | { tap: string; expect?: ScenarioExpect };
 
 export type ScenarioExpect = {
@@ -29,9 +29,9 @@ export const SCENARIOS: readonly Scenario[] = [
     modes: ["a2ui", "widgets", "html"],
     steps: [
       { say: "I want dinner after this event, pick a place nearby.", expect: { bricks: ["OptionCard", "List"] } },
-      { tap: "pick_place", expect: { bricks: ["Stepper", "ChoicePicker", "Button"] } },
+      { tap: "pick_", expect: { bricks: ["Stepper", "ChoicePicker", "Button"] } },
       { say: "We're six, and later.", expect: { patchOnly: true } },
-      { tap: "confirm" },
+      { tap: "confirm_" },
     ],
   },
   {
@@ -42,8 +42,8 @@ export const SCENARIOS: readonly Scenario[] = [
     steps: [
       { say: "I need to book a flight tomorrow.", expect: { bricks: ["TextField", "DateTimeInput"] } },
       { say: "To New York, give me options.", expect: { bricks: ["OptionCard"] } },
-      { tap: "pick_flight", expect: { bricks: ["SeatMap"] } },
-      { tap: "confirm" },
+      { tap: "pick_", expect: { bricks: ["SeatMap"] } },
+      { tap: "confirm_" },
     ],
   },
   {

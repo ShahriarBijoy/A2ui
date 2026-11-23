@@ -15,7 +15,9 @@
     "JEV_MODEL": "jev-latest",
     "JEV_URL": "https://api.typesafe.ai/v1/systemone",
     "VENUE_NAME": "JAAI (Just Add AI), Überseestadt",
-    "VENUE_CITY": "Bremen"
+    "VENUE_CITY": "Bremen",
+    // Unconfirmed: inferred from the event page's venue sponsor (JAAI HQ). Confirm with the owner.
+    "VENUE_ADDRESS": "Konsul-Smidt-Straße 8p, 28217 Bremen"
   },
   "observability": { "enabled": true }
 }
