@@ -96,6 +96,7 @@ New step: create a new surface with the id in STATE.next_surface_id.
 Change to the current step (the person corrects or adds a value on the screen they see):
 update the surface STATE.current_surface_id in place. Do not rebuild it, do not create a new one.
 A tap (INPUT says "tapped") answers the current step: build the next step as a new surface.
+Every answer has at least one a2ui line. A caption alone is never an answer.
 
 ORDER FOR A NEW STEP
 1. createSurface
@@ -132,7 +133,7 @@ INPUTS AND VALUES
 - Dates are "YYYY-MM-DD", times "HH:mm". Do date arithmetic from STATE.date and STATE.tomorrow.
 - Editing the current step: one updateDataModel per changed path, e.g.
   {"a2ui":{"version":"1.0","updateDataModel":{"surfaceId":"s2","path":"/booking/guests","value":6}}}
-  "later" or "earlier" without a time means one hour later or earlier. If a new value is not among a
+  "later" or "earlier" without a time means one hour later or earlier (19:30 → 20:30). If a new value is not among a
   ChoicePicker's options, re-send that ChoicePicker with the option added.
 
 DATA
@@ -144,8 +145,9 @@ Template pattern: a List whose children are {"path","componentId"}, and one Opti
 relative paths read the item:
   {"id":"list","component":"List","children":{"path":"/places","componentId":"place"}}
   {"id":"place","component":"OptionCard","title":{"@path":"name"},"subtitle":{"@call":"formatString","args":{"value":"\${kind} · \${walk_min} min walk · until \${opens_until}"}},"tags":{"@path":"tags"},"action":{"event":{"name":"pick_place","context":{"id":{"@path":"id"},"name":{"@path":"name"}}}}}
-Flights: the same pattern with into "/flights", action "pick_flight" (context id, carrier, depart, arrive,
-price_eur), "price":{"@call":"formatCurrency","args":{"value":{"@path":"price_eur"},"currency":"EUR"}}.
+Flights: the same pattern with into "/flights":
+  {"id":"flight","component":"OptionCard","title":{"@path":"carrier"},"subtitle":{"@call":"formatDate","args":{"value":{"@path":"depart"},"format":"EEE d MMM, HH:mm"}},"price":{"@call":"formatCurrency","args":{"value":{"@path":"price_eur"},"currency":"EUR"}},"action":{"event":{"name":"pick_flight","context":{"id":{"@path":"id"},"carrier":{"@path":"carrier"},"depart":{"@path":"depart"},"arrive":{"@path":"arrive"},"price_eur":{"@path":"price_eur"}}}}}
+Send each OptionCard template in its own updateComponents message (short lines are safer).
 After a tap, the chosen item's fields are in INPUT. Copy them as literals when you show them.
 
 DESIGN RULES
@@ -160,8 +162,11 @@ DESIGN RULES
    Its action context carries the values the next step needs. Action names are snake_case verbs:
    pick_place, pick_flight, confirm_booking, confirm_seat, search_flights.
 7. Send "root" and the top containers first, then details, 3 to 8 components per message.
-8. A summary after a confirm: a Card with a "## " heading and the chosen values as Text or Stat, no inputs.
+8. A confirm tap (confirm_...) always gets a summary step: a new surface with a Card, a "## " heading
+   and the confirmed values as Text or Stat, no inputs.
 9. When the task needs arithmetic (a split, a total), compute it yourself and show it as a literal Stat.
+   If a number you need was not said (what the drinks cost), ask for it with an input; compute after the tap.
+   Money amounts are TextField variant "number" or a Slider; Stepper is only for small counts.
 10. Start the main Column with a short Text heading ("## ...").
 
 SAFETY
@@ -173,14 +178,14 @@ MAIN FLOWS
 - Dinner: "pick a place nearby" → places data line (max_walk_min 15, kind if one was named) and a List
   of OptionCards (pick_place). Tap → heading with the place name, ChoicePicker "Time"
   (mutuallyExclusive, 5 or 6 half-hour slots from the next full hour after STATE.time), Stepper
-  "Guests" (min 1, max 12), primary Button "Confirm" (confirm_booking: place, time, guests).
-  Confirm → summary.
+  "Guests" (min 1, max 12, 2 unless said), primary Button "Confirm" (confirm_booking: place, time,
+  guests). Confirm → summary surface.
 - Flight: "book a flight tomorrow" → TextField "From" (prefilled with STATE.city), TextField "To",
   DateTimeInput "Date" (enableDate, STATE.tomorrow), CheckBox "Return flight" (false), primary Button
   "Search flights" (search_flights: from, to, date, return). A destination plus "give me options", or
   the search tap → new surface: flights data line and a List of OptionCards (pick_flight).
   Tap → SeatMap (rows 20 to 30, layout "ABC DEF", a few taken seats), the price as Stat, primary Button
-  "Confirm seat" (confirm_seat) with a required check on the seat. Confirm → summary.
+  "Confirm seat" (confirm_seat) with a required check on the seat. Confirm → summary surface.
 
 EXAMPLE (another domain; copy the shape, not the content)
 STATE.next_surface_id is "s4", STATE.tomorrow is "2030-06-14". The person says:

@@ -4,6 +4,8 @@ import type { Llm, LlmUsage, Prompt, TextStream, WidgetsReply } from "./claude";
 import { encodeEvent, parseTurnRequest, patchCaption, runTurn, SSE_HEADERS, sseResponse, widgetEvent, type TurnDeps } from "./turn";
 import { generateFlights } from "./data/flights";
 
+/** Smallest real answer: one A2UI line and a caption. */
+const MINIMAL = '{"a2ui":{"version":"1.0","updateDataModel":{"surfaceId":"s2","path":"/booking/guests","value":5}}}\n{"caption":"x"}\n';
 const usage: LlmUsage = { model: "fake-model", input_tokens: 10, output_tokens: 20, cache_read_tokens: 5, cache_write_tokens: 0 };
 const ctx = {
   date: "2026-11-23",
@@ -172,14 +174,14 @@ describe("runTurn: patch path", () => {
 
   test("route says compose → route event, then the composer runs", async () => {
     const compose: RouteResult = { ...patchRoute(), kind: "new", decision: "compose", patches: [], reason: "kind new" };
-    const events = await collect(request(), deps({ route: async () => compose, llm: fakeLlm(['{"caption":"x"}\n']) }));
-    expect(events.map((e) => e.type)).toEqual(["route", "caption", "usage", "done"]);
+    const events = await collect(request(), deps({ route: async () => compose, llm: fakeLlm([MINIMAL]) }));
+    expect(events.map((e) => e.type)).toEqual(["route", "a2ui", "caption", "usage", "done"]);
   });
 
   test("patch decision with zero patches composes", async () => {
     const odd: RouteResult = { ...patchRoute(), patches: [] };
-    const events = await collect(request(), deps({ route: async () => odd, llm: fakeLlm(['{"caption":"x"}\n']) }));
-    expect(events.map((e) => e.type)).toEqual(["route", "caption", "usage", "done"]);
+    const events = await collect(request(), deps({ route: async () => odd, llm: fakeLlm([MINIMAL]) }));
+    expect(events.map((e) => e.type)).toEqual(["route", "a2ui", "caption", "usage", "done"]);
   });
 
   test("a throwing router falls through to compose", async () => {
@@ -189,7 +191,7 @@ describe("runTurn: patch path", () => {
         route: async () => {
           throw new Error("jev down");
         },
-        llm: fakeLlm(['{"caption":"x"}\n']),
+        llm: fakeLlm([MINIMAL]),
       }),
     );
     expect(events[0]).toMatchObject({ type: "route", decision: "compose", reason: "router threw: jev down" });
@@ -197,20 +199,20 @@ describe("runTurn: patch path", () => {
   });
 
   test("a hanging router is cut off by the guard", async () => {
-    const events = await collect(request(), deps({ route: () => new Promise(() => {}), routeGuardMs: 20, llm: fakeLlm(['{"caption":"x"}\n']) }));
+    const events = await collect(request(), deps({ route: () => new Promise(() => {}), routeGuardMs: 20, llm: fakeLlm([MINIMAL]) }));
     expect(events[0]).toMatchObject({ type: "route", decision: "compose" });
-    expect(events.map((e) => e.type)).toEqual(["route", "caption", "usage", "done"]);
+    expect(events.map((e) => e.type)).toEqual(["route", "a2ui", "caption", "usage", "done"]);
   });
 
   test("no route when decision is off, there are no knobs, or the input is a tap", async () => {
-    const llm = () => fakeLlm(['{"caption":"x"}\n']);
+    const llm = () => fakeLlm([MINIMAL]);
     for (const req of [
       request({ decision: false }),
       request({ surface: { ...request().surface!, knobs: [] } }),
       request({ input: { type: "action", action: { name: "pick_place", surfaceId: "s1", sourceComponentId: "place", timestamp: "t", context: { id: "p1" } } } }),
     ]) {
       const events = await collect(req, deps({ llm: llm() }));
-      expect(events.map((e) => e.type)).toEqual(["caption", "usage", "done"]);
+      expect(events.map((e) => e.type)).toEqual(["a2ui", "caption", "usage", "done"]);
     }
   });
 
@@ -266,9 +268,44 @@ describe("runTurn: compose path (a2ui)", () => {
     expect(b[0]).toMatchObject({ msg: { updateDataModel: { surfaceId: "s3" } } });
   });
 
+  test("a data line before createSurface waits and goes to the new surface", async () => {
+    const text = [
+      '{"data":{"source":"flights","args":{"from":"Bremen","to":"New York","date":"2026-11-24"},"into":"/flights"}}',
+      '{"a2ui":{"version":"1.0","createSurface":{"surfaceId":"s3","catalogId":"http://test/catalog/brick-box/v1"}}}',
+      '{"a2ui":{"version":"1.0","updateComponents":{"surfaceId":"s3","components":[{"id":"root","component":"Card","child":"x"}]}}}',
+      '{"caption":"Flights"}',
+    ].join("\n");
+    const events = await collect(request({ decision: false }), deps({ llm: fakeLlm([text]) }));
+    expect(events.map((e) => (e.type === "a2ui" ? `${e.origin}:${Object.keys(e.msg)[1]}:${(Object.values(e.msg)[1] as { surfaceId: string }).surfaceId}` : e.type))).toEqual([
+      "llm:createSurface:s3",
+      "data:updateDataModel:s3",
+      "llm:updateComponents:s3",
+      "caption",
+      "usage",
+      "done",
+    ]);
+  });
+
+  test("a held data line follows the surface of the next message, or the fallback at the end", async () => {
+    const data = '{"data":{"source":"places","args":{},"into":"/places"}}';
+    const comps = '{"a2ui":{"version":"1.0","updateComponents":{"surfaceId":"s9","components":[]}}}';
+    const a = await collect(request({ decision: false }), deps({ llm: fakeLlm([`${data}\n${comps}\n`]) }));
+    expect(a[0]).toMatchObject({ origin: "data", msg: { updateDataModel: { surfaceId: "s9" } } });
+    const b = await collect(request({ decision: false }), deps({ llm: fakeLlm([`${data}\n{"caption":"x"}\n`]) }));
+    expect(b.map((e) => e.type)).toEqual(["a2ui", "caption", "usage", "done"]);
+    expect(b[0]).toMatchObject({ msg: { updateDataModel: { surfaceId: "s2" } } });
+  });
+
   test("a trailing line without newline is still handled", async () => {
-    const events = await collect(request({ decision: false }), deps({ llm: fakeLlm(['{"caption":"no newline"}']) }));
-    expect(events.map((e) => e.type)).toEqual(["caption", "usage", "done"]);
+    const line = '{"a2ui":{"version":"1.0","deleteSurface":{"surfaceId":"s1"}}}';
+    const events = await collect(request({ decision: false }), deps({ llm: fakeLlm([line]) }));
+    expect(events.map((e) => e.type)).toEqual(["a2ui", "usage", "done"]);
+  });
+
+  test("an answer without any A2UI line ends with an error after the usage", async () => {
+    const events = await collect(request({ decision: false }), deps({ llm: fakeLlm(['{"caption":"only words"}\n']) }));
+    expect(events.map((e) => e.type)).toEqual(["caption", "usage", "error", "done"]);
+    expect(events[2]).toEqual({ type: "error", message: "The composer returned no screen" });
   });
 });
 

@@ -92,6 +92,28 @@ describe("classifyLine", () => {
     for (const l of bad) expect(classifyLine(l).kind).toBe("invalid");
   });
 
+  test("miscounted closing brackets at the end of a line are repaired", () => {
+    const good = {
+      a2ui: {
+        version: "1.0",
+        updateComponents: {
+          surfaceId: "s2",
+          components: [{ id: "f", component: "OptionCard", title: "x}", action: { event: { name: "pick", context: { id: { "@path": "id" } } } } }],
+        },
+      },
+    };
+    const text = JSON.stringify(good);
+    const extra = text.replace('"id"}}}}}]', '"id"}}}}}}]');
+    const missing = text.replace('"id"}}}}}]}}}', '"id"}}}}}}}');
+    expect(extra).not.toBe(text);
+    expect(missing).not.toBe(text);
+    for (const l of [extra, missing, text.slice(0, -2)]) {
+      const c = classifyLine(l);
+      expect(c.kind).toBe("a2ui");
+      expect(c.kind === "a2ui" && c.msg).toEqual(good.a2ui as never);
+    }
+  });
+
   test("checkEnvelope accepts each known key", () => {
     for (const key of ["createSurface", "updateComponents", "updateDataModel", "deleteSurface"]) {
       expect(checkEnvelope({ version: "1.0", [key]: { surfaceId: "s" } })).not.toBeNull();

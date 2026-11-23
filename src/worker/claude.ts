@@ -231,7 +231,11 @@ export function classifyLine(raw: string): ComposerLine {
   try {
     obj = JSON.parse(line);
   } catch {
-    return { kind: "invalid", reason: "invalid JSON" };
+    try {
+      obj = JSON.parse(repairBrackets(line));
+    } catch {
+      return { kind: "invalid", reason: "invalid JSON" };
+    }
   }
   if (!isPlainObject(obj)) return { kind: "invalid", reason: "not a JSON object" };
 
@@ -257,6 +261,38 @@ export function classifyLine(raw: string): ComposerLine {
   // Lenient: a bare A2UI message without the {"a2ui": ...} wrapper.
   const bare = checkEnvelope(obj);
   return bare ? { kind: "a2ui", msg: bare } : { kind: "invalid", reason: "unknown line kind" };
+}
+
+/**
+ * Fixes the one mistake the composer makes on long lines without thinking: a miscounted run of
+ * closing brackets at the end of a deeply nested component. A closer that does not match the open
+ * bracket is dropped, and missing closers are appended. Strings are left untouched.
+ */
+export function repairBrackets(line: string): string {
+  const stack: string[] = [];
+  let out = "";
+  let inString = false;
+  let escaped = false;
+  for (const ch of line) {
+    if (inString) {
+      out += ch;
+      if (escaped) escaped = false;
+      else if (ch === "\\") escaped = true;
+      else if (ch === '"') inString = false;
+      continue;
+    }
+    if (ch === '"') {
+      inString = true;
+    } else if (ch === "{" || ch === "[") {
+      stack.push(ch === "{" ? "}" : "]");
+    } else if (ch === "}" || ch === "]") {
+      if (stack.at(-1) !== ch) continue;
+      stack.pop();
+    }
+    out += ch;
+  }
+  if (inString) return line;
+  return out + stack.reverse().join("");
 }
 
 /** Light check only (the client validates fully): version "1.0", exactly one known key, an object with a surfaceId. */

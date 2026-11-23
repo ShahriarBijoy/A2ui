@@ -7,6 +7,7 @@ import {
   A2UI_VERSION,
   isPathBinding,
   isPlainObject,
+  messageSurfaceId,
   type A2uiMessage,
   type JsonObject,
   type JsonValue,
@@ -316,6 +317,25 @@ async function composeA2ui(req: TurnRequest, deps: TurnDeps, send: Emit, signal:
   let firstUi: number | null = null;
   let skipped = 0;
   let createdSurface: string | null = null;
+  /**
+   * Data resolved before this turn's createSurface. The model sometimes writes the data line first;
+   * sent at once it would land on the old surface (and createSurface resets the new one), so it waits
+   * for the next A2UI message and goes to that message's surface.
+   */
+  let pending: { into: string; records: JsonValue }[] = [];
+
+  const emitA2ui = async (msg: A2uiMessage, origin: "llm" | "data") => {
+    firstUi ??= Math.round(deps.now() - t0);
+    await send({ type: "a2ui", msg, origin });
+  };
+  const flushPending = async (surfaceId: string) => {
+    const held = pending;
+    pending = [];
+    for (const p of held) {
+      await emitA2ui({ version: A2UI_VERSION, updateDataModel: { surfaceId, path: p.into, value: p.records } }, "data");
+    }
+  };
+  const fallbackSurface = () => createdSurface ?? req.surface?.id ?? req.nextSurfaceId;
 
   const handle = async (line: string) => {
     const c = classifyLine(line);
@@ -325,28 +345,33 @@ async function composeA2ui(req: TurnRequest, deps: TurnDeps, send: Emit, signal:
       return;
     }
     if (c.kind === "caption") {
+      await flushPending(fallbackSurface());
       await send({ type: "caption", text: c.text });
       return;
     }
-    let msg: A2uiMessage;
-    let origin: "llm" | "data";
     if (c.kind === "a2ui") {
-      msg = fixCatalogId(c.msg, deps.context.catalogId);
-      if ("createSurface" in msg) createdSurface = msg.createSurface.surfaceId;
-      origin = "llm";
-    } else {
-      const args = resolveArgBindings(c.args, req.surface?.data ?? null);
-      const res = resolveData({ source: c.source, args }, dataDefaults(deps.context));
-      if (!res.ok) {
-        skipped++;
-        return;
+      const msg = fixCatalogId(c.msg, deps.context.catalogId);
+      if ("createSurface" in msg) {
+        createdSurface = msg.createSurface.surfaceId;
+        await emitA2ui(msg, "llm");
+        await flushPending(createdSurface);
+      } else {
+        await flushPending(messageSurfaceId(msg));
+        await emitA2ui(msg, "llm");
       }
-      const surfaceId = createdSurface ?? req.surface?.id ?? req.nextSurfaceId;
-      msg = { version: A2UI_VERSION, updateDataModel: { surfaceId, path: c.into, value: res.records } };
-      origin = "data";
+      return;
     }
-    firstUi ??= Math.round(deps.now() - t0);
-    await send({ type: "a2ui", msg, origin });
+    const args = resolveArgBindings(c.args, req.surface?.data ?? null);
+    const res = resolveData({ source: c.source, args }, dataDefaults(deps.context));
+    if (!res.ok) {
+      skipped++;
+      return;
+    }
+    if (createdSurface) {
+      await emitA2ui({ version: A2UI_VERSION, updateDataModel: { surfaceId: createdSurface, path: c.into, value: res.records } }, "data");
+    } else {
+      pending.push({ into: c.into, records: res.records });
+    }
   };
 
   const it = stream[Symbol.asyncIterator]();
@@ -357,6 +382,7 @@ async function composeA2ui(req: TurnRequest, deps: TurnDeps, send: Emit, signal:
       for (const line of splitter.push(r.value)) await handle(line);
     }
     for (const line of splitter.flush()) await handle(line);
+    await flushPending(fallbackSurface());
     const usage = await abortable(stream.usage(), signal);
     await send({
       type: "usage",
@@ -365,6 +391,8 @@ async function composeA2ui(req: TurnRequest, deps: TurnDeps, send: Emit, signal:
       compose_ms: Math.round(deps.now() - t0),
       skipped_lines: skipped,
     });
+    // A caption-only answer leaves the screen unchanged; an error gives the speaker "Try again" (U15).
+    if (firstUi === null) await send({ type: "error", message: "The composer returned no screen" });
   } catch (err) {
     stream.abort();
     throw err;
