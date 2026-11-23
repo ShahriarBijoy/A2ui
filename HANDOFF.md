@@ -14,15 +14,24 @@ Vite + React 19 + Tailwind 4 + shadcn (**Base UI**, all components installed) cl
 Every event enters the client through `store.applyTurnEvent`, the single ingress that replay also uses.
 Contract files: `src/shared/{a2ui,catalog,protocol,pointer}.ts` and `src/client/state.ts`.
 
-## Status at hand-off
-- **Step 1:** done locally (health 401/200, catalog served). Wrangler is logged into the owner's **personal** account; `account_id` is pinned. **Not deployed yet.** Deploy after the lanes land: `bun run deploy`, then `wrangler secret put` for DEMO_KEY, JEV_API_KEY, ANTHROPIC_API_KEY and SONIOX_API_KEY.
-- **Five parallel lanes were dispatched** (disjoint file ownership, explicit-path commits):
-  - **R** (steps 2–3): A2UI runtime, store, renderer, bricks, DevRunner, `turns.ts`.
-  - **S** (step 4 + UX + widgets UI): App shell, panels, keyboard.
-  - **W** (steps 5, 6, 11-server): Worker routes, turn loop, Claude composer, data, soniox-key.
-  - **D** (steps 9–10 server): knobs, Jev client, router, predict, `scripts/jev-eval.ts`.
-  - **V** (steps 8, 10 client): **DONE_WITH_CONCERNS**, commit 2b31dbc. The live mic test is pending (needs the SONIOX key and W's `/api/soniox-key`). It assumes temporary keys are reusable across presses (W issues them with `expires_in_seconds: 600`, not single-use, which is consistent). It added `useMountEffect.ts`.
-- If a lane has no report file and no commits, its agent died with the old session. Re-dispatch it with `common.md` + its brief (model opus; sonnet for V), then check `git status` for its half-written files first.
+## Status at hand-off (updated 2026-11-23 ~20:35)
+- **All five lanes have landed.** Whole tree: `bunx tsc -b` clean, `bun test` 224 pass / 0 fail.
+- **Step 1:** done locally. Wrangler is on the owner's personal account (`account_id` pinned). **Not deployed yet.**
+- **V (voice, steps 8/10 client):** complete and reviewed (2b31dbc..b60b31e). The live mic test with the owner is pending.
+- **D (decision model, steps 9/10):** complete and reviewed (5461a57..22a1cf6). 30/30 live lines, warm route ~150 ms. `warmJev` exists but is **not wired yet**.
+- **R (A2UI runtime/renderer, steps 2–3):** landed (b8bfe71..e2b8165, 55 tests); **review was running** at hand-off. See `.superpowers/sdd/lane-R-review.md` if present; if not, re-dispatch the review.
+- **W (Worker/composer, steps 5/6/11):** landed (4becab3..bcacf04, 74 tests). Live: first UI 0.6–0.9 s, dinner 2/2, flight 4/4, 0 refused over 54 turns. **Review was running**; see `lane-W-review.md`.
+- **S (stage shell, step 4 + UX):** landed (99349f0..0e83338, 27 tests). Headless checks pass at 1920 and 1280. **Review was running**; see `lane-S-review.md`.
+- Measured numbers are in NOTES.md → Measurements.
+
+## Integration TODO (after the reviews and their fix rounds)
+1. Wire `GET /api/warm` → `warmJev(env)` in `src/worker/index.ts`. Call it from the client on page load and on Space-down (cold Jev was 810 ms against an 800 ms budget).
+2. Voice: add a minimum-length guard so one-word fragments like "I'" are not sent as turns (seen in lane S's live session).
+3. `index.css`: add a darker highlight token for highlight-coloured *text* (lane S measured 3.1:1 on the background).
+4. Step 12: replay (Shift+R saves the last turn's `recordings[turnId]` to localStorage; `src/client/replay.ts` holds exported turns; F1..F6 play them through `store.beginTurn` + `applyTurnEvent` with the original timing and a "replay" badge). Also: check error handling with a wrong ANTHROPIC key (one error line + Try again), and check the stage layout.
+5. Step 13: `scripts/smoke.ts` over `src/shared/scenarios.ts` against the deployed URL, all three modes, 3× each; write the numbers into NOTES.md.
+6. Deploy: `bun run deploy`, then `wrangler secret put` DEMO_KEY / JEV_API_KEY / ANTHROPIC_API_KEY / SONIOX_API_KEY. Then measure `route.ms` from the deployed Worker, cold and warm.
+7. A live voice rehearsal with the owner in Chrome (both scenarios by voice, U1/U2).
 
 ## Next steps after the lanes
 1. Review each lane against its brief (spec compliance + quality) and fix gaps.
