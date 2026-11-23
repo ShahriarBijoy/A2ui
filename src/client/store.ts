@@ -46,6 +46,11 @@ export function compactJson(value: unknown, max = 48): string {
   return s.length > max ? s.slice(0, max - 1) + "…" : s;
 }
 
+/** The wire is untrusted at runtime: one malformed usage event must not turn the session totals into NaN. */
+function finite(n: unknown): number {
+  return typeof n === "number" && Number.isFinite(n) ? n : 0;
+}
+
 function omitType<T extends { type: string }>(ev: T): Omit<T, "type"> {
   const copy: Partial<T> = { ...ev };
   delete copy.type;
@@ -159,6 +164,8 @@ export function createStore(): StoreApi {
   let surfaceSeq = 0;
   /** Every surface id seen this session, so nextSurfaceId never repeats one, even after Esc. */
   const seenSurfaceIds = new Set<string>();
+  /** Surfaces that have been made the newest once; a later root on them is an update, not a new step. */
+  const promotedSurfaceIds = new Set<string>();
 
   const set = (next: AppState) => {
     if (next === state) return;
@@ -179,16 +186,8 @@ export function createStore(): StoreApi {
     origin: A2uiOrigin,
     turnId: string | null,
     now: number,
-  ): { state: AppState; res: ApplyResult } => {
+  ): { state: AppState; res: ApplyResult; promoted: boolean } => {
     const res = applyMessage(s.surfaces, raw, { now, turnId });
-    if (res.kind === "updateDataModel") {
-      const prior = s.surfaces[res.surfaceId];
-      const written = res.surfaces[res.surfaceId];
-      // U5 flashes edits. Filling a surface in the turn that created it is not an edit, so it leaves no stamp.
-      if (written && (res.created || prior?.turnId === turnId)) {
-        res.surfaces = { ...res.surfaces, [res.surfaceId]: { ...written, changed: prior?.changed ?? {} } };
-      }
-    }
     const entries: WireEntry[] = [
       wireEntry({
         dir: "down",
@@ -226,9 +225,17 @@ export function createStore(): StoreApi {
     }
 
     let newestSurfaceId = s.newestSurfaceId;
-    if (res.created) {
+    if (res.created) seenSurfaceIds.add(res.surfaceId);
+    // A data-only message to a stray id auto-creates a rootless surface; making it the newest would
+    // turn the real one inert behind a skeleton that never resolves. Promote on createSurface or root.
+    const surface = res.surfaces[res.surfaceId];
+    const promoted =
+      surface !== undefined &&
+      ((res.kind === "createSurface" && res.created) ||
+        (!promotedSurfaceIds.has(res.surfaceId) && surface.components.root !== undefined));
+    if (promoted) {
+      promotedSurfaceIds.add(res.surfaceId);
       newestSurfaceId = res.surfaceId;
-      seenSurfaceIds.add(res.surfaceId);
     }
     if (res.kind === "deleteSurface" && newestSurfaceId === res.surfaceId) newestSurfaceId = null;
 
@@ -236,6 +243,7 @@ export function createStore(): StoreApi {
     return {
       state: { ...s, surfaces: res.surfaces, wire: appendWire(s.wire, entries), pool, newestSurfaceId, totals },
       res,
+      promoted,
     };
   };
 
@@ -260,12 +268,15 @@ export function createStore(): StoreApi {
     },
 
     clearThread() {
+      promotedSurfaceIds.clear();
       set({
         ...state,
         thread: [],
         surfaces: {},
         newestSurfaceId: null,
         activeTurnId: null,
+        // The replay turn's own done/failTurn can no longer find its item after this, so reset here.
+        replaying: false,
         wire: [],
         pool: { predicted: [], used: [], counts: {} },
       });
@@ -329,7 +340,7 @@ export function createStore(): StoreApi {
           if (ev.origin === "llm") metrics = { ...metrics, llmCalled: true };
           if (res.kind) {
             const prior = before[res.surfaceId];
-            if (res.created) {
+            if (out.promoted) {
               a = { ...a, surfaceId: res.surfaceId };
             } else if (res.kind !== "deleteSurface" && prior && prior.turnId !== turnId) {
               a = { ...a, updatedSurfaceId: res.surfaceId };
@@ -373,8 +384,8 @@ export function createStore(): StoreApi {
             totals: {
               ...s.totals,
               llmCalls: s.totals.llmCalls + 1,
-              inputTokens: s.totals.inputTokens + ev.input_tokens,
-              outputTokens: s.totals.outputTokens + ev.output_tokens,
+              inputTokens: s.totals.inputTokens + finite(ev.input_tokens),
+              outputTokens: s.totals.outputTokens + finite(ev.output_tokens),
             },
           };
           break;
@@ -481,6 +492,20 @@ export function createStore(): StoreApi {
     },
   };
   return api;
+}
+
+/**
+ * True while a turn that owns the surface, or one that is updating it, is still pending or streaming.
+ * Returns a boolean, so it is safe as a useStore selector.
+ */
+export function surfaceStreaming(s: AppState, surfaceId: string): boolean {
+  const owner = s.surfaces[surfaceId]?.turnId ?? null;
+  return s.thread.some(
+    (i) =>
+      i.kind === "agent" &&
+      (i.status === "pending" || i.status === "streaming") &&
+      (i.turnId === owner || i.surfaceId === surfaceId || i.updatedSurfaceId === surfaceId),
+  );
 }
 
 export const store: StoreApi = createStore();

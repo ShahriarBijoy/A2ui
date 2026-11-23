@@ -1,9 +1,9 @@
 import type { OptionCardComponent } from "@shared/a2ui";
 import { Badge } from "@/components/ui/badge";
 import { cn } from "@/lib/utils";
-import { resolveBoolean, resolveString, resolveStringList } from "@/a2ui/evaluate";
+import { isPending, resolveBoolean, resolveString, resolveStringList } from "@/a2ui/evaluate";
 import { store } from "@/store";
-import { evalCtx, useSurfaceEnv, type BrickProps } from "./shared";
+import { evalCtx, InlineSkeleton, useSurfaceEnv, type BrickProps } from "./shared";
 
 export function OptionCard({ def, scope }: BrickProps<OptionCardComponent>) {
   const env = useSurfaceEnv();
@@ -13,6 +13,12 @@ export function OptionCard({ def, scope }: BrickProps<OptionCardComponent>) {
   const tags = resolveStringList(def.tags, ctx);
   const price = resolveString(def.price, ctx);
   const selected = resolveBoolean(def.selected, ctx);
+  // Skeletons only while the turn streams; afterwards a missing field simply renders nothing.
+  const pending = {
+    title: env.streaming && isPending(def.title, ctx),
+    subtitle: env.streaming && isPending(def.subtitle, ctx),
+    price: env.streaming && isPending(def.price, ctx),
+  };
   return (
     <button
       type="button"
@@ -28,8 +34,14 @@ export function OptionCard({ def, scope }: BrickProps<OptionCardComponent>) {
       )}
     >
       <span className="flex min-w-0 flex-1 flex-col gap-0.5">
-        <span className="text-base font-medium leading-snug">{title}</span>
-        {subtitle ? <span className="text-sm text-muted-foreground">{subtitle}</span> : null}
+        <span className="text-base font-medium leading-snug">
+          {pending.title ? <InlineSkeleton className="h-5 w-40" /> : title}
+        </span>
+        {pending.subtitle ? (
+          <InlineSkeleton className="h-4 w-28" />
+        ) : subtitle ? (
+          <span className="text-sm text-muted-foreground">{subtitle}</span>
+        ) : null}
         {tags.length > 0 ? (
           <span className="mt-1.5 flex flex-wrap gap-1.5">
             {tags.map((tag, i) => (
@@ -40,7 +52,11 @@ export function OptionCard({ def, scope }: BrickProps<OptionCardComponent>) {
           </span>
         ) : null}
       </span>
-      {price ? <span className="shrink-0 font-mono text-base tabular-nums">{price}</span> : null}
+      {pending.price ? (
+        <InlineSkeleton className="h-5 w-12 shrink-0" />
+      ) : price ? (
+        <span className="shrink-0 font-mono text-base tabular-nums">{price}</span>
+      ) : null}
     </button>
   );
 }

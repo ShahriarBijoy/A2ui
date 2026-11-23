@@ -17,7 +17,11 @@ export function TextField({ def, scope, firstSeen }: BrickProps<TextFieldCompone
   // A literal (unbound) value has nowhere to write, so it stays uncontrolled.
   const valueProps = path ? { value } : { defaultValue: value };
   const write = (v: string) => {
-    if (path) store.setData(env.surfaceId, path, v);
+    if (!path) return;
+    // A number field stores a number, so actions, knobs and Stat see 6 rather than "6".
+    const n = Number(v);
+    const value = def.variant === "number" && v.trim() !== "" && Number.isFinite(n) ? n : v;
+    store.setData(env.surfaceId, path, value);
   };
   return (
     <div className="flex flex-col gap-2">

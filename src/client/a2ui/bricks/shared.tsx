@@ -3,12 +3,13 @@
  * List templates), the U5 flash wrapper, labels, skeletons and the refused placeholder.
  */
 import { createContext, useContext, type ReactNode } from "react";
-import type { ChildList, JsonValue } from "@shared/a2ui";
-import { isChildTemplate, isPlainObject } from "@shared/a2ui";
-import { getAt, pathsOverlap, resolvePath } from "@shared/pointer";
-import type { A2uiAction } from "@shared/a2ui";
+import type { A2uiAction, ChildList } from "@shared/a2ui";
+import { isChildTemplate } from "@shared/a2ui";
+import type { BrickName } from "@shared/catalog";
+import { pathsOverlap } from "@shared/pointer";
 import { cn } from "@/lib/utils";
 import type { EvalContext } from "@/a2ui/evaluate";
+import { templateView } from "@/a2ui/template";
 import type { SurfaceState } from "@/state";
 
 export type SurfaceEnv = {
@@ -16,6 +17,8 @@ export type SurfaceEnv = {
   surface: SurfaceState;
   interactive: boolean;
   onAction: (a: A2uiAction) => void;
+  /** A turn is still streaming into this surface: missing data is "on its way", not "absent". */
+  streaming: boolean;
   /** Renders component "id" in "scope"; Surface owns the node wrapper (fade, error boundary, cycle guard). */
   renderNode: (id: string, scope: string, key?: string) => ReactNode;
 };
@@ -34,6 +37,16 @@ export function evalCtx(env: SurfaceEnv, scope: string): EvalContext {
   return { data: env.surface.data, scope };
 }
 
+/** Skeleton per pending template item, sized like the brick it stands in for (U3: no jump on arrival). */
+const PENDING_SHAPE: Partial<Record<BrickName, string>> = {
+  OptionCard: "h-25 rounded-lg",
+  Text: "h-6",
+  Stat: "h-16",
+  Button: "h-10 w-32",
+  Divider: "h-px",
+};
+const PENDING_ITEMS = 3;
+
 /** Children of Row/Column/List: static ids, or one child per array item with scope "<path>/<index>". */
 export function renderChildList(env: SurfaceEnv, children: ChildList | undefined, scope: string): ReactNode[] {
   if (Array.isArray(children)) {
@@ -45,26 +58,20 @@ export function renderChildList(env: SurfaceEnv, children: ChildList | undefined
     });
   }
   if (!isChildTemplate(children)) return [];
-  const abs = resolvePath(children.path, scope);
-  let items: JsonValue | undefined;
-  try {
-    items = getAt(env.surface.data, abs);
-  } catch {
-    items = undefined;
+  const state = templateView(children, env.surface.data, scope, env.streaming);
+  if (state.kind === "skeleton") {
+    const entry = env.surface.components[children.componentId];
+    const shape = (entry?.status === "ok" && PENDING_SHAPE[entry.def.component]) || "h-20 rounded-lg";
+    return Array.from({ length: PENDING_ITEMS }, (_, i) => <SkeletonBlock key={"pending" + i} className={shape} />);
   }
-  // The data line usually lands after the template: hold the space instead of collapsing.
-  if (items === undefined) return [<SkeletonBlock key="pending" className="h-16" />];
-  if (!Array.isArray(items)) return [];
-  const base = abs === "/" ? "" : abs;
-  const seen = new Set<string>();
-  return items.map((item, i) => {
-    const raw = isPlainObject(item) ? item.id : undefined;
-    const itemId = typeof raw === "string" || typeof raw === "number" ? String(raw) : null;
-    // Stable keys keep inputs mounted when items are re-sent; duplicates fall back to the index.
-    const key = itemId !== null && !seen.has(itemId) ? "id:" + itemId : "i:" + i;
-    if (itemId !== null) seen.add(itemId);
-    return env.renderNode(children.componentId, base + "/" + i, key);
-  });
+  if (state.kind === "empty") {
+    return [
+      <p key="empty" className="text-sm text-muted-foreground">
+        Nothing found
+      </p>,
+    ];
+  }
+  return state.items.map((item) => env.renderNode(children.componentId, item.scope, item.key));
 }
 
 const FLASH_MS = 600;
@@ -113,16 +120,24 @@ export function SkeletonBlock(props: { className?: string }) {
 
 /** U10: calm and small. The agent gets the VALIDATION_FAILED error; the audience sees this. */
 export function Refused(props: { type: string; reason?: string }) {
-  const extra = props.reason && props.reason !== "Not in the catalog" ? " · " + props.reason.toLowerCase() : "";
+  // "Not in the catalog" only when that is true; a catalog brick can be refused for other reasons.
+  const text =
+    props.reason && props.reason !== "Not in the catalog"
+      ? "Refused · " + props.type + " · " + props.reason.toLowerCase()
+      : "Not in the catalog · " + props.type;
   return (
     <div
       role="note"
       className="rounded-md border border-dashed border-input px-3 py-2 font-mono text-xs text-muted-foreground"
     >
-      Not in the catalog · {props.type}
-      {extra}
+      {text}
     </div>
   );
+}
+
+/** Stand-in for a value whose data has not arrived yet, while its turn still streams (see isPending). */
+export function InlineSkeleton(props: { className?: string }) {
+  return <span aria-hidden className={cn("bb-skeleton inline-block h-[1em] w-24 align-middle", props.className)} />;
 }
 
 /** Text without the markdown markers, for places that take a plain label (Button). */

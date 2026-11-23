@@ -168,7 +168,7 @@ describe("updateComponents", () => {
 });
 
 describe("updateDataModel", () => {
-  test("changedPaths, changed stamp, hasDemoData", () => {
+  test("changedPaths and hasDemoData; the creating turn's fill leaves no flash stamp", () => {
     const { surfaces, results } = run([
       { version: v, createSurface: { surfaceId: "s1", catalogId: CAT } },
       { version: v, updateDataModel: { surfaceId: "s1", path: "/flights", value: [{ id: "f1", demo: true }] } },
@@ -176,11 +176,34 @@ describe("updateDataModel", () => {
     ]);
     expect(results[1].changedPaths).toEqual(["/flights"]);
     expect(results[2].changedPaths).toEqual(["/trip/guests"]);
-    expect(surfaces.s1.changed).toEqual({ "/flights": 2, "/trip/guests": 3 });
+    expect(surfaces.s1.changed).toEqual({});
     expect(surfaces.s1.hasDemoData).toBe(true);
     const cleared = applyMessage(surfaces, { version: v, updateDataModel: { surfaceId: "s1", path: "/flights", value: null } }, { now: 4, turnId: null });
     expect(cleared.surfaces.s1.data).toEqual({ trip: { guests: 6 } });
     expect(cleared.surfaces.s1.hasDemoData).toBe(false);
+  });
+  test("a later turn's edit stamps only the leaves whose value changed", () => {
+    const { surfaces } = run([
+      { version: v, createSurface: { surfaceId: "s1", catalogId: CAT } },
+      { version: v, updateDataModel: { surfaceId: "s1", value: { booking: { place: "P", time: ["19:00"], guests: 4 } } } },
+    ]);
+    const edit = applyMessage(
+      surfaces,
+      { version: v, updateDataModel: { surfaceId: "s1", path: "/booking", value: { place: "P", time: ["20:00"], guests: 6 } } },
+      { now: 50, turnId: "t2" },
+    );
+    expect(edit.changedPaths).toEqual(["/booking"]);
+    expect(edit.surfaces.s1.changed).toEqual({ "/booking/time/0": 50, "/booking/guests": 50 });
+    // Outside a turn (applyA2ui) nothing counts as an edit.
+    const quiet = applyMessage(surfaces, { version: v, updateDataModel: { surfaceId: "s1", path: "/booking/guests", value: 8 } }, { now: 60, turnId: null });
+    expect(quiet.surfaces.s1.changed).toEqual({});
+    // A rewrite at the root still stamps leaves, not "/".
+    const root = applyMessage(
+      surfaces,
+      { version: v, updateDataModel: { surfaceId: "s1", path: "/", value: { booking: { place: "P", time: ["19:00"], guests: 5 } } } },
+      { now: 70, turnId: "t3" },
+    );
+    expect(root.surfaces.s1.changed).toEqual({ "/booking/guests": 70 });
   });
   test("path defaults to / and bad paths are rejected", () => {
     const { surfaces } = run([{ version: v, updateDataModel: { surfaceId: "s1", value: { a: 1 } } }]);

@@ -6,7 +6,7 @@
 import type { A2uiError, A2uiMessageKind, CatalogComponent, JsonValue } from "@shared/a2ui";
 import { A2UI_MESSAGE_KINDS, A2UI_VERSION, isChildTemplate, isFunctionCall, isPlainObject } from "@shared/a2ui";
 import { CATALOG_PATH, isBrickName, isFunctionName, type BrickName } from "@shared/catalog";
-import { formatPointer, setAt } from "@shared/pointer";
+import { formatPointer, getAt, parsePointer, setAt } from "@shared/pointer";
 import type { ComponentEntry, SurfaceState } from "@/state";
 
 export type ApplyOptions = { now: number; turnId: string | null };
@@ -257,16 +257,57 @@ function updateDataModel(
   } catch (e) {
     return reject(surfaceId, "/updateDataModel/path", e instanceof Error ? e.message : String(e));
   }
-  const surface: SurfaceState = {
-    ...prev,
-    data,
-    changed: { ...prev.changed, [path]: opts.now },
-    hasDemoData: containsDemoData(data),
-  };
+  // U5 flashes edits only. Filling a surface in the turn that created it is not an edit, and a
+  // message outside any turn (applyA2ui) never is one. Only leaves whose value changed get a stamp,
+  // so rewriting a parent object flashes the one control that changed, not every sibling.
+  const isEdit = existing !== undefined && opts.turnId !== null && existing.turnId !== opts.turnId;
+  let changed = prev.changed;
+  if (isEdit) {
+    changed = { ...prev.changed };
+    for (const leaf of changedLeaves(getAt(prev.data, path), getAt(data, path), parsePointer(path))) {
+      changed[leaf] = opts.now;
+    }
+  }
+  const surface: SurfaceState = { ...prev, data, changed, hasDemoData: containsDemoData(data) };
   return done({ ...surfaces, [surfaceId]: surface }, "updateDataModel", surfaceId, {
     changedPaths: [path],
     created: existing === undefined,
   });
+}
+
+const MAX_STAMPS = 64;
+
+function sameJson(a: JsonValue | undefined, b: JsonValue | undefined): boolean {
+  if (a === b) return true;
+  if (a === undefined || b === undefined || a === null || b === null) return false;
+  if (typeof a !== "object" || typeof b !== "object") return false;
+  if (Array.isArray(a) !== Array.isArray(b)) return false;
+  if (Array.isArray(a) && Array.isArray(b)) return a.length === b.length && a.every((v, i) => sameJson(v, b[i]));
+  const ao = a as { [key: string]: JsonValue };
+  const bo = b as { [key: string]: JsonValue };
+  const keys = Object.keys(ao);
+  return keys.length === Object.keys(bo).length && keys.every((k) => k in bo && sameJson(ao[k], bo[k]));
+}
+
+/** Pointers of the leaves that differ between two values; a big rewrite collapses to its root. */
+function changedLeaves(before: JsonValue | undefined, after: JsonValue | undefined, tokens: string[]): string[] {
+  const out: string[] = [];
+  const walk = (a: JsonValue | undefined, b: JsonValue | undefined, at: string[]) => {
+    if (out.length > MAX_STAMPS || sameJson(a, b)) return;
+    if (Array.isArray(a) && Array.isArray(b) && a.length === b.length) {
+      a.forEach((v, i) => walk(v, b[i], [...at, String(i)]));
+      return;
+    }
+    if (isPlainObject(a) && isPlainObject(b)) {
+      const ao = a as { [key: string]: JsonValue };
+      const bo = b as { [key: string]: JsonValue };
+      for (const key of new Set([...Object.keys(ao), ...Object.keys(bo)])) walk(ao[key], bo[key], [...at, key]);
+      return;
+    }
+    out.push(formatPointer(at));
+  };
+  walk(before, after, tokens);
+  return out.length > MAX_STAMPS ? [formatPointer(tokens)] : out;
 }
 
 // ── Validation ───────────────────────────────────────────────────────────────

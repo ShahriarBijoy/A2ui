@@ -180,6 +180,40 @@ describe("local writes and actions", () => {
   });
 });
 
+describe("fix round 1", () => {
+  test("clearThread resets replaying (Esc during a replay)", () => {
+    const s = createStore();
+    s.beginTurn({ ...utter("replayed"), replay: true });
+    expect(s.getState().replaying).toBe(true);
+    s.clearThread();
+    expect(s.getState().replaying).toBe(false);
+    const t = s.beginTurn(utter("next"));
+    s.applyTurnEvent(t, { type: "done" });
+    expect(s.getState().replaying).toBe(false);
+  });
+  test("a data-only message to a stray id does not take over the newest surface", () => {
+    const s = createStore();
+    const t1 = s.beginTurn(utter("table for four"));
+    for (const msg of DINNER_STEP_2.messages) s.applyTurnEvent(t1, a2ui(msg));
+    s.applyTurnEvent(t1, { type: "done" });
+    const t2 = s.beginTurn(utter("more"));
+    s.applyTurnEvent(t2, a2ui({ version: "1.0", updateDataModel: { surfaceId: "s7", path: "/x", value: 1 } }, "data"));
+    expect(s.getState().newestSurfaceId).toBe("s2");
+    expect(agentOf(s, t2)?.surfaceId).toBeUndefined();
+    // Once it gets a root it is a real step and becomes the newest.
+    s.applyTurnEvent(t2, a2ui({ version: "1.0", updateComponents: { surfaceId: "s7", components: [{ id: "root", component: "Divider" }] } }));
+    expect(s.getState().newestSurfaceId).toBe("s7");
+    expect(agentOf(s, t2)?.surfaceId).toBe("s7");
+  });
+  test("a malformed usage event cannot turn the totals into NaN", () => {
+    const s = createStore();
+    const t = s.beginTurn(utter("x"));
+    s.applyTurnEvent(t, { ...usage, input_tokens: undefined } as unknown as TurnEvent);
+    expect(s.getState().totals.inputTokens).toBe(0);
+    expect(s.getState().totals.outputTokens).toBe(300);
+  });
+});
+
 describe("buildTurnRequest", () => {
   test("derives the thread (user, tap, agent), snapshots the newest surface, picks a fresh surface id", () => {
     const s = createStore();

@@ -6,7 +6,7 @@ import { Component, createContext, useContext, useMemo, type ErrorInfo, type JSX
 import type { A2uiAction } from "@shared/a2ui";
 import { Badge } from "@/components/ui/badge";
 import { cn } from "@/lib/utils";
-import { useStore } from "@/store";
+import { surfaceStreaming, useStore } from "@/store";
 import { brickComponent } from "./bricks";
 import { Refused, SkeletonBlock, SurfaceEnvContext, useSurfaceEnv, type SurfaceEnv } from "./bricks/shared";
 
@@ -95,9 +95,10 @@ export function Surface(props: {
 }): JSX.Element {
   const { surfaceId, interactive, onAction } = props;
   const surface = useStore((s) => s.surfaces[surfaceId]);
+  const streaming = useStore((s) => surfaceStreaming(s, surfaceId));
   const env = useMemo<SurfaceEnv | null>(
-    () => (surface ? { surfaceId, surface, interactive, onAction, renderNode } : null),
-    [surfaceId, surface, interactive, onAction],
+    () => (surface ? { surfaceId, surface, interactive, streaming, onAction, renderNode } : null),
+    [surfaceId, surface, interactive, streaming, onAction],
   );
   const hasRoot = surface?.components.root !== undefined;
 

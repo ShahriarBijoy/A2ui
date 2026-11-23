@@ -1,6 +1,6 @@
-import { describe, expect, test } from "bun:test";
+import { describe, expect, spyOn, test } from "bun:test";
 import type { Action, JsonValue } from "@shared/a2ui";
-import { EvalError, evalChecks, formatDate, resolve, resolveActionContext, resolveBoolean, resolveNumber, resolveString, resolveStringList, type EvalContext } from "./evaluate";
+import { EvalError, evalChecks, formatDate, isPending, resolve, resolveActionContext, resolveBoolean, resolveNumber, resolveString, resolveStringList, type EvalContext } from "./evaluate";
 
 const data: JsonValue = {
   booking: { place: "Placeholder Bistro", time: ["19:00"], guests: 4, note: "" },
@@ -81,6 +81,7 @@ describe("functions", () => {
     expect(formatDate("soon", "d MMM")).toBe("soon");
     expect(formatDate("2026-11-28")).toBe("Sat 28 Nov");
     expect(formatDate("19:00", "d MMM")).toBe(" ");
+    expect(formatDate("2026-11-28", "constructor toString d")).toBe("constructor toString 28");
   });
   test("required", () => {
     expect(resolve(call("required", { value: { "@path": "/booking/time" } }), top)).toBe(true);
@@ -122,8 +123,27 @@ describe("checks", () => {
     );
     expect(res).toEqual({ ok: false, message: "Add a note" });
   });
-  test("a check that cannot be evaluated fails", () => {
+  test("a check that cannot be evaluated fails, and says so in the console", () => {
+    const warn = spyOn(console, "warn").mockImplementation(() => {});
     expect(evalChecks([{ condition: { "@call": "eval" }, message: "nope" }], top)).toEqual({ ok: false, message: "nope" });
+    expect(warn).toHaveBeenCalledTimes(1);
+    warn.mockRestore();
+  });
+});
+
+describe("isPending", () => {
+  const D = "$";
+  test("top-level bindings to missing data are pending", () => {
+    expect(isPending({ "@path": "/flight/missing" }, top)).toBe(true);
+    expect(isPending({ "@path": "/flight/price_eur" }, top)).toBe(false);
+    expect(isPending(call("formatCurrency", { value: { "@path": "/nope" } }), top)).toBe(true);
+    expect(isPending(call("formatString", { value: "At " + D + "{/nope/place}" }), top)).toBe(true);
+    expect(isPending(call("formatString", { value: "At " + D + "{/booking/place}" }), top)).toBe(false);
+    expect(isPending("literal", top)).toBe(false);
+    expect(isPending(undefined, top)).toBe(false);
+  });
+  test("inside a template scope a missing field is absent, not pending", () => {
+    expect(isPending({ "@path": "subtitle" }, item)).toBe(false);
   });
 });
 

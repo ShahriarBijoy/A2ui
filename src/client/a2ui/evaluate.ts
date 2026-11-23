@@ -34,6 +34,29 @@ export function resolve(value: DynamicValue | undefined, ctx: EvalContext): Json
   return out;
 }
 
+/**
+ * A top-level binding whose data has not arrived yet: live data lands seconds after the UI, so
+ * bricks show a skeleton bar instead of a blank. Inside a List template a missing field is just
+ * absent (an optional subtitle), so template scopes never count as pending.
+ */
+export function isPending(value: DynamicValue | undefined, ctx: EvalContext): boolean {
+  if (ctx.scope !== "/" || value === undefined || value === null || typeof value !== "object") return false;
+  if (Array.isArray(value)) return value.some((v) => isPending(v, ctx));
+  if (isPathBinding(value)) return readPath(value["@path"], ctx) === undefined;
+  if (isFunctionCall(value)) {
+    const args = value.args;
+    if (!isPlainObject(args)) return false;
+    if (value["@call"] === "formatString" && typeof args.value === "string") {
+      for (const m of args.value.matchAll(/\$\{([^}]*)\}/g)) {
+        const path = m[1].trim();
+        if (path !== "" && readPath(path, ctx) === undefined) return true;
+      }
+    }
+    return Object.values(args).some((v) => isPending(v, ctx));
+  }
+  return Object.values(value).some((v) => isPending(v, ctx));
+}
+
 /** Absolute pointer a binding writes to, or null when the value is not a plain @path binding. */
 export function boundPath(value: unknown, scope: string): string | null {
   if (!isPathBinding(value)) return null;
@@ -274,9 +297,9 @@ export function formatDate(value: string, format?: string): string {
   const fmt = format && format.trim() !== "" ? format : defaultFormat(parts);
   return fmt.replace(/'([^']*)'|[A-Za-z]+/g, (run: string, quoted: string | undefined) => {
     if (quoted !== undefined) return quoted;
-    const token = TOKENS[run];
-    if (!token) return run;
-    return token(parts) ?? "";
+    // Own keys only: words like "constructor" must not reach Object.prototype.
+    if (!Object.hasOwn(TOKENS, run)) return run;
+    return TOKENS[run](parts) ?? "";
   });
 }
 

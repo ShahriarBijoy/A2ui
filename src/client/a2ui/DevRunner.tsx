@@ -16,6 +16,9 @@ const STEP_MS = 90;
 
 const sleep = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms));
 
+/** Bumped by every run and by Reset, so a run still stepping stops instead of interleaving with the next. */
+let runToken = 0;
+
 function parseJsonl(text: string): { messages: unknown[]; errors: string[] } {
   const messages: unknown[] = [];
   const errors: string[] = [];
@@ -35,10 +38,12 @@ function parseJsonl(text: string): { messages: unknown[]; errors: string[] } {
 }
 
 async function runAsTurn(display: string, messages: readonly unknown[]): Promise<void> {
+  const token = ++runToken;
   abortTurn();
   const turnId = store.beginTurn({ input: { type: "utterance", text: display }, display, via: "text" });
   for (const msg of messages) {
     await sleep(STEP_MS);
+    if (token !== runToken) break;
     // Raw on purpose: the processor validates and refuses bad messages, which is what the runner is for.
     store.applyTurnEvent(turnId, { type: "a2ui", msg: msg as A2uiMessage, origin: "llm" });
   }
@@ -62,6 +67,7 @@ export default function DevRunner() {
   };
 
   const reset = () => {
+    runToken++;
     abortTurn();
     store.clearThread();
     setErrors([]);

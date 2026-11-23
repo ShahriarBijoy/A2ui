@@ -1,8 +1,8 @@
 import type { ReactNode } from "react";
 import type { TextComponent } from "@shared/a2ui";
 import { cn } from "@/lib/utils";
-import { resolveString } from "@/a2ui/evaluate";
-import { evalCtx, useSurfaceEnv, type BrickProps } from "./shared";
+import { isPending, resolveString } from "@/a2ui/evaluate";
+import { evalCtx, InlineSkeleton, useSurfaceEnv, type BrickProps } from "./shared";
 
 const HEADING = ["text-2xl font-semibold tracking-tight", "text-xl font-semibold tracking-tight", "text-lg font-semibold"];
 
@@ -39,12 +39,15 @@ export function renderMarkdown(text: string): ReactNode[] {
 
 export function Text({ def, scope }: BrickProps<TextComponent>) {
   const env = useSurfaceEnv();
-  const text = resolveString(def.text, evalCtx(env, scope));
+  const ctx = evalCtx(env, scope);
+  const caption = def.variant === "caption";
+  if (env.streaming && isPending(def.text, ctx)) return <InlineSkeleton className={caption ? "h-4 w-32" : "h-6 w-48"} />;
+  const text = resolveString(def.text, ctx);
   return (
     <div
       className={cn(
         "flex flex-col gap-1 leading-snug",
-        def.variant === "caption" ? "text-sm text-muted-foreground" : "text-base",
+        caption ? "text-sm text-muted-foreground" : "text-base",
       )}
     >
       {renderMarkdown(text)}
