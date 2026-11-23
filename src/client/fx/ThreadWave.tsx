@@ -4,26 +4,11 @@
  * distortion-waves bends a picture of the DOM, so both views must be still while it runs. Esc gives that:
  * the turn is aborted first, the picture is taken, then the store is cleared under the running wave.
  * At rest `capture` stays off, so the library never re-pictures a streaming thread while the pointer is over it.
+ * The Esc logic itself is in waveControl.ts.
  */
 import { useState, type CSSProperties, type ReactNode } from "react";
-import { flushSync } from "react-dom";
-import { DistortionWave, snapshot, type CaptureRequest, type DistortionWaveHandle, type Rect } from "distortion-waves";
-import { store } from "@/store";
-
-type Runner = (clear: () => void) => Promise<void>;
-let runner: Runner | null = null;
-
-/** Clears the thread, with the wave when one is mounted and the thread can be pictured; otherwise at once. */
-export function clearThreadWithWave(clear: () => void): Promise<void> {
-  if (!runner) {
-    clear();
-    return Promise.resolve();
-  }
-  return runner(clear);
-}
-
-/** Esc must never feel stuck: past this the wave starts with whatever picture it has (or none). */
-const PREPARE_BUDGET_MS = 350;
+import { DistortionWave, snapshot, type CaptureRequest, type Rect } from "distortion-waves";
+import { createWaveControl } from "./waveControl";
 
 const ROOT_STYLE: CSSProperties = { height: "100%", gridTemplateRows: "minmax(0, 1fr)", gridTemplateColumns: "minmax(0, 1fr)" };
 
@@ -92,145 +77,9 @@ async function captureWithBorders(req: CaptureRequest): Promise<HTMLCanvasElemen
   return shot.canvas;
 }
 
-/** True when `p` settled within `ms`. */
-function settlesWithin(p: Promise<void>, ms: number): Promise<boolean> {
-  return new Promise((resolve) => {
-    const timer = window.setTimeout(() => resolve(false), ms);
-    p.catch((err: unknown) => console.warn("[wave] picture failed", err)).finally(() => {
-      window.clearTimeout(timer);
-      resolve(true);
-    });
-  });
-}
-
-/**
- * Both pictures in and current. A picture that went stale before the wave starts would be retaken after the
- * clear, i.e. of the empty thread, and the old thread would vanish instead of being carried away.
- */
-async function picturesReady(h: DistortionWaveHandle): Promise<boolean> {
-  const deadline = performance.now() + PREPARE_BUDGET_MS;
-  for (let round = 0; round < 2; round++) {
-    const left = deadline - performance.now();
-    if (left <= 0 || !(await settlesWithin(h.prepare(), left))) return false;
-    const d = h.controller?.debug;
-    // No renderer (no WebGL 2, or reduced motion): the library crossfades and needs no picture.
-    if (!d || !d.webgl) return true;
-    if (d.content.ready && !d.content.stale && d.revealed.ready && !d.revealed.stale) return true;
-  }
-  return false;
-}
-
-/** One per mounted wave: what Esc (through `runner`) and the wave's onFinish call. */
-function createWaveControl(setArmed: (on: boolean) => void) {
-  let handle: DistortionWaveHandle | null = null;
-  let busy = false;
-  let stopWatching: (() => void) | null = null;
-
-  const settle = () => {
-    stopWatching?.();
-    stopWatching = null;
-    handle?.reset();
-    setArmed(false);
-    busy = false;
-  };
-
-  const run: Runner = async (clear) => {
-    const h = handle;
-    const root = h?.element;
-    // Nothing to carry away, a second Esc mid-wave, or an iframe (HTML mode), which the picture leaves out.
-    if (!h || !root || busy || store.getState().thread.length === 0 || root.querySelector("iframe")) {
-      clear();
-      return;
-    }
-    busy = true;
-    const before = store.getState().thread;
-    performance.mark("bb-wave-esc");
-    // Also flushes the aborted turn's last render, so the picture shows the thread as it now stands.
-    flushSync(() => setArmed(true));
-    const ready = await picturesReady(h);
-    if (handle !== h) {
-      clear();
-      return;
-    }
-    if (store.getState().thread !== before) {
-      // The thread moved while it was being pictured: a second Esc already cleared it, or a turn began
-      // (a voice turn finalising, a hands-free endpoint). Clearing now would wipe that newer turn while its
-      // stream runs on into nothing, so the newer intent wins: no wave, no clear.
-      performance.mark("bb-wave-skipped");
-      busy = false;
-      setArmed(false);
-      return;
-    }
-    if (!ready) {
-      // Esc never waits on a picture: clear now, without the wave.
-      performance.mark("bb-wave-skipped");
-      busy = false;
-      setArmed(false);
-      clear();
-      return;
-    }
-    performance.mark("bb-wave-play");
-    h.play({ source: sourceRect(root) });
-    clear();
-    // A turn started while the wave is out must show at once (U2), so it cuts the wave.
-    stopWatching = store.subscribe(() => {
-      if (store.getState().thread.length > 0) settle();
-    });
-  };
-
-  let cancelWarm: (() => void) | null = null;
-  const scheduleWarm = (h: DistortionWaveHandle) => {
-    if (typeof window.requestIdleCallback === "function") {
-      const id = window.requestIdleCallback(() => warm(h));
-      cancelWarm = () => window.cancelIdleCallback(id);
-    } else {
-      const id = window.setTimeout(() => warm(h), 1500);
-      cancelWarm = () => window.clearTimeout(id);
-    }
-  };
-
-  // The page's first WebGL renderer costs ~0.6 s of main thread (measured at 1920×1080: one 640 ms frame);
-  // later ones reuse the compiled programs and cost ~0.1 s. Pay it once, at idle after load, not on Esc.
-  const warm = (h: DistortionWaveHandle) => {
-    if (handle !== h || busy) return;
-    // Never in the middle of a turn: the main thread belongs to the stream then. Try again at the next idle.
-    if (store.getState().activeTurnId !== null) {
-      scheduleWarm(h);
-      return;
-    }
-    flushSync(() => setArmed(true));
-    h.prepare()
-      .catch((err: unknown) => console.warn("[wave] warm-up failed; the first Esc pays for it", err))
-      .finally(() => {
-        if (!busy) setArmed(false);
-      });
-  };
-
-  return {
-    attach(h: DistortionWaveHandle | null) {
-      if (!h) return;
-      handle = h;
-      runner = run;
-      scheduleWarm(h);
-      return () => {
-        cancelWarm?.();
-        cancelWarm = null;
-        if (runner === run) runner = null;
-        stopWatching?.();
-        stopWatching = null;
-        handle = null;
-        busy = false;
-      };
-    },
-    finish() {
-      if (busy) settle();
-    },
-  };
-}
-
 export function ThreadWave({ children, empty }: { children: ReactNode; empty: ReactNode }) {
   const [armed, setArmed] = useState(false);
-  const [control] = useState(() => createWaveControl(setArmed));
+  const [control] = useState(() => createWaveControl({ setArmed, sourceOf: sourceRect }));
   return (
     <DistortionWave
       ref={control.attach}

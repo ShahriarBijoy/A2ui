@@ -22,6 +22,9 @@ type Props = {
   replaying: boolean;
 };
 
+/** The thread's scroller, shared with the wave's empty view so the hand-back after a wave lines up exactly. */
+const SCROLLER = "h-full overflow-y-auto [overflow-anchor:none] [scrollbar-gutter:stable]";
+
 const EXAMPLES = [
   "I want dinner after this event, pick a place nearby.",
   "I need to book a flight tomorrow.",
@@ -51,10 +54,7 @@ export function Thread({ thread, surfaces, newestSurfaceId, decision, replaying 
       </header>
       <div className="relative min-h-0 flex-1">
         <ThreadWave empty={<EmptyView />}>
-          <div
-            ref={viewportRef}
-            className="h-full overflow-y-auto [overflow-anchor:none] [scrollbar-gutter:stable]"
-          >
+          <div ref={viewportRef} className={SCROLLER}>
             {timeline.length === 0 ? (
               <EmptyState />
             ) : (
@@ -134,7 +134,7 @@ function hasKnobs(surface: SurfaceState): boolean {
  * hand-back to the live thread after the wave is pixel for pixel. Hidden from assistive tech: it is a picture. */
 function EmptyView() {
   return (
-    <div aria-hidden inert className="h-full overflow-y-auto [scrollbar-gutter:stable]">
+    <div aria-hidden inert className={SCROLLER}>
       <EmptyState />
     </div>
   );

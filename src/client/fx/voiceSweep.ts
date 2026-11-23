@@ -59,15 +59,26 @@ export function stepSweep(
   };
 }
 
+/** Longer than this without a frame, the beam was inactive: start again from rest, not from a stale beam. */
+const STALE_GAP_S = 0.5;
+
 /** A `motion` getter for VoiceBeam: sampled every frame by its driver, so no React render per frame. */
-export function createSweep(read: () => { processing: boolean; reduced: boolean }): () => VoiceBeamMotion | null {
+export function createSweep(
+  read: () => { processing: boolean; reduced: boolean },
+  clock: () => number = () => performance.now(),
+): () => VoiceBeamMotion | null {
   let state: SweepState = { gather: 0, phase: 0 };
   let last: number | null = null;
   return () => {
-    const now = performance.now();
-    // The driver stops calling while the beam is inactive; a long gap is not a long step.
-    const dt = last === null ? 0 : (now - last) / 1000;
+    const now = clock();
+    // The driver stops calling while the beam is inactive. A beam left gathered when a turn ended must not
+    // greet the next Space press, so a long gap restarts from rest.
+    let dt = last === null ? 0 : (now - last) / 1000;
     last = now;
+    if (dt > STALE_GAP_S) {
+      state = { gather: 0, phase: 0 };
+      dt = 0;
+    }
     const { processing, reduced } = read();
     const out = stepSweep(state, dt, processing, reduced);
     state = out.state;

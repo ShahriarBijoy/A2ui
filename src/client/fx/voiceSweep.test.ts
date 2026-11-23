@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { glowPhase, stepSweep, type SweepState } from "./voiceSweep";
+import { createSweep, glowPhase, stepSweep, type SweepState } from "./voiceSweep";
 
 const st = (over: Partial<Parameters<typeof glowPhase>[0]> = {}) => ({
   activeTurnId: null,
@@ -59,6 +59,32 @@ describe("stepSweep", () => {
   test("a long gap (beam was inactive) is clamped to one short step", () => {
     const out = stepSweep({ gather: 0, phase: 0 }, 30, true, false);
     expect(out.motion?.gather).toBeLessThan(1);
+  });
+  test("after a long gap (the beam was inactive) it starts from rest, not from the old gathered beam", () => {
+    let t = 0;
+    let processing = true;
+    const sweep = createSweep(() => ({ processing, reduced: false }), () => t);
+    for (let i = 0; i < 60; i++) {
+      sweep();
+      t += 1000 / 60;
+    }
+    expect(sweep()?.gather).toBe(1);
+    // The turn ends and the beam fades out; the driver stops sampling. Two seconds later Space is pressed.
+    processing = false;
+    t += 2000;
+    expect(sweep()).toBeNull();
+  });
+  test("short gaps keep easing from where it was", () => {
+    let t = 0;
+    let processing = true;
+    const sweep = createSweep(() => ({ processing, reduced: false }), () => t);
+    for (let i = 0; i < 60; i++) {
+      sweep();
+      t += 1000 / 60;
+    }
+    processing = false;
+    t += 100;
+    expect(sweep()?.gather).toBeGreaterThan(0);
   });
   test("reduced motion: a still beam at the centre, no easing", () => {
     const out = run(5, 1 / 60, true, true).motion;

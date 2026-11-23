@@ -9,7 +9,7 @@ const TONE: Record<ChipTone, string> = {
   // Filled, not tinted text: highlight-coloured text on the page background is too faint from the back row.
   highlight: "rounded-[0.3rem] bg-highlight px-1.5 py-px text-highlight-foreground",
   // A failed search is information, not an alarm: plain weight, the destructive hue only.
-  failed: "text-destructive",
+  failed: "text-destructive/75",
 };
 
 /** One mono line of measured numbers under each agent item. The line is always present so nothing shifts when values land. */
