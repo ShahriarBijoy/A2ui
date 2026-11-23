@@ -361,11 +361,11 @@ export function buildRouteRequest(utterance: string, knobs: Knob[]): RouteReques
         if (o.key !== UNCHANGED && !Object.hasOwn(criteria, o.key)) criteria[o.key] = o.label;
       }
       if (Object.keys(criteria).length < 2) return;
-      const flavour = knobFlavour(knob);
+      const hint = relativeHint(knob, knobFlavour(knob));
+      for (const [key, text] of Object.entries(hint.sentinels)) if (!Object.hasOwn(criteria, key)) criteria[key] = text;
       questions[knobQuestionId(i)] = {
         type: "choice",
-        instructions:
-          "What should '" + knob.label + "' be after this request? Current value: " + knob.currentLabel + "." + relativeHint(knob, flavour),
+        instructions: "What should '" + knob.label + "' be after this request? Current value: " + knob.currentLabel + "." + hint.text,
         criteria,
       };
     } else if (knob.type === "multi") {
@@ -395,22 +395,34 @@ const RELATIVE_HINT: Record<Flavour, string> = {
 };
 
 /**
- * Time knobs name the concrete answer for a bare "later" (code does the arithmetic), and say that a
- * count is not a time: "We're six, and later." put 13–28 % of the Time mass on 18:00 without it.
+ * Time knobs name the concrete answer for a bare "later"/"earlier" (code does the arithmetic), one
+ * clause per direction, and say that a count is not a time ("We're six, and later." put 13–28 % of
+ * the Time mass on 18:00 without it). A direction with no option at all (the last or first chip) gets
+ * a sentinel criterion instead: tying both directions to one target made "later" at 21:00 patch
+ * 20:00 (9 backwards patches in 15 measured cases); the sentinel turns it into a partial edit.
  */
-function relativeHint(knob: ChoiceKnob, flavour: Flavour): string {
-  if (flavour !== "time") return RELATIVE_HINT[flavour];
+function relativeHint(knob: ChoiceKnob, flavour: Flavour): { text: string; sentinels: Record<string, string> } {
+  const sentinels: Record<string, string> = {};
+  if (flavour !== "time") return { text: RELATIVE_HINT[flavour], sentinels };
+  const count = " A count of people, such as 'we're six', is not a time.";
   const cur = minutesOf(knob.current);
+  if (cur === null) return { text: " If the speaker only says later or earlier without a time, pick one hour later or earlier." + count, sentinels };
   const keys = new Set(knob.options.map((o) => o.key));
-  const parts: string[] = [];
-  if (cur !== null) {
-    const later = hhmm((cur + 60) % 1440);
-    const earlier = hhmm((cur + 1380) % 1440);
-    if (keys.has(later)) parts.push(later + " (one hour later)");
-    if (keys.has(earlier)) parts.push(earlier + " (one hour earlier)");
+  // DateTimeInput slots wrap around midnight, so both directions always exist there; chips are linear.
+  const circular = knob.component === "DateTimeInput";
+  const mins = knob.options.map((o) => minutesOf(o.value)).filter((m): m is number => m !== null);
+  let text = "";
+  for (const dir of ["later", "earlier"] as const) {
+    const target = hhmm((cur + (dir === "later" ? 60 : 1380)) % 1440);
+    const any = circular || mins.some((m) => (dir === "later" ? m > cur : m < cur));
+    if (keys.has(target)) {
+      text += " If the speaker only says " + dir + " without a time, pick " + target + " (one hour " + dir + ").";
+    } else if (!any && !keys.has(dir)) {
+      sentinels[dir] = (dir === "later" ? "Later" : "Earlier") + " than " + hhmm(cur) + ", which is not available";
+      text += " If the speaker only says " + dir + ", pick " + dir + ".";
+    }
   }
-  const pick = parts.length ? "pick " + parts.join(" or ") : "pick one hour later or earlier";
-  return " If the speaker only says later or earlier without a time, " + pick + ". A count of people, such as 'we're six', is not a time.";
+  return { text: text + count, sentinels };
 }
 
 function minutesOf(v: JsonValue): number | null {
@@ -515,7 +527,12 @@ function knobOutcome(knob: Knob, index: number, answers: JevAnswers): KnobOutcom
     const top = argmax(probs);
     // Speaker asked to change it (low P(unchanged), or a change is the top answer) but no option is clear.
     const askedToChange = pUnchanged < 1 - threshold || (top !== null && top !== UNCHANGED);
-    if (bestKey === null || bestP < threshold) return askedToChange ? { status: "partial", label: knob.label } : { status: "unchanged" };
+    if (bestKey === null || bestP < threshold) {
+      if (!askedToChange) return { status: "unchanged" };
+      // A sentinel ("later" past the last chip) is not an option: name it so the inspector says why.
+      const sentinel = top !== null && top !== UNCHANGED && !knob.options.some((o) => o.key === top);
+      return { status: "partial", label: knob.label + (sentinel ? " (no " + top + " option)" : "") };
+    }
     if (top === UNCHANGED) return { status: "unchanged" };
     const option = knob.options.find((o) => o.key === bestKey);
     if (!option) return { status: "unchanged" };

@@ -6,7 +6,7 @@
  */
 import { readFileSync } from "node:fs";
 import type { CatalogComponent, JsonValue } from "../src/shared/a2ui";
-import { buildRouteRequest, deriveKnobs } from "../src/shared/knobs";
+import { buildRouteRequest, deriveKnobs, GUARD_THRESHOLD } from "../src/shared/knobs";
 import type { JevAnswers } from "../src/shared/knobs";
 import type { Knob, RouteResult, TurnRequest } from "../src/shared/protocol";
 import { decide, warmJev } from "../src/worker/jev";
@@ -70,11 +70,26 @@ function turn(components: CatalogComponent[], data: JsonValue, text: string): { 
   };
 }
 
-type Expect = { compose: true } | { patches: Record<string, JsonValue[]> };
+/**
+ * compose: optionally the exact reason, or guard: the guard Noul itself must be ≥ the threshold
+ * (another rule may compose first, e.g. "unsure it is an edit"; this still proves the guard fires).
+ * patches: orCompose accepts a compose too (e.g. "later" at 20:30, where one hour later is no chip).
+ */
+type Expect =
+  | { compose: true; reason?: string; guard?: true }
+  | { patches: Record<string, JsonValue[]>; orCompose?: true };
 
 function check(r: RouteResult, exp: Expect): boolean {
-  if ("compose" in exp) return r.decision === "compose";
-  if (r.decision !== "patch") return false;
+  if ("compose" in exp) {
+    if (r.decision !== "compose") return false;
+    if (exp.reason !== undefined && r.reason !== exp.reason) return false;
+    if (exp.guard) {
+      const g = lastBody?.answers?.guard;
+      if (g?.type !== "noul" || g.noul < GUARD_THRESHOLD) return false;
+    }
+    return true;
+  }
+  if (r.decision !== "patch") return exp.orCompose === true && r.decision === "compose";
   const got = new Map(r.patches.map((p) => [p.path, JSON.stringify(p.value)]));
   const want = Object.entries(exp.patches);
   if (got.size !== want.length) return false;
@@ -176,7 +191,7 @@ const dinnerLines: [string, Expect][] = [
   ["confirm", { compose: true }],
   ["hmm let me think", { compose: true }],
   // Mixed: a knob plus something the knobs cannot express → must not patch half of it.
-  ["somewhere closer, and later", { compose: true }],
+  ["somewhere closer, and later", { compose: true, guard: true }],
   ["a different place for six people", { compose: true }],
   // Transcription variants of the 1:10 beat.
   ["We're 6, and later.", { patches: { [G]: [6], [T]: [["20:00"]] } }],
@@ -364,13 +379,34 @@ const guestsOnly: CatalogComponent[] = [
   { id: "guests", component: "Stepper", label: "Guests", min: 1, max: 12, value: { "@path": "/booking/guests" } },
 ];
 const guestLines: [string, Expect][] = [
-  ["We're six, and later.", { compose: true }],
-  ["make it six and add a dessert option", { compose: true }],
+  ["We're six, and later.", { compose: true, reason: "asks for something not on screen" }],
+  ["make it six and add a dessert option", { compose: true, guard: true }],
   ["make it six", { patches: { [G]: [6] } }],
   ["two more people", { patches: { [G]: [6] } }],
 ];
 console.log("\n9. Guests stepper only (4)");
 for (const [text, exp] of guestLines) await runLine(guestsOnly, { booking: { guests: 4 } }, text, exp);
+
+// ── 10. Time chips at the edges of their range (18:00..21:00) ────────────────
+// "later" on the last chip must never patch an earlier time; it composes (sentinel → partial edit).
+const edgeLines: [string, string, Expect][] = [
+  ["21:00", "later", { compose: true, reason: "partial edit: Time (no later option)" }],
+  ["21:00", "a bit later", { compose: true }],
+  ["21:00", "We're six, and later.", { compose: true }],
+  ["21:00", "earlier", { patches: { [T]: [["20:00"]] } }],
+  ["18:00", "earlier", { compose: true, reason: "partial edit: Time (no earlier option)" }],
+  ["18:00", "We're six, and earlier.", { compose: true }],
+  ["18:00", "a bit later", { patches: { [T]: [["19:00"]] } }],
+  ["20:30", "later", { patches: { [T]: [["21:00"]] }, orCompose: true }],
+  ["18:30", "earlier", { patches: { [T]: [["18:00"]] }, orCompose: true }],
+  ["20:00", "later", { patches: { [T]: [["21:00"]] } }],
+  ["19:00", "earlier", { patches: { [T]: [["18:00"]] } }],
+];
+console.log("\n10. Time chips at the edges (18:00..21:00) + Guests stepper 4");
+for (const [cur, text, exp] of edgeLines) {
+  process.stdout.write("[" + cur + "] ");
+  await runLine(dinner, { booking: { place: "Placeholder Bistro", time: [cur], guests: 4 } }, text, exp);
+}
 
 globalThis.fetch = realFetch;
 console.log("\nroute failures (all sections): " + fails);

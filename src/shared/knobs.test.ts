@@ -228,7 +228,7 @@ describe("deriveKnobs", () => {
     expect(c.options[c.options.length - 1].key).toBe("05:00");
     const q = buildRouteRequest("we're six, and later", [k]).questions.k0;
     expect(q.instructions).toBe(
-      "What should 'Time' be after this request? Current value: 23:00. If the speaker only says later or earlier without a time, pick 00:00 (one hour later) or 22:00 (one hour earlier). A count of people, such as 'we're six', is not a time.",
+      "What should 'Time' be after this request? Current value: 23:00. If the speaker only says later without a time, pick 00:00 (one hour later). If the speaker only says earlier without a time, pick 22:00 (one hour earlier). A count of people, such as 'we're six', is not a time.",
     );
   });
 
@@ -317,7 +317,7 @@ describe("buildRouteRequest", () => {
     const time = questions.k0;
     if (time.type !== "choice") throw new Error("k0 should be a choice");
     expect(time.instructions).toBe(
-      "What should 'Time' be after this request? Current value: 19:00. If the speaker only says later or earlier without a time, pick 20:00 (one hour later) or 18:00 (one hour earlier). A count of people, such as 'we're six', is not a time.",
+      "What should 'Time' be after this request? Current value: 19:00. If the speaker only says later without a time, pick 20:00 (one hour later). If the speaker only says earlier without a time, pick 18:00 (one hour earlier). A count of people, such as 'we're six', is not a time.",
     );
     expect(kind.instructions).toContain("Short follow-ups such as 'later'");
     expect(questions.guard).toEqual({
@@ -338,9 +338,28 @@ describe("buildRouteRequest", () => {
     expect(Object.keys(guests.criteria)).toHaveLength(12);
   });
 
-  test("time chips at the edge name only the target that exists; no knobs → no guard", () => {
-    const knobs = deriveKnobs(dinner, { booking: { time: ["21:00"], guests: 4 } }, NOW);
-    expect(buildRouteRequest("later", knobs).questions.k0.instructions).toContain("pick 20:00 (one hour earlier).");
+  test("time chips at the edge: one clause per direction, a sentinel where no option exists, never a cross-direction target", () => {
+    const at = (cur: string) => {
+      const q = buildRouteRequest("later", deriveKnobs(dinner, { booking: { time: [cur], guests: 4 } }, NOW)).questions.k0;
+      if (q.type !== "choice") throw new Error("k0 should be a choice");
+      return q;
+    };
+    const COUNT = " A count of people, such as 'we're six', is not a time.";
+    const last = at("21:00");
+    expect(last.instructions).toEndWith(
+      "Current value: 21:00. If the speaker only says later, pick later. If the speaker only says earlier without a time, pick 20:00 (one hour earlier)." + COUNT,
+    );
+    expect(last.criteria.later).toBe("Later than 21:00, which is not available");
+    expect(last.criteria.earlier).toBeUndefined();
+    const first = at("18:00");
+    expect(first.instructions).toEndWith(
+      "Current value: 18:00. If the speaker only says later without a time, pick 19:00 (one hour later). If the speaker only says earlier, pick earlier." + COUNT,
+    );
+    expect(first.criteria.earlier).toBe("Earlier than 18:00, which is not available");
+    // 20:30: a later chip exists (21:00) but not one hour later → no later clause, no sentinel.
+    const nearEnd = at("20:30");
+    expect(nearEnd.instructions).toEndWith("Current value: 20:30. If the speaker only says earlier without a time, pick 19:30 (one hour earlier)." + COUNT);
+    expect(nearEnd.criteria.later).toBeUndefined();
     expect(Object.keys(buildRouteRequest("hello", []).questions)).toEqual(["kind"]);
   });
 
@@ -475,6 +494,22 @@ describe("answersToRoute", () => {
     const fine = answersToRoute({ ...answers, guard: { type: "noul", noul: 0.29 } }, knobs, 1, "jev");
     expect(fine.decision).toBe("patch");
     expect(fine.patches).toEqual([{ knobId: "/booking/guests", path: "/booking/guests", value: 6, confidence: 0.99 }]);
+  });
+
+  test("choosing the sentinel ('later' past the last chip) is a partial edit, never a patch", () => {
+    const edge = deriveKnobs(dinner, { booking: { time: ["21:00"], guests: 4 } }, NOW);
+    const r = answersToRoute(
+      {
+        kind: kind(0.95, 0.05),
+        k0: pick({ later: 0.99, unchanged: 0.01, "20:00": 0 }),
+        k1: pick({ unchanged: 0.01, "6": 0.99 }),
+        guard: { type: "noul", noul: 0.2 },
+      },
+      edge,
+      1,
+      "jev",
+    );
+    expect(r).toMatchObject({ decision: "compose", patches: [], reason: "partial edit: Time (no later option)" });
   });
 
   test("kind 'other' → compose", () => {
