@@ -7,6 +7,7 @@ import { useState } from "react";
 import type { A2uiMessage } from "@shared/a2ui";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
+import { copyReplaysJson } from "@/replay";
 import { store } from "@/store";
 import { abortTurn } from "@/turns";
 import { FIXTURES, GALLERY, type Fixture } from "./fixtures";
@@ -82,6 +83,9 @@ export default function DevRunner() {
           </Button>
         ))}
         <span className="flex-1" />
+        <Button type="button" variant="outline" size="sm" onClick={() => void copyReplaysJson()}>
+          Copy replays JSON
+        </Button>
         <Button type="button" size="sm" onClick={runText}>
           Run
         </Button>

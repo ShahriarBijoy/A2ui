@@ -7,6 +7,7 @@ import { BottomBar, type VoiceStatus } from "@/panels/BottomBar";
 import { BrickPool } from "@/panels/BrickPool";
 import { Inspector } from "@/panels/Inspector";
 import { Thread } from "@/panels/Thread";
+import { cancelReplay, copyReplaysJson, playReplay, saveLastTurn, useReplayNote } from "@/replay";
 import { store, useStore } from "@/store";
 import { abortTurn, sendTurn } from "@/turns";
 import { useVoice } from "@/voice/useVoice";
@@ -25,9 +26,19 @@ function onShortcut(s: Shortcut): void {
       break;
     case "clear":
       abortTurn();
-      // The aborted turn is now still, so the wave can picture it before the store lets go of it.
+      cancelReplay();
+      // The aborted turn and replay are now still, so the wave can picture them before the store lets go of them.
       // The wave falls back to a plain clear on its own; this only catches a store that cannot clear.
       clearThreadWithWave(store.clearThread).catch((err: unknown) => console.error("[esc] could not clear the thread", err));
+      break;
+    case "replay":
+      playReplay(s.slot);
+      break;
+    case "save":
+      saveLastTurn();
+      break;
+    case "export":
+      void copyReplaysJson();
       break;
   }
 }
@@ -94,6 +105,7 @@ function BottomBarPanel({ voice }: { voice: VoiceStatus }) {
   const handsFree = useStore((s) => s.handsFree);
   const totals = useStore((s) => s.totals);
   const glow = useStore(glowPhase);
+  const replayNote = useReplayNote();
   return (
     <BottomBar
       transcript={transcript}
@@ -103,6 +115,7 @@ function BottomBarPanel({ voice }: { voice: VoiceStatus }) {
       handsFree={handsFree}
       totals={totals}
       glow={glow}
+      replayNote={replayNote}
       onMode={store.setMode}
       onDecision={store.setDecision}
       onHandsFree={store.setHandsFree}

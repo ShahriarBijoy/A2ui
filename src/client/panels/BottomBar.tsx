@@ -22,6 +22,8 @@ type Props = {
   handsFree: boolean;
   totals: SessionTotals;
   glow: GlowPhase;
+  /** Replay feedback ("Saved to F3 · …", "Replaying F2 · …"), or null. */
+  replayNote?: string | null;
   onMode: (mode: Mode) => void;
   onDecision: (on: boolean) => void;
   onHandsFree: (on: boolean) => void;
@@ -48,7 +50,8 @@ export function BottomBar(props: Props) {
         </div>
       </VoiceGlow>
       <div className="grid grid-rows-2 gap-y-1">
-        <div className="flex items-center justify-end">
+        <div className="flex min-w-0 items-center justify-end gap-6">
+          <ReplayNote note={props.replayNote ?? null} />
           <Totals totals={totals} />
         </div>
         <div className="flex items-center justify-end gap-5">
@@ -139,6 +142,22 @@ function TranscriptLine({ transcript, voice, handsFree }: { transcript: Transcri
       <span aria-hidden className={cn("size-2.5 shrink-0 rounded-full", dot)} />
       <span className="sr-only">{listening ? "Microphone on" : "Microphone off"}</span>
       {line}
+    </div>
+  );
+}
+
+/**
+ * Absolutely placed in a slot that takes only the room the row has spare, so a note never widens the
+ * column, moves the totals or squeezes the composer.
+ */
+function ReplayNote({ note }: { note: string | null }) {
+  return (
+    <div className="relative h-full min-w-0 flex-1" aria-live="polite">
+      {note && (
+        <span className="absolute inset-y-0 right-0 flex max-w-full items-center font-mono text-[0.75rem] text-muted-foreground">
+          <span className="truncate">{note}</span>
+        </span>
+      )}
     </div>
   );
 }

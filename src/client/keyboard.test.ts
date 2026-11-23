@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { isTypingTarget, matchShortcut, type KeyInfo } from "./keyboard";
+import { isTypingTarget, matchShortcut, replaySlotOf, type KeyInfo } from "./keyboard";
 
 const key = (k: string, extra: Partial<KeyInfo> = {}): KeyInfo => ({
   key: k,
@@ -39,6 +39,42 @@ describe("matchShortcut", () => {
     expect(matchShortcut(key(" "))).toBeNull();
     expect(matchShortcut(key("4"))).toBeNull();
     expect(matchShortcut(key("r"))).toBeNull();
+    expect(matchShortcut(key("e"))).toBeNull();
+  });
+  test("F1..F6 play replay slots 1..6; F7 and modified F-keys do not", () => {
+    for (let n = 1; n <= 6; n++) expect(matchShortcut(key("F" + n))).toEqual({ type: "replay", slot: n });
+    expect(matchShortcut(key("F7"))).toBeNull();
+    expect(matchShortcut(key("F12"))).toBeNull();
+    for (const mod of ["ctrlKey", "metaKey", "altKey", "shiftKey"] as const) {
+      expect(matchShortcut(key("F1", { [mod]: true }))).toBeNull();
+    }
+  });
+  test("a held F-key does not restart the replay", () => {
+    expect(matchShortcut(key("F2", { repeat: true }))).toBeNull();
+  });
+  test("Shift+R saves and Shift+E exports, with or without caps lock, once per press", () => {
+    expect(matchShortcut(key("R", { shiftKey: true }))).toEqual({ type: "save" });
+    expect(matchShortcut(key("r", { shiftKey: true }))).toEqual({ type: "save" });
+    expect(matchShortcut(key("E", { shiftKey: true }))).toEqual({ type: "export" });
+    expect(matchShortcut(key("e", { shiftKey: true }))).toEqual({ type: "export" });
+    expect(matchShortcut(key("R", { shiftKey: true, repeat: true }))).toBeNull();
+    expect(matchShortcut(key("R", { shiftKey: true, ctrlKey: true }))).toBeNull();
+    expect(matchShortcut(key("R", { shiftKey: true, metaKey: true }))).toBeNull();
+    expect(matchShortcut(key("D", { shiftKey: true }))).toBeNull();
+  });
+});
+
+describe("replaySlotOf", () => {
+  // The capture-phase handler prevents the browser's default (F5 reload, F1 help, F3 find) for these, held or not.
+  test("names the slot for F1..F6 with no modifier, whatever else", () => {
+    expect(replaySlotOf(key("F1"))).toBe(1);
+    expect(replaySlotOf(key("F5", { repeat: true }))).toBe(5);
+    expect(replaySlotOf(key("F6"))).toBe(6);
+    expect(replaySlotOf(key("F7"))).toBeNull();
+    expect(replaySlotOf(key("F10"))).toBeNull();
+    expect(replaySlotOf(key("1"))).toBeNull();
+    expect(replaySlotOf(key("F5", { ctrlKey: true }))).toBeNull();
+    expect(replaySlotOf(key("F5", { shiftKey: true }))).toBeNull();
   });
 });
 

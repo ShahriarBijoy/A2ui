@@ -1,22 +1,47 @@
 /**
  * Stage keyboard (U13): 1/2/3 modes (in the bar's visual order Widgets | HTML | A2UI), D decision model,
- * Esc clears the thread. Space belongs to the voice lane; this file only keeps Space away from focused controls.
+ * Esc clears the thread, F1..F6 play replays, Shift+R saves the last turn for replay, Shift+E exports the saves.
+ * Space belongs to the voice lane; this file only keeps Space away from focused controls.
  */
 import { useEffect } from "react";
 import type { Mode } from "@shared/protocol";
 
-export type Shortcut = { type: "mode"; mode: Mode } | { type: "decision" } | { type: "clear" };
+export type Shortcut =
+  | { type: "mode"; mode: Mode }
+  | { type: "decision" }
+  | { type: "clear" }
+  /** 1-based: F1 is slot 1. */
+  | { type: "replay"; slot: number }
+  | { type: "save" }
+  | { type: "export" };
 export type KeyInfo = Pick<KeyboardEvent, "key" | "ctrlKey" | "metaKey" | "altKey" | "shiftKey" | "repeat">;
+
+/** F1..F6 with no modifier, held or not: the replay slot (1-based), else null. */
+export function replaySlotOf(e: Omit<KeyInfo, "repeat">): number | null {
+  if (e.ctrlKey || e.metaKey || e.altKey || e.shiftKey) return null;
+  const m = /^F([1-6])$/.exec(e.key);
+  return m ? Number(m[1]) : null;
+}
 
 /** Visual order of the segmented control, not the order of MODES. */
 export const MODE_KEYS: Readonly<Record<Mode, string>> = { widgets: "1", html: "2", a2ui: "3" };
 const KEY_TO_MODE: Readonly<Record<string, Mode>> = { "1": "widgets", "2": "html", "3": "a2ui" };
 
 export function matchShortcut(e: KeyInfo): Shortcut | null {
+  if (e.shiftKey && !e.ctrlKey && !e.metaKey && !e.altKey) {
+    if (e.repeat) return null;
+    // Lower case too: Shift with caps lock on gives "r".
+    const k = e.key.toLowerCase();
+    if (k === "r") return { type: "save" };
+    if (k === "e") return { type: "export" };
+    return null;
+  }
   if (e.ctrlKey || e.metaKey || e.altKey || e.shiftKey) return null;
   if (e.key === "Escape") return { type: "clear" };
-  // Holding a key must not flip the decision switch back and forth.
+  // Holding a key must not flip the decision switch back and forth, or restart a replay.
   if (e.repeat) return null;
+  const slot = replaySlotOf(e);
+  if (slot !== null) return { type: "replay", slot };
   const mode = KEY_TO_MODE[e.key];
   if (mode) return { type: "mode", mode };
   if (e.key === "d" || e.key === "D") return { type: "decision" };
@@ -95,6 +120,15 @@ function shieldSpace(e: KeyboardEvent): void {
 /** Installs the stage shortcuts. Pass a stable (module-level) handler. */
 export function useKeyboardShortcuts(onShortcut: (s: Shortcut) => void): void {
   useEffect(() => {
+    // Capture phase, before the typing-target and repeat checks: a held F5, or one pressed while the text field
+    // still has focus after a typed turn, would otherwise reload the page, and offline that ends the demo.
+    // F-keys type nothing, so they play from the text field too.
+    const onReplayKey = (e: KeyboardEvent) => {
+      if (replaySlotOf(e) === null) return;
+      e.preventDefault();
+      const s = matchShortcut(e);
+      if (s) onShortcut(s);
+    };
     const onKeyDown = (e: KeyboardEvent) => {
       if (e.defaultPrevented) return;
       const el = asElement(e.target);
@@ -108,10 +142,12 @@ export function useKeyboardShortcuts(onShortcut: (s: Shortcut) => void): void {
       e.preventDefault();
       onShortcut(s);
     };
+    window.addEventListener("keydown", onReplayKey, { capture: true });
     window.addEventListener("keydown", shieldSpace, { capture: true });
     window.addEventListener("keyup", shieldSpace, { capture: true });
     window.addEventListener("keydown", onKeyDown);
     return () => {
+      window.removeEventListener("keydown", onReplayKey, { capture: true });
       window.removeEventListener("keydown", shieldSpace, { capture: true });
       window.removeEventListener("keyup", shieldSpace, { capture: true });
       window.removeEventListener("keydown", onKeyDown);
