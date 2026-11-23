@@ -16,6 +16,14 @@ import { useVoice } from "@/voice/useVoice";
 const DEV = new URLSearchParams(window.location.search).has("dev");
 const DevRunner = lazy(() => import("@/a2ui/DevRunner"));
 
+/**
+ * The Esc clear while it runs. The wave keeps the thread when a turn begins mid-clear (a live turn's newer intent
+ * wins), so a replay key pressed right after Esc waits for the clear instead, capped so a stuck clear never holds
+ * back the fallback.
+ */
+let clearing: Promise<void> | null = null;
+const CLEAR_WAIT_MS = 1000;
+
 function onShortcut(s: Shortcut): void {
   switch (s.type) {
     case "mode":
@@ -24,15 +32,29 @@ function onShortcut(s: Shortcut): void {
     case "decision":
       store.setDecision(!store.getState().decision);
       break;
-    case "clear":
+    case "clear": {
       abortTurn();
       cancelReplay();
       // The aborted turn and replay are now still, so the wave can picture them before the store lets go of them.
       // The wave falls back to a plain clear on its own; this only catches a store that cannot clear.
-      clearThreadWithWave(store.clearThread).catch((err: unknown) => console.error("[esc] could not clear the thread", err));
+      const run: Promise<void> = clearThreadWithWave(store.clearThread).catch((err: unknown) =>
+        console.error("[esc] could not clear the thread", err),
+      );
+      clearing = run;
+      void run.finally(() => {
+        if (clearing === run) clearing = null;
+      });
       break;
+    }
     case "replay":
-      playReplay(s.slot);
+      if (clearing) {
+        const slot = s.slot;
+        void Promise.race([clearing, new Promise<void>((resolve) => setTimeout(resolve, CLEAR_WAIT_MS))]).then(() =>
+          playReplay(slot),
+        );
+      } else {
+        playReplay(s.slot);
+      }
       break;
     case "save":
       saveLastTurn();
