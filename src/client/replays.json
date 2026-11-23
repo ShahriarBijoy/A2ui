@@ -1,1 +1,1258 @@
-[]
+[
+  {
+    "display": "I want dinner after this event, pick a place nearby.",
+    "via": "voice",
+    "mode": "a2ui",
+    "input": {
+      "type": "utterance",
+      "text": "I want dinner after this event, pick a place nearby."
+    },
+    "events": [
+      {
+        "t": 1216.729800000001,
+        "ev": {
+          "type": "a2ui",
+          "msg": {
+            "version": "1.0",
+            "createSurface": {
+              "surfaceId": "s1",
+              "catalogId": "http://localhost:5191/catalog/brick-box/v1"
+            }
+          },
+          "origin": "llm"
+        }
+      },
+      {
+        "t": 2050.3332999999984,
+        "ev": {
+          "type": "a2ui",
+          "msg": {
+            "version": "1.0",
+            "updateComponents": {
+              "surfaceId": "s1",
+              "components": [
+                {
+                  "id": "root",
+                  "component": "Card",
+                  "child": "main"
+                },
+                {
+                  "id": "main",
+                  "component": "Column",
+                  "children": [
+                    "title",
+                    "when",
+                    "list"
+                  ]
+                },
+                {
+                  "id": "title",
+                  "component": "Text",
+                  "text": "## Dinner near Überseestadt"
+                },
+                {
+                  "id": "when",
+                  "component": "Text",
+                  "text": "Tonight, after the event · Konsul-Smidt-Straße 8p",
+                  "variant": "caption"
+                },
+                {
+                  "id": "list",
+                  "component": "List",
+                  "children": {
+                    "path": "/results",
+                    "componentId": "item"
+                  }
+                }
+              ]
+            }
+          },
+          "origin": "llm"
+        }
+      },
+      {
+        "t": 3642.5458999999973,
+        "ev": {
+          "type": "a2ui",
+          "msg": {
+            "version": "1.0",
+            "updateComponents": {
+              "surfaceId": "s1",
+              "components": [
+                {
+                  "id": "item",
+                  "component": "OptionCard",
+                  "title": {
+                    "@path": "name"
+                  },
+                  "subtitle": {
+                    "@path": "subtitle"
+                  },
+                  "tags": {
+                    "@path": "tags"
+                  },
+                  "action": {
+                    "event": {
+                      "name": "pick_restaurant",
+                      "context": {
+                        "id": {
+                          "@path": "id"
+                        },
+                        "name": {
+                          "@path": "name"
+                        },
+                        "subtitle": {
+                          "@path": "subtitle"
+                        },
+                        "hours": {
+                          "@path": "hours"
+                        }
+                      }
+                    }
+                  }
+                }
+              ]
+            }
+          },
+          "origin": "llm"
+        }
+      },
+      {
+        "t": 3644.166599999997,
+        "ev": {
+          "type": "caption",
+          "text": "Dinner spots near the venue, open tonight"
+        }
+      },
+      {
+        "t": 3644.2960999999996,
+        "ev": {
+          "type": "usage",
+          "model": "claude-sonnet-5-5",
+          "input_tokens": 239,
+          "output_tokens": 576,
+          "cache_read_tokens": 6038,
+          "cache_write_tokens": 0,
+          "first_ui_ms": 1206,
+          "compose_ms": 3636,
+          "skipped_lines": 0,
+          "repaired_lines": 0,
+          "thinking": "between-tools"
+        }
+      },
+      {
+        "t": 7388.034999999996,
+        "ev": {
+          "type": "a2ui",
+          "msg": {
+            "version": "1.0",
+            "updateDataModel": {
+              "surfaceId": "s1",
+              "path": "/results",
+              "value": [
+                {
+                  "id": "r1",
+                  "name": "Riva",
+                  "subtitle": "Mediterranean and Italian menu · Kitchen Tue–Fri 17:30–22:00",
+                  "tags": [
+                    "Restaurant",
+                    "Italian / Mediterranean",
+                    "Seafood"
+                  ],
+                  "hours": "Di - Do 12:00 - 22:00 (Küchenzeiten Di - Fr 12:00 - 14:30 | 17:30 - 22:00)",
+                  "source": "https://riva-restaurant.de/"
+                },
+                {
+                  "id": "r2",
+                  "name": "Feuerwache",
+                  "subtitle": "Italian dishes for lunch and dinner · Kitchen Mon–Thu 11:30–21:30",
+                  "tags": [
+                    "Restaurant",
+                    "Italian",
+                    "Sunday brunch"
+                  ],
+                  "hours": "Öffnungszeiten-Küche: Montag bis Donnerstag: 11:30 Uhr - 21:30 Uhr",
+                  "source": "https://www.restaurant-feuerwache.de/"
+                },
+                {
+                  "id": "r3",
+                  "name": "Blaufeuer (Steigenberger Hotel Bremen)",
+                  "subtitle": "Open all day, breakfast, lunch and dinner · North German seafood and river fish",
+                  "tags": [
+                    "Restaurant",
+                    "Creative international",
+                    "Hotel"
+                  ],
+                  "hours": null,
+                  "source": "https://www.ueberseestadt-bremen.de/en/page/press/the-taste-gastronomy"
+                }
+              ]
+            }
+          },
+          "origin": "data"
+        }
+      },
+      {
+        "t": 7394.329899999997,
+        "ev": {
+          "type": "fetch",
+          "source": "search",
+          "query": "restaurants open for dinner on Wednesday 25 November 2026 from 20:00 near Konsul-Smidt-Straße 8p, 28217 Bremen",
+          "ok": true,
+          "records": 3,
+          "ms": 4738,
+          "searches": 1,
+          "input_tokens": 15353,
+          "output_tokens": 867
+        }
+      },
+      {
+        "t": 7394.365099999995,
+        "ev": {
+          "type": "done"
+        }
+      }
+    ]
+  },
+  {
+    "display": "pick_restaurant · r1, Riva, Mediterranean and Italian menu · Kitchen Tue–Fri …",
+    "via": "tap",
+    "mode": "a2ui",
+    "input": {
+      "type": "action",
+      "action": {
+        "name": "pick_restaurant",
+        "surfaceId": "s1",
+        "sourceComponentId": "item",
+        "timestamp": "2026-11-23T23:16:07.317Z",
+        "context": {
+          "id": "r1",
+          "name": "Riva",
+          "subtitle": "Mediterranean and Italian menu · Kitchen Tue–Fri 17:30–22:00",
+          "hours": "Di - Do 12:00 - 22:00 (Küchenzeiten Di - Fr 12:00 - 14:30 | 17:30 - 22:00)"
+        }
+      }
+    },
+    "events": [
+      {
+        "t": 940.8925999999992,
+        "ev": {
+          "type": "a2ui",
+          "msg": {
+            "version": "1.0",
+            "createSurface": {
+              "surfaceId": "s2",
+              "catalogId": "http://localhost:5191/catalog/brick-box/v1"
+            }
+          },
+          "origin": "llm"
+        }
+      },
+      {
+        "t": 1581.9035999999978,
+        "ev": {
+          "type": "a2ui",
+          "msg": {
+            "version": "1.0",
+            "updateComponents": {
+              "surfaceId": "s2",
+              "components": [
+                {
+                  "id": "root",
+                  "component": "Card",
+                  "child": "main"
+                },
+                {
+                  "id": "main",
+                  "component": "Column",
+                  "children": [
+                    "title",
+                    "place",
+                    "hours",
+                    "when",
+                    "guests",
+                    "book"
+                  ]
+                },
+                {
+                  "id": "title",
+                  "component": "Text",
+                  "text": "## Table at Riva"
+                }
+              ]
+            }
+          },
+          "origin": "llm"
+        }
+      },
+      {
+        "t": 2961.760699999999,
+        "ev": {
+          "type": "a2ui",
+          "msg": {
+            "version": "1.0",
+            "updateComponents": {
+              "surfaceId": "s2",
+              "components": [
+                {
+                  "id": "place",
+                  "component": "Text",
+                  "text": "Riva · Mediterranean and Italian menu"
+                },
+                {
+                  "id": "hours",
+                  "component": "Text",
+                  "variant": "caption",
+                  "text": "Kitchen Tue–Fri 17:30–22:00"
+                },
+                {
+                  "id": "when",
+                  "component": "ChoicePicker",
+                  "label": "Time tonight",
+                  "variant": "mutuallyExclusive",
+                  "options": [
+                    {
+                      "label": "19:30",
+                      "value": "19:30"
+                    },
+                    {
+                      "label": "20:00",
+                      "value": "20:00"
+                    },
+                    {
+                      "label": "20:30",
+                      "value": "20:30"
+                    },
+                    {
+                      "label": "21:00",
+                      "value": "21:00"
+                    }
+                  ],
+                  "value": {
+                    "@path": "/dinner/time"
+                  }
+                },
+                {
+                  "id": "guests",
+                  "component": "Stepper",
+                  "label": "Guests",
+                  "min": 1,
+                  "max": 8,
+                  "value": {
+                    "@path": "/dinner/guests"
+                  }
+                }
+              ]
+            }
+          },
+          "origin": "llm"
+        }
+      },
+      {
+        "t": 3989.407500000001,
+        "ev": {
+          "type": "a2ui",
+          "msg": {
+            "version": "1.0",
+            "updateComponents": {
+              "surfaceId": "s2",
+              "components": [
+                {
+                  "id": "book",
+                  "component": "Button",
+                  "variant": "primary",
+                  "child": "book_label",
+                  "action": {
+                    "event": {
+                      "name": "confirm_dinner",
+                      "context": {
+                        "name": "Riva",
+                        "date": "2026-11-25",
+                        "time": {
+                          "@path": "/dinner/time"
+                        },
+                        "guests": {
+                          "@path": "/dinner/guests"
+                        }
+                      }
+                    }
+                  },
+                  "@checks": [
+                    {
+                      "condition": {
+                        "@call": "required",
+                        "args": {
+                          "value": {
+                            "@path": "/dinner/time"
+                          }
+                        }
+                      },
+                      "message": "Pick a time"
+                    }
+                  ]
+                },
+                {
+                  "id": "book_label",
+                  "component": "Text",
+                  "text": "Reserve table"
+                }
+              ]
+            }
+          },
+          "origin": "llm"
+        }
+      },
+      {
+        "t": 4273.996400000004,
+        "ev": {
+          "type": "a2ui",
+          "msg": {
+            "version": "1.0",
+            "updateDataModel": {
+              "surfaceId": "s2",
+              "path": "/dinner",
+              "value": {
+                "time": [
+                  "20:00"
+                ],
+                "guests": 2
+              }
+            }
+          },
+          "origin": "llm"
+        }
+      },
+      {
+        "t": 4379.580699999999,
+        "ev": {
+          "type": "caption",
+          "text": "Table reservation at Riva for tonight"
+        }
+      },
+      {
+        "t": 4381.831299999998,
+        "ev": {
+          "type": "usage",
+          "model": "claude-sonnet-5-5",
+          "input_tokens": 932,
+          "output_tokens": 800,
+          "cache_read_tokens": 6038,
+          "cache_write_tokens": 0,
+          "first_ui_ms": 929,
+          "compose_ms": 4370,
+          "skipped_lines": 0,
+          "repaired_lines": 0,
+          "thinking": "between-tools"
+        }
+      },
+      {
+        "t": 4381.921300000002,
+        "ev": {
+          "type": "done"
+        }
+      }
+    ]
+  },
+  {
+    "display": "We're six, and later.",
+    "via": "voice",
+    "mode": "a2ui",
+    "input": {
+      "type": "utterance",
+      "text": "We're six, and later."
+    },
+    "events": [
+      {
+        "t": 173.737000000001,
+        "ev": {
+          "type": "route",
+          "kind": "edit",
+          "decision": "patch",
+          "ms": 161,
+          "engine": "jev-1.14.0",
+          "reason": "edit 0.94: Time tonight → 21:00, Guests → 6",
+          "patches": 2
+        }
+      },
+      {
+        "t": 174.45030000000406,
+        "ev": {
+          "type": "a2ui",
+          "msg": {
+            "version": "1.0",
+            "updateDataModel": {
+              "surfaceId": "s2",
+              "path": "/dinner/time",
+              "value": [
+                "21:00"
+              ]
+            }
+          },
+          "origin": "knob"
+        }
+      },
+      {
+        "t": 174.64140000000043,
+        "ev": {
+          "type": "a2ui",
+          "msg": {
+            "version": "1.0",
+            "updateDataModel": {
+              "surfaceId": "s2",
+              "path": "/dinner/guests",
+              "value": 6
+            }
+          },
+          "origin": "knob"
+        }
+      },
+      {
+        "t": 174.7225000000035,
+        "ev": {
+          "type": "caption",
+          "text": "Time tonight 21:00 · Guests 6"
+        }
+      },
+      {
+        "t": 174.73159999999916,
+        "ev": {
+          "type": "done"
+        }
+      }
+    ]
+  },
+  {
+    "display": "I need to book a flight tomorrow.",
+    "via": "voice",
+    "mode": "a2ui",
+    "input": {
+      "type": "utterance",
+      "text": "I need to book a flight tomorrow."
+    },
+    "events": [
+      {
+        "t": 1388.258199999982,
+        "ev": {
+          "type": "a2ui",
+          "msg": {
+            "version": "1.0",
+            "createSurface": {
+              "surfaceId": "s1",
+              "catalogId": "http://localhost:5182/catalog/brick-box/v1"
+            }
+          },
+          "origin": "llm"
+        }
+      },
+      {
+        "t": 1632.2943000000087,
+        "ev": {
+          "type": "a2ui",
+          "msg": {
+            "version": "1.0",
+            "updateComponents": {
+              "surfaceId": "s1",
+              "components": [
+                {
+                  "id": "root",
+                  "component": "Card",
+                  "child": "main"
+                },
+                {
+                  "id": "main",
+                  "component": "Column",
+                  "children": [
+                    "title",
+                    "from",
+                    "to",
+                    "day",
+                    "go"
+                  ]
+                },
+                {
+                  "id": "title",
+                  "component": "Text",
+                  "text": "## Book a flight"
+                }
+              ]
+            }
+          },
+          "origin": "llm"
+        }
+      },
+      {
+        "t": 2457.6129000000074,
+        "ev": {
+          "type": "a2ui",
+          "msg": {
+            "version": "1.0",
+            "updateComponents": {
+              "surfaceId": "s1",
+              "components": [
+                {
+                  "id": "from",
+                  "component": "TextField",
+                  "label": "From",
+                  "variant": "shortText",
+                  "value": {
+                    "@path": "/trip/from"
+                  }
+                },
+                {
+                  "id": "to",
+                  "component": "TextField",
+                  "label": "To",
+                  "placeholder": "Destination city",
+                  "variant": "shortText",
+                  "value": {
+                    "@path": "/trip/to"
+                  }
+                },
+                {
+                  "id": "day",
+                  "component": "DateTimeInput",
+                  "label": "Day",
+                  "enableDate": true,
+                  "value": {
+                    "@path": "/trip/date"
+                  }
+                }
+              ]
+            }
+          },
+          "origin": "llm"
+        }
+      },
+      {
+        "t": 3381.5503000000026,
+        "ev": {
+          "type": "a2ui",
+          "msg": {
+            "version": "1.0",
+            "updateComponents": {
+              "surfaceId": "s1",
+              "components": [
+                {
+                  "id": "go",
+                  "component": "Button",
+                  "variant": "primary",
+                  "child": "go_label",
+                  "action": {
+                    "event": {
+                      "name": "search_flights",
+                      "context": {
+                        "from": {
+                          "@path": "/trip/from"
+                        },
+                        "to": {
+                          "@path": "/trip/to"
+                        },
+                        "date": {
+                          "@path": "/trip/date"
+                        }
+                      }
+                    }
+                  },
+                  "@checks": [
+                    {
+                      "condition": {
+                        "@call": "required",
+                        "args": {
+                          "value": {
+                            "@path": "/trip/to"
+                          }
+                        }
+                      },
+                      "message": "Enter a destination"
+                    }
+                  ]
+                },
+                {
+                  "id": "go_label",
+                  "component": "Text",
+                  "text": "Find flights"
+                }
+              ]
+            }
+          },
+          "origin": "llm"
+        }
+      },
+      {
+        "t": 3882.3046999999788,
+        "ev": {
+          "type": "a2ui",
+          "msg": {
+            "version": "1.0",
+            "updateDataModel": {
+              "surfaceId": "s1",
+              "path": "/trip",
+              "value": {
+                "from": "Bremen",
+                "to": "",
+                "date": "2026-11-26"
+              }
+            }
+          },
+          "origin": "llm"
+        }
+      },
+      {
+        "t": 3886.7728999999817,
+        "ev": {
+          "type": "caption",
+          "text": "Flight form for tomorrow; destination needed"
+        }
+      },
+      {
+        "t": 3888.8004000000074,
+        "ev": {
+          "type": "usage",
+          "model": "claude-sonnet-5-5",
+          "input_tokens": 235,
+          "output_tokens": 679,
+          "cache_read_tokens": 6038,
+          "cache_write_tokens": 0,
+          "first_ui_ms": 1377,
+          "compose_ms": 3878,
+          "skipped_lines": 0,
+          "repaired_lines": 0,
+          "thinking": "between-tools"
+        }
+      },
+      {
+        "t": 3888.831599999976,
+        "ev": {
+          "type": "done"
+        }
+      }
+    ]
+  },
+  {
+    "display": "To New York, give me options.",
+    "via": "voice",
+    "mode": "a2ui",
+    "input": {
+      "type": "utterance",
+      "text": "To New York, give me options."
+    },
+    "events": [
+      {
+        "t": 197.15129999996861,
+        "ev": {
+          "type": "route",
+          "kind": "new",
+          "decision": "compose",
+          "ms": 186,
+          "engine": "jev-1.14.0",
+          "reason": "not an edit (new 0.96)",
+          "patches": 0
+        }
+      },
+      {
+        "t": 1554.9945999999763,
+        "ev": {
+          "type": "a2ui",
+          "msg": {
+            "version": "1.0",
+            "createSurface": {
+              "surfaceId": "s2",
+              "catalogId": "http://localhost:5182/catalog/brick-box/v1"
+            }
+          },
+          "origin": "llm"
+        }
+      },
+      {
+        "t": 2249.220900000015,
+        "ev": {
+          "type": "a2ui",
+          "msg": {
+            "version": "1.0",
+            "updateComponents": {
+              "surfaceId": "s2",
+              "components": [
+                {
+                  "id": "root",
+                  "component": "Card",
+                  "child": "main"
+                },
+                {
+                  "id": "main",
+                  "component": "Column",
+                  "children": [
+                    "title",
+                    "from",
+                    "to",
+                    "day",
+                    "list"
+                  ]
+                },
+                {
+                  "id": "title",
+                  "component": "Text",
+                  "text": "## Flights to New York"
+                }
+              ]
+            }
+          },
+          "origin": "llm"
+        }
+      },
+      {
+        "t": 2273.287699999986,
+        "ev": {
+          "type": "a2ui",
+          "msg": {
+            "version": "1.0",
+            "updateDataModel": {
+              "surfaceId": "s2",
+              "path": "/flights",
+              "value": [
+                {
+                  "id": "f1",
+                  "carrier": "Demo Air",
+                  "from": "Bremen",
+                  "to": "New York",
+                  "depart": "2026-11-26T07:15",
+                  "arrive": "2026-11-26T15:45",
+                  "stops": 0,
+                  "price_eur": 164,
+                  "demo": true
+                },
+                {
+                  "id": "f2",
+                  "carrier": "Hanse Demo",
+                  "from": "Bremen",
+                  "to": "New York",
+                  "depart": "2026-11-26T12:30",
+                  "arrive": "2026-11-26T21:20",
+                  "stops": 0,
+                  "price_eur": 607,
+                  "demo": true
+                },
+                {
+                  "id": "f3",
+                  "carrier": "Blue Demo",
+                  "from": "Bremen",
+                  "to": "New York",
+                  "depart": "2026-11-26T16:15",
+                  "arrive": "2026-11-27T01:05",
+                  "stops": 0,
+                  "price_eur": 428,
+                  "demo": true
+                },
+                {
+                  "id": "f4",
+                  "carrier": "Northwind Demo",
+                  "from": "Bremen",
+                  "to": "New York",
+                  "depart": "2026-11-26T19:50",
+                  "arrive": "2026-11-27T05:45",
+                  "stops": 1,
+                  "price_eur": 95,
+                  "demo": true
+                }
+              ]
+            }
+          },
+          "origin": "data"
+        }
+      },
+      {
+        "t": 2273.5518000000156,
+        "ev": {
+          "type": "fetch",
+          "source": "flights",
+          "query": "Bremen → New York 2026-11-26",
+          "ok": true,
+          "records": 4,
+          "ms": 0
+        }
+      },
+      {
+        "t": 3068.1570000000065,
+        "ev": {
+          "type": "a2ui",
+          "msg": {
+            "version": "1.0",
+            "updateComponents": {
+              "surfaceId": "s2",
+              "components": [
+                {
+                  "id": "from",
+                  "component": "TextField",
+                  "label": "From",
+                  "value": {
+                    "@path": "/trip/from"
+                  }
+                },
+                {
+                  "id": "to",
+                  "component": "TextField",
+                  "label": "To",
+                  "value": {
+                    "@path": "/trip/to"
+                  }
+                },
+                {
+                  "id": "day",
+                  "component": "DateTimeInput",
+                  "label": "Day",
+                  "enableDate": true,
+                  "value": {
+                    "@path": "/trip/date"
+                  }
+                },
+                {
+                  "id": "list",
+                  "component": "List",
+                  "children": {
+                    "path": "/flights",
+                    "componentId": "flight"
+                  }
+                }
+              ]
+            }
+          },
+          "origin": "llm"
+        }
+      },
+      {
+        "t": 4235.5865999999805,
+        "ev": {
+          "type": "a2ui",
+          "msg": {
+            "version": "1.0",
+            "updateComponents": {
+              "surfaceId": "s2",
+              "components": [
+                {
+                  "id": "flight",
+                  "component": "OptionCard",
+                  "title": {
+                    "@path": "carrier"
+                  },
+                  "subtitle": {
+                    "@call": "formatDate",
+                    "args": {
+                      "value": {
+                        "@path": "depart"
+                      },
+                      "format": "EEE d MMM, HH:mm"
+                    }
+                  },
+                  "price": {
+                    "@call": "formatCurrency",
+                    "args": {
+                      "value": {
+                        "@path": "price_eur"
+                      },
+                      "currency": "EUR"
+                    }
+                  },
+                  "action": {
+                    "event": {
+                      "name": "pick_flight",
+                      "context": {
+                        "id": {
+                          "@path": "id"
+                        },
+                        "carrier": {
+                          "@path": "carrier"
+                        },
+                        "depart": {
+                          "@path": "depart"
+                        },
+                        "arrive": {
+                          "@path": "arrive"
+                        },
+                        "price_eur": {
+                          "@path": "price_eur"
+                        }
+                      }
+                    }
+                  }
+                }
+              ]
+            }
+          },
+          "origin": "llm"
+        }
+      },
+      {
+        "t": 4706.21100000001,
+        "ev": {
+          "type": "a2ui",
+          "msg": {
+            "version": "1.0",
+            "updateDataModel": {
+              "surfaceId": "s2",
+              "path": "/trip",
+              "value": {
+                "from": "Bremen",
+                "to": "New York",
+                "date": "2026-11-26"
+              }
+            }
+          },
+          "origin": "llm"
+        }
+      },
+      {
+        "t": 4711.152499999967,
+        "ev": {
+          "type": "caption",
+          "text": "Bremen to New York flight options for tomorrow"
+        }
+      },
+      {
+        "t": 4713.16399999999,
+        "ev": {
+          "type": "usage",
+          "model": "claude-sonnet-5-5",
+          "input_tokens": 412,
+          "output_tokens": 795,
+          "cache_read_tokens": 6038,
+          "cache_write_tokens": 0,
+          "first_ui_ms": 1360,
+          "compose_ms": 4517,
+          "skipped_lines": 0,
+          "repaired_lines": 0,
+          "thinking": "between-tools"
+        }
+      },
+      {
+        "t": 4713.20749999996,
+        "ev": {
+          "type": "done"
+        }
+      }
+    ]
+  },
+  {
+    "display": "pick_flight · f1, Demo Air, 2026-11-26T07:15, 2026-11-26T15:45, 164",
+    "via": "tap",
+    "mode": "a2ui",
+    "input": {
+      "type": "action",
+      "action": {
+        "name": "pick_flight",
+        "surfaceId": "s2",
+        "sourceComponentId": "flight",
+        "timestamp": "2026-11-23T22:41:02.376Z",
+        "context": {
+          "id": "f1",
+          "carrier": "Demo Air",
+          "depart": "2026-11-26T07:15",
+          "arrive": "2026-11-26T15:45",
+          "price_eur": 164
+        }
+      }
+    },
+    "events": [
+      {
+        "t": 1316.8916000000318,
+        "ev": {
+          "type": "a2ui",
+          "msg": {
+            "version": "1.0",
+            "createSurface": {
+              "surfaceId": "s3",
+              "catalogId": "http://localhost:5182/catalog/brick-box/v1"
+            }
+          },
+          "origin": "llm"
+        }
+      },
+      {
+        "t": 1735.422900000005,
+        "ev": {
+          "type": "a2ui",
+          "msg": {
+            "version": "1.0",
+            "updateComponents": {
+              "surfaceId": "s3",
+              "components": [
+                {
+                  "id": "root",
+                  "component": "Card",
+                  "child": "main"
+                },
+                {
+                  "id": "main",
+                  "component": "Column",
+                  "children": [
+                    "title",
+                    "sum",
+                    "seats",
+                    "seatmap",
+                    "go"
+                  ]
+                },
+                {
+                  "id": "title",
+                  "component": "Text",
+                  "text": "## Pick your seat"
+                }
+              ]
+            }
+          },
+          "origin": "llm"
+        }
+      },
+      {
+        "t": 2899.7119999999995,
+        "ev": {
+          "type": "a2ui",
+          "msg": {
+            "version": "1.0",
+            "updateComponents": {
+              "surfaceId": "s3",
+              "components": [
+                {
+                  "id": "sum",
+                  "component": "Text",
+                  "text": "Demo Air, Bremen to New York, Thu 26 Nov, 07:15 to 15:45, €164"
+                },
+                {
+                  "id": "seats",
+                  "component": "Text",
+                  "variant": "caption",
+                  "text": "Choose one seat"
+                },
+                {
+                  "id": "seatmap",
+                  "component": "SeatMap",
+                  "rows": 24,
+                  "layout": "ABC DEF",
+                  "taken": [
+                    "1A",
+                    "1B",
+                    "2C",
+                    "3D",
+                    "4E",
+                    "5F",
+                    "6A",
+                    "7B",
+                    "8C",
+                    "9D",
+                    "10E",
+                    "11F",
+                    "12A",
+                    "12B",
+                    "14C"
+                  ],
+                  "value": {
+                    "@path": "/seat/pick"
+                  }
+                }
+              ]
+            }
+          },
+          "origin": "llm"
+        }
+      },
+      {
+        "t": 3967.2764000000316,
+        "ev": {
+          "type": "a2ui",
+          "msg": {
+            "version": "1.0",
+            "updateComponents": {
+              "surfaceId": "s3",
+              "components": [
+                {
+                  "id": "go",
+                  "component": "Button",
+                  "variant": "primary",
+                  "child": "go_label",
+                  "action": {
+                    "event": {
+                      "name": "confirm_seat",
+                      "context": {
+                        "seat": {
+                          "@path": "/seat/pick"
+                        },
+                        "flight_id": "f1",
+                        "carrier": "Demo Air",
+                        "depart": "2026-11-26T07:15",
+                        "arrive": "2026-11-26T15:45",
+                        "price_eur": 164
+                      }
+                    }
+                  },
+                  "@checks": [
+                    {
+                      "condition": {
+                        "@call": "required",
+                        "args": {
+                          "value": {
+                            "@path": "/seat/pick"
+                          }
+                        }
+                      },
+                      "message": "Pick a seat"
+                    }
+                  ]
+                },
+                {
+                  "id": "go_label",
+                  "component": "Text",
+                  "text": "Confirm seat"
+                }
+              ]
+            }
+          },
+          "origin": "llm"
+        }
+      },
+      {
+        "t": 4482.100299999991,
+        "ev": {
+          "type": "a2ui",
+          "msg": {
+            "version": "1.0",
+            "updateDataModel": {
+              "surfaceId": "s3",
+              "path": "/seat",
+              "value": {
+                "pick": "12C"
+              }
+            }
+          },
+          "origin": "llm"
+        }
+      },
+      {
+        "t": 4483.260799999989,
+        "ev": {
+          "type": "caption",
+          "text": "Seat selection for the Demo Air flight"
+        }
+      },
+      {
+        "t": 4485.225199999986,
+        "ev": {
+          "type": "usage",
+          "model": "claude-sonnet-5-5",
+          "input_tokens": 854,
+          "output_tokens": 749,
+          "cache_read_tokens": 6038,
+          "cache_write_tokens": 0,
+          "first_ui_ms": 1305,
+          "compose_ms": 4474,
+          "skipped_lines": 0,
+          "repaired_lines": 0,
+          "thinking": "between-tools"
+        }
+      },
+      {
+        "t": 4485.247700000007,
+        "ev": {
+          "type": "done"
+        }
+      }
+    ]
+  }
+]
