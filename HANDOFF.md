@@ -14,6 +14,9 @@ Vite + React 19 + Tailwind 4 + shadcn (**Base UI**, all components installed) cl
 Every event enters the client through `store.applyTurnEvent`, the single ingress that replay also uses.
 Contract files: `src/shared/{a2ui,catalog,protocol,pointer}.ts` and `src/client/state.ts`.
 
+## 🚨 BLOCKER (2026-11-24 ~00:20)
+The Anthropic API key has reached its **account spend limit**: "You will regain access on 2026-12-01 at 00:00 UTC", which is after the talk. Every composer, widgets, html and search call fails, both locally and in production. **The owner must raise the limit** (console.anthropic.com → Settings → Limits → monthly spend limit, for the organization or workspace that owns the key) **or provide another key.** Then update the Worker secret: `printf '%s' <key> | bunx wrangler secret put ANTHROPIC_API_KEY` and `.dev.vars`. Jev (decision model) and Soniox (voice) are unaffected.
+
 ## Status at hand-off (updated 2026-11-24 ~00:00)
 - **Production:** https://brick-box.shahriarbijoy.workers.dev runs **615d559**: composer `claude-sonnet-5-5` (search, widgets and html on Haiku), live web search, the decision model with time/date/Day fixes and the silent-drop guard, replay (F1–F6, Shift+R, Shift+E), voice-glow, the Esc wave, live widgets and the voice fragment guard. Open it with `?k=<DEMO_KEY from .dev.vars>`.
 - **Everything built is reviewed.** 422 tests pass, and `bunx tsc -b` is clean. Ledger: `.superpowers/sdd/progress.md` (every task, review, ruling and parked minor).
