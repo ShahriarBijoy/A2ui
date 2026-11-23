@@ -181,6 +181,14 @@ export function createStore(): StoreApi {
     now: number,
   ): { state: AppState; res: ApplyResult } => {
     const res = applyMessage(s.surfaces, raw, { now, turnId });
+    if (res.kind === "updateDataModel") {
+      const prior = s.surfaces[res.surfaceId];
+      const written = res.surfaces[res.surfaceId];
+      // U5 flashes edits. Filling a surface in the turn that created it is not an edit, so it leaves no stamp.
+      if (written && (res.created || prior?.turnId === turnId)) {
+        res.surfaces = { ...res.surfaces, [res.surfaceId]: { ...written, changed: prior?.changed ?? {} } };
+      }
+    }
     const entries: WireEntry[] = [
       wireEntry({
         dir: "down",
