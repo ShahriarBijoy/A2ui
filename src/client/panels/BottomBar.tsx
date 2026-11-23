@@ -58,7 +58,7 @@ export function BottomBar(props: Props) {
               key={m.mode}
               value={m.mode}
               aria-label={`${m.label} mode (key ${MODE_KEYS[m.mode]})`}
-              className="h-9 gap-2 px-3.5 text-[0.875rem] aria-pressed:bg-primary aria-pressed:text-primary-foreground aria-pressed:hover:bg-primary"
+              className="h-9 gap-2 px-3.5 text-[0.875rem] motion-reduce:transition-none aria-pressed:bg-primary aria-pressed:text-primary-foreground aria-pressed:hover:bg-primary"
             >
               {m.label}
               <Kbd className="bg-transparent font-mono text-[0.6875rem] text-current opacity-60">{MODE_KEYS[m.mode]}</Kbd>

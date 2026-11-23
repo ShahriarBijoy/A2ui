@@ -32,6 +32,12 @@ export function Thread({ thread, surfaces, newestSurfaceId, decision, replaying 
   const interactiveId = pickInteractiveSurface(timeline, surfaces, newestSurfaceId);
   const newest = newestSurfaceId ? surfaces[newestSurfaceId] : undefined;
   const routable = useMemo(() => (newest ? hasKnobs(newest) : false), [newest]);
+  // A replayed or re-run turn can re-create a surface id; only its latest creator renders it, so one id never shows twice.
+  const owners = useMemo(() => {
+    const m = new Map<string, string>();
+    for (const item of thread) if (item.kind === "agent" && item.surfaceId) m.set(item.surfaceId, item.id);
+    return m;
+  }, [thread]);
   const { viewportRef, contentRef, atBottom, scrollToBottom } = useStickToBottom({ jumpOnNewChild: true });
 
   return (
@@ -77,6 +83,7 @@ export function Thread({ thread, surfaces, newestSurfaceId, decision, replaying 
                     key={item.id}
                     item={item}
                     surfaceExists={item.surfaceId ? item.surfaceId in surfaces : false}
+                    surfaceOwned={item.surfaceId ? owners.get(item.surfaceId) === item.id : false}
                     interactive={item.surfaceId !== undefined && item.surfaceId === interactiveId && !replaying}
                     awaitingRoute={awaitingRoute}
                   />
@@ -161,12 +168,19 @@ const UserLine = memo(function UserLine({ item }: { item: UserItem }) {
   );
 });
 
-type AgentProps = { item: AgentItem; surfaceExists: boolean; interactive: boolean; awaitingRoute: boolean };
+type AgentProps = {
+  item: AgentItem;
+  surfaceExists: boolean;
+  surfaceOwned: boolean;
+  interactive: boolean;
+  awaitingRoute: boolean;
+};
 
-const AgentEntry = memo(function AgentEntry({ item, surfaceExists, interactive, awaitingRoute }: AgentProps) {
+const AgentEntry = memo(function AgentEntry(props: AgentProps) {
+  const { item } = props;
   return (
     <article className="flex flex-col items-start gap-2" data-status={item.status} aria-busy={!isTurnFinished(item)}>
-      <AgentBody item={item} surfaceExists={surfaceExists} interactive={interactive} awaitingRoute={awaitingRoute} />
+      <AgentBody {...props} />
       {item.status === "error" && <ErrorLine item={item} />}
       {item.mode === "a2ui" ? (
         // Reserved even when empty: the caption lands late and must not push the chip down.
@@ -179,10 +193,11 @@ const AgentEntry = memo(function AgentEntry({ item, surfaceExists, interactive, 
   );
 });
 
-function AgentBody({ item, surfaceExists, interactive, awaitingRoute }: AgentProps) {
+function AgentBody({ item, surfaceExists, surfaceOwned, interactive, awaitingRoute }: AgentProps) {
   const finished = isTurnFinished(item);
   if (item.surfaceId) {
     if (!surfaceExists) return <Note>Surface {item.surfaceId} was removed.</Note>;
+    if (!surfaceOwned) return <Note>Surface {item.surfaceId} was rebuilt further down.</Note>;
     return <Surface surfaceId={item.surfaceId} interactive={interactive} onAction={sendAction} />;
   }
   if (item.widget) {
