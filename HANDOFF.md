@@ -15,7 +15,7 @@ Every event enters the client through `store.applyTurnEvent`, the single ingress
 Contract files: `src/shared/{a2ui,catalog,protocol,pointer}.ts` and `src/client/state.ts`.
 
 ## Status at hand-off (updated 2026-11-23 ~23:05)
-- **Production:** https://brick-box.shahriarbijoy.workers.dev runs **fb43969** (live search, voice-glow, Esc wave, live widgets). It **lacks**: replay (step 12), the replay-totals fix, lenient @checks, the composer structure fixes (d78f02e) and the decision-model time/guard fixes (5f2eff0+). **Redeploy** once the open reviews and fix rounds below clear (`bun run deploy` from a green tree), then re-run `bun run smoke` against production and refresh `scripts/smoke-results.md` and NOTES.
+- **Production:** https://brick-box.shahriarbijoy.workers.dev runs **8bc7ae3** (deployed 2026-11-23 ~23:13 from a clean worktree). That includes replay, replay-totals, lenient @checks, the composer structure fixes d78f02e, the decision-model time/guard fixes 5996e08 and the voice fragment guard. The prod probe passed: patch 0.96 in 195 ms; dinner first UI 0.78 s. **The dinner search returned 0 places at 23:14 Monday**: the time-aware query correctly drops closed kitchens late at night, so test at the talk's clock (`DEV_NOW` override, coming) or during the evening.
 - **Complete and reviewed:** lanes R, S, W, D, V; phases 2 (R, S, W) and 3 (widgets live); step 12 replay (4f7da0e, b020f5e, 5b580c1); lenient @checks (c22534f). Ledger: `.superpowers/sdd/progress.md`.
 - **Open at hand-off:**
   - Decision model fix round 1 (relativeHint edge wording; never a backwards patch).
