@@ -42,8 +42,10 @@ function Node({ id, scope }: { id: string; scope: string }): JSX.Element {
   const env = useSurfaceEnv();
   const ancestors = useContext(AncestryContext);
   const entry = env.surface.components[id];
-  // U3: an id that has not arrived yet holds its place.
-  if (!entry) return <SkeletonBlock />;
+  // U3: an id that has not arrived yet holds its place, but only while a turn still streams into this surface.
+  // A turn that ended without it (aborted, left mid-turn, saved and reloaded) never sends it: show nothing, not a
+  // placeholder that pulses forever.
+  if (!entry) return env.streaming ? <SkeletonBlock /> : <></>;
   if (ancestors.includes(id) || ancestors.length >= MAX_DEPTH) {
     const type = entry.status === "ok" ? entry.def.component : entry.component;
     return <Refused type={type} reason="Cycle" />;
@@ -109,7 +111,7 @@ export function Surface(props: {
       // U8: older surfaces stay visible as history but cannot be used.
       inert={!interactive}
       className={cn(
-        "relative w-full max-w-[560px] rounded-xl border bg-card p-5 text-card-foreground",
+        "relative w-full max-w-(--surface-w) rounded-xl border bg-card p-5 text-card-foreground",
         "transition-opacity duration-150 motion-reduce:transition-none",
         !interactive && "opacity-55",
       )}
@@ -126,8 +128,10 @@ export function Surface(props: {
         <SurfaceEnvContext value={env}>
           <Node id="root" scope="/" />
         </SurfaceEnvContext>
-      ) : (
+      ) : streaming ? (
         <SurfaceSkeleton />
+      ) : (
+        <p className="font-mono text-[0.8125rem] text-muted-foreground">Stopped before this screen was built.</p>
       )}
     </section>
   );

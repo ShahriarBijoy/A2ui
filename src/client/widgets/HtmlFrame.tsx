@@ -10,7 +10,7 @@ const THROTTLE_MS = 300;
 export function HtmlFrame({ html, streaming = false }: { html: string; streaming?: boolean }) {
   const shown = useThrottled(html, THROTTLE_MS);
   return (
-    <figure className="w-full max-w-[560px]">
+    <figure className="w-full max-w-(--surface-w)">
       <figcaption className="mb-1.5 flex items-center justify-between font-mono text-[0.6875rem] uppercase tracking-[0.12em] text-muted-foreground">
         <span>generated HTML · sandboxed</span>
         <span className={cn(!streaming && "invisible")}>streaming</span>
@@ -29,7 +29,7 @@ export function HtmlFrame({ html, streaming = false }: { html: string; streaming
 /** Same frame before the first byte, so the iframe does not push the thread when it appears. */
 export function HtmlFrameSkeleton() {
   return (
-    <figure className="w-full max-w-[560px]" aria-busy="true">
+    <figure className="w-full max-w-(--surface-w)" aria-busy="true">
       <figcaption className="mb-1.5 font-mono text-[0.6875rem] uppercase tracking-[0.12em] text-muted-foreground">
         generated HTML · sandboxed
       </figcaption>

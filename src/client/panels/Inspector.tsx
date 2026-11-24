@@ -38,7 +38,7 @@ export function Inspector({ wire, surface }: Props) {
   );
 }
 
-function WireLog({ wire }: { wire: WireEntry[] }) {
+export function WireLog({ wire }: { wire: WireEntry[] }) {
   const counts = useMemo(() => wireCounts(wire), [wire]);
   const { viewportRef, contentRef } = useStickToBottom({ mode: "log" });
   return (
@@ -122,7 +122,7 @@ function WireRow({ entry }: { entry: WireEntry }) {
   );
 }
 
-function DataPanel({ surface }: { surface: SurfaceState | null }) {
+export function DataPanel({ surface }: { surface: SurfaceState | null }) {
   if (!surface) {
     return (
       <p className="border-t px-4 py-6 font-mono text-[0.75rem] leading-relaxed text-muted-foreground">

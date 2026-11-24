@@ -12,6 +12,7 @@ import type {
   JsonValue,
 } from "@shared/a2ui";
 import type { BrickName } from "@shared/catalog";
+import type { IconName } from "@shared/icons";
 import type { A2uiOrigin, Mode, TurnEvent, TurnInput, TurnRequest, WidgetName } from "@shared/protocol";
 
 export type ComponentEntry =
@@ -121,6 +122,20 @@ export type Transcript = { final: string; interim: string; listening: boolean; e
 /** Recorded events of one turn, for Shift+R / replay (t = ms since turn start). */
 export type TurnRecording = { display: string; via: UserItem["via"]; mode: Mode; events: { t: number; ev: TurnEvent }[] };
 
+/** One conversation in the sessions rail. Saved in this browser (sessions.ts). */
+export type SessionMeta = {
+  id: string;
+  /** The first utterance, shortened; "New session" while empty. */
+  title: string;
+  /** The first Icon brick the session's screens used, else null (the rail shows a chat icon). */
+  icon: IconName | null;
+  /** Date.now() */
+  createdAt: number;
+  /** Date.now() of the last turn start or end. */
+  updatedAt: number;
+  turns: number;
+};
+
 export type AppState = {
   mode: Mode;
   decision: boolean;
@@ -136,6 +151,9 @@ export type AppState = {
   transcript: Transcript;
   replaying: boolean;
   recordings: Record<string, TurnRecording>;
+  /** Most recent first; includes the open one. */
+  sessions: SessionMeta[];
+  activeSessionId: string;
 };
 
 export interface StoreApi {
@@ -147,6 +165,15 @@ export interface StoreApi {
   setHandsFree(on: boolean): void;
   /** Esc: clear thread, surfaces, wire log, pool state. Keeps settings and session totals. */
   clearThread(): void;
+
+  /** Saves the open session and opens an empty one. No-op when the open session has no thread items. */
+  newSession(): void;
+  /** Saves the open session and opens `id` with its thread, surfaces and wire. */
+  switchSession(id: string): void;
+  /** Deleting the open session opens the most recent other, or a fresh one. */
+  deleteSession(id: string): void;
+  /** Leaves one fresh empty session. */
+  deleteAllSessions(): void;
 
   /** U2: synchronously adds the user line and a pending agent item (skeleton). Returns the turnId. */
   beginTurn(opts: { input: TurnInput; display: string; via: UserItem["via"]; replay?: boolean }): string;

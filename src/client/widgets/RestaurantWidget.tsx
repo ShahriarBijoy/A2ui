@@ -11,7 +11,7 @@ export { parseRestaurantProps } from "./restaurantRows";
 export function RestaurantWidget({ places, kind, max_walk_min }: RestaurantWidgetProps) {
   const filters = [kind, max_walk_min !== undefined ? `≤ ${max_walk_min} min walk` : undefined].filter(Boolean).join(" · ");
   return (
-    <article className="w-full max-w-[560px] rounded-xl border bg-card">
+    <article className="w-full max-w-(--surface-w) rounded-xl border bg-card">
       <header className="flex items-baseline justify-between gap-3 border-b px-5 py-3.5">
         <h3 className="text-[1.0625rem] font-semibold tracking-tight">Restaurants nearby</h3>
         {filters && <span className="truncate text-[0.8125rem] text-muted-foreground">{filters}</span>}

@@ -12,7 +12,7 @@ import {
   type VoiceController,
 } from "./soniox";
 import { useMountEffect } from "./useMountEffect";
-import { isTypingTarget as isEditableTextEntry } from "@/keyboard";
+import { isInPopup, isTypingTarget as isEditableTextEntry } from "@/keyboard";
 
 export type VoiceState = { supported: boolean; ready: boolean; listening: boolean; error?: string };
 
@@ -22,6 +22,11 @@ const CONTEXT_TERMS = ["Bremen", "Überseestadt", "New York", "A2UI", "Brick Box
 
 function isTypingTarget(target: EventTarget | null): boolean {
   return target instanceof Element && isEditableTextEntry(target);
+}
+
+/** Space inside an open menu or confirm dialog belongs to that popup, not to the microphone behind it. */
+function inPopup(target: EventTarget | null): boolean {
+  return target instanceof Element && isInPopup(target);
 }
 
 const supportsAudio = () =>
@@ -69,7 +74,7 @@ export function useVoice(): VoiceState {
 
     const onKeyDown = (e: KeyboardEvent) => {
       if (e.code !== "Space" || e.ctrlKey || e.metaKey || e.altKey || e.shiftKey) return;
-      if (isTypingTarget(e.target) || store.getState().handsFree) return;
+      if (isTypingTarget(e.target) || inPopup(e.target) || store.getState().handsFree) return;
       e.preventDefault();
       if (e.repeat) return;
       controller.keyDown();

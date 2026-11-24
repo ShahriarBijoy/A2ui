@@ -12,7 +12,7 @@ export { parseFlightSearchProps } from "./flightRows";
  */
 export function FlightSearchWidget({ from, to, date, flights }: FlightSearchWidgetProps) {
   return (
-    <article className="w-full max-w-[560px] rounded-xl border bg-card">
+    <article className="w-full max-w-(--surface-w) rounded-xl border bg-card">
       <header className="flex items-center justify-between gap-3 border-b px-5 py-3.5">
         <h3 className="text-[1.0625rem] font-semibold tracking-tight">Flight search</h3>
         <Badge variant="outline" className="font-mono text-[0.6875rem] font-normal uppercase tracking-[0.08em] text-muted-foreground">

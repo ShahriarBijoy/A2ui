@@ -6,6 +6,7 @@ import {
   formatPriceLevel,
   formatSeconds,
   formatTokens,
+  openTurnIds,
   pickInteractiveSurface,
   tailText,
   wireCounts,
@@ -279,5 +280,57 @@ describe("wireCounts", () => {
     expect(
       wireCounts([w("down", "createSurface"), w("down", "updateComponents"), w("up", "action"), w("up", "error")]),
     ).toEqual({ messages: 2, actions: 1, refused: 1 });
+  });
+});
+
+describe("openTurnIds", () => {
+  const turn = (n: number, over: Partial<AgentItem> = {}): ThreadItem[] => [
+    user("t" + n),
+    agent({ id: "a" + n, turnId: "t" + n, ...over }, { startedAt: n * 100 }),
+  ];
+  const ids = (s: Set<string>) => [...s].sort();
+  const surfaces = { s1: surface("s1", [110]), s2: surface("s2", [210]), s3: surface("s3", [310]) };
+
+  test("the last two turns and the interactive surface's turn stay open", () => {
+    const thread = [
+      ...turn(1, { surfaceId: "s1" }),
+      ...turn(2, { surfaceId: "s2" }),
+      ...turn(3, { updatedSurfaceId: "s2" }),
+      ...turn(4, { updatedSurfaceId: "s2" }),
+    ];
+    expect(ids(openTurnIds(buildTimeline(thread, surfaces), "s2"))).toEqual(["t2", "t3", "t4"]);
+  });
+  test("after a patch turn, the patched screen's turn stays open", () => {
+    const thread = [...turn(1, { surfaceId: "s1" }), ...turn(2, { surfaceId: "s2" }), ...turn(3, { updatedSurfaceId: "s2" })];
+    expect(ids(openTurnIds(buildTimeline(thread, surfaces), "s2"))).toEqual(["t2", "t3"]);
+  });
+  test("an earlier screen folds once two newer turns follow", () => {
+    const thread = [...turn(1, { surfaceId: "s1" }), ...turn(2, { surfaceId: "s2" }), ...turn(3, { surfaceId: "s3" })];
+    expect(ids(openTurnIds(buildTimeline(thread, surfaces), "s3"))).toEqual(["t2", "t3"]);
+  });
+  test("a single turn is open; an empty timeline has none", () => {
+    expect(ids(openTurnIds(buildTimeline(turn(1, { surfaceId: "s1" }), surfaces), "s1"))).toEqual(["t1"]);
+    expect(openTurnIds([], null).size).toBe(0);
+  });
+  test("widget, HTML and text-reply answers never fold", () => {
+    const thread = [
+      ...turn(1, { mode: "widgets", widget: { name: "FlightSearchWidget", props: {} } }),
+      ...turn(2, { mode: "html", html: "<p>hi</p>" }),
+      ...turn(3, { mode: "widgets", text: "no widget fits" }),
+      ...turn(4, { surfaceId: "s1" }),
+      ...turn(5, { surfaceId: "s2" }),
+      ...turn(6, { surfaceId: "s3" }),
+    ];
+    expect(ids(openTurnIds(buildTimeline(thread, surfaces), "s3"))).toEqual(["t1", "t2", "t3", "t5", "t6"]);
+  });
+  test("while the newest turn streams, the screen it replaces stays open", () => {
+    const streaming = [
+      ...turn(1, { surfaceId: "s1" }),
+      ...turn(2, { updatedSurfaceId: "s1" }),
+      ...turn(3, { surfaceId: "s2", status: "streaming" }),
+    ];
+    expect(ids(openTurnIds(buildTimeline(streaming, surfaces), "s2"))).toEqual(["t1", "t2", "t3"]);
+    const done = [...turn(1, { surfaceId: "s1" }), ...turn(2, { updatedSurfaceId: "s1" }), ...turn(3, { surfaceId: "s2" })];
+    expect(ids(openTurnIds(buildTimeline(done, surfaces), "s2"))).toEqual(["t2", "t3"]);
   });
 });

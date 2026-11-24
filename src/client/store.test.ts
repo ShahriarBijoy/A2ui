@@ -1,4 +1,4 @@
-import { describe, expect, test } from "bun:test";
+import { describe, expect, spyOn, test } from "bun:test";
 import type { A2uiMessage } from "@shared/a2ui";
 import type { TurnEvent } from "@shared/protocol";
 import type { AgentItem } from "@/state";
@@ -371,5 +371,283 @@ describe("buildTurnRequest", () => {
     expect(req.thread).toHaveLength(6);
     expect(req.thread[0]).toEqual({ role: "user", text: "line 2" });
     expect(req.surface).toBeNull();
+  });
+});
+
+// ── Sessions ─────────────────────────────────────────────────────────────────
+
+function memory() {
+  const map = new Map<string, string>();
+  return {
+    map,
+    getItem: (k: string) => map.get(k) ?? null,
+    setItem: (k: string, v: string) => {
+      map.set(k, v);
+    },
+  };
+}
+
+/** A store with a ticking wall clock and synchronous saves. */
+function sessionStore(storage: ReturnType<typeof memory> | null = memory()) {
+  let now = 1_000;
+  return createStore({ storage, clock: () => ++now, defer: (fn) => fn() });
+}
+
+/** One finished dinner turn (surface s2). */
+function dinnerTurn(s: ReturnType<typeof createStore>, text = "table for four") {
+  const t = s.beginTurn(utter(text));
+  for (const msg of DINNER_STEP_2.messages) s.applyTurnEvent(t, a2ui(msg));
+  s.applyTurnEvent(t, { type: "caption", text: "Table at Placeholder Bistro" });
+  s.applyTurnEvent(t, { type: "done" });
+  return t;
+}
+
+describe("sessions", () => {
+  test("a fresh store has one empty session, open", () => {
+    const st = sessionStore().getState();
+    expect(st.sessions).toHaveLength(1);
+    expect(st.activeSessionId).toBe(st.sessions[0].id);
+    expect(st.sessions[0]).toMatchObject({ title: "New session", icon: null, turns: 0 });
+  });
+
+  test("the open session takes its title from the first utterance as the turn starts", () => {
+    const s = sessionStore();
+    s.beginTurn(utter("I want dinner after this event"));
+    expect(s.getState().sessions[0]).toMatchObject({ title: "I want dinner after this event", turns: 1 });
+  });
+
+  test("newSession keeps the old session in the list and starts empty", () => {
+    const s = sessionStore();
+    dinnerTurn(s);
+    const oldId = s.getState().activeSessionId;
+    s.newSession();
+    const st = s.getState();
+    expect(st.thread).toHaveLength(0);
+    expect(st.surfaces).toEqual({});
+    expect(st.wire).toEqual([]);
+    expect(st.newestSurfaceId).toBeNull();
+    expect(st.sessions).toHaveLength(2);
+    expect(st.activeSessionId).not.toBe(oldId);
+    expect(st.sessions[0].id).toBe(st.activeSessionId);
+    expect(st.sessions.find((m) => m.id === oldId)).toMatchObject({ turns: 1, title: "table for four" });
+  });
+
+  test("newSession on an empty session does nothing", () => {
+    const s = sessionStore();
+    const before = s.getState();
+    s.newSession();
+    expect(s.getState()).toBe(before);
+  });
+
+  test("switchSession restores thread, surfaces and wire", () => {
+    const s = sessionStore();
+    dinnerTurn(s);
+    const before = s.getState();
+    s.newSession();
+    s.beginTurn(utter("flight tomorrow"));
+    s.switchSession(before.activeSessionId);
+    const st = s.getState();
+    expect(st.activeSessionId).toBe(before.activeSessionId);
+    expect(st.thread).toEqual(before.thread);
+    expect(st.surfaces).toEqual(before.surfaces);
+    expect(st.wire).toEqual(before.wire);
+    expect(st.newestSurfaceId).toBe("s2");
+    expect(st.activeTurnId).toBeNull();
+    // The flight session was left mid-turn: it is kept, with that turn stopped.
+    expect(st.sessions).toHaveLength(2);
+  });
+
+  test("leaving an empty session drops it from the list", () => {
+    const s = sessionStore();
+    dinnerTurn(s);
+    const dinner = s.getState().activeSessionId;
+    s.newSession();
+    s.switchSession(dinner);
+    expect(s.getState().sessions.map((m) => m.id)).toEqual([dinner]);
+  });
+
+  test("events for a turn of another session are ignored", () => {
+    const s = sessionStore();
+    const old = s.beginTurn(utter("dinner nearby"));
+    const oldSession = s.getState().activeSessionId;
+    s.newSession();
+    s.applyTurnEvent(old, a2ui({ version: "1.0", createSurface: { surfaceId: "s1", catalogId: CAT } }));
+    s.failTurn(old, "Connection closed");
+    expect(s.getState().surfaces).toEqual({});
+    expect(s.getState().wire).toEqual([]);
+    // Back in the old session the turn shows as stopped, and late events still land nowhere.
+    s.switchSession(oldSession);
+    expect(agentOf(s, old)?.status).toBe("done");
+    s.applyTurnEvent(old, a2ui({ version: "1.0", createSurface: { surfaceId: "s1", catalogId: CAT } }));
+    expect(s.getState().surfaces).toEqual({});
+  });
+
+  test("a patch after switching back updates the screen in place", () => {
+    const s = sessionStore();
+    dinnerTurn(s);
+    const dinner = s.getState().activeSessionId;
+    s.newSession();
+    s.beginTurn(utter("flight"));
+    s.switchSession(dinner);
+    const t = s.beginTurn(utter("we're six"));
+    s.applyTurnEvent(t, { type: "route", kind: "edit", decision: "patch", ms: 160, engine: "jev", reason: "", patches: 1 });
+    s.applyTurnEvent(t, a2ui({ version: "1.0", updateDataModel: { surfaceId: "s2", path: "/booking/guests", value: 6 } }, "knob"));
+    // A re-sent root on a restored surface is an update too, not a new step.
+    s.applyTurnEvent(t, a2ui({ version: "1.0", updateComponents: { surfaceId: "s2", components: [{ id: "root", component: "Card", child: "col" }] } }));
+    s.applyTurnEvent(t, { type: "done" });
+    const item = agentOf(s, t);
+    expect(item?.updatedSurfaceId).toBe("s2");
+    expect(item?.surfaceId).toBeUndefined();
+    expect(s.getState().surfaces.s2.data).toMatchObject({ booking: { guests: 6 } });
+  });
+
+  test("deleteSession of the open session opens the most recent other", () => {
+    const s = sessionStore();
+    dinnerTurn(s, "first");
+    const first = s.getState().activeSessionId;
+    s.newSession();
+    dinnerTurn(s, "second");
+    const second = s.getState().activeSessionId;
+    s.newSession();
+    dinnerTurn(s, "third");
+    const third = s.getState().activeSessionId;
+    s.deleteSession(third);
+    expect(s.getState().activeSessionId).toBe(second);
+    expect(s.getState().sessions.map((m) => m.id)).toEqual([second, first]);
+    expect(s.getState().thread[0]).toMatchObject({ text: "second" });
+    // Deleting one that is not open leaves the open one alone.
+    s.deleteSession(first);
+    expect(s.getState().activeSessionId).toBe(second);
+    expect(s.getState().sessions.map((m) => m.id)).toEqual([second]);
+    // The last one: a fresh empty session.
+    s.deleteSession(second);
+    expect(s.getState().sessions).toHaveLength(1);
+    expect(s.getState().thread).toEqual([]);
+  });
+
+  test("deleteAllSessions leaves one empty session", () => {
+    const s = sessionStore();
+    dinnerTurn(s);
+    s.newSession();
+    dinnerTurn(s);
+    s.deleteAllSessions();
+    const st = s.getState();
+    expect(st.sessions).toHaveLength(1);
+    expect(st.sessions[0]).toMatchObject({ title: "New session", turns: 0 });
+    expect(st.activeSessionId).toBe(st.sessions[0].id);
+    expect(st.thread).toEqual([]);
+    expect(st.surfaces).toEqual({});
+  });
+
+  test("totals survive newSession and switchSession", () => {
+    const s = sessionStore();
+    dinnerTurn(s);
+    const dinner = s.getState().activeSessionId;
+    const turns = s.getState().totals.turns;
+    s.newSession();
+    expect(s.getState().totals.turns).toBe(turns);
+    s.switchSession(dinner);
+    expect(s.getState().totals.turns).toBe(turns);
+    s.deleteAllSessions();
+    expect(s.getState().totals.turns).toBe(turns);
+  });
+
+  test("more than 20 sessions drops the oldest", () => {
+    const s = sessionStore();
+    const ids: string[] = [];
+    for (let i = 0; i < 21; i++) {
+      s.beginTurn(utter("turn " + i));
+      ids.push(s.getState().activeSessionId);
+      s.newSession();
+    }
+    const listed = s.getState().sessions.map((m) => m.id);
+    expect(listed).toHaveLength(20);
+    expect(listed[0]).toBe(s.getState().activeSessionId);
+    expect(listed).not.toContain(ids[0]);
+    expect(listed).not.toContain(ids[1]);
+    expect(listed).toContain(ids[2]);
+  });
+
+  test("sessions come back after a reload, the most recent open, with fresh ids for new turns", () => {
+    const storage = memory();
+    const s = sessionStore(storage);
+    dinnerTurn(s);
+    s.newSession();
+    const t = s.beginTurn(utter("flight tomorrow"));
+    s.applyTurnEvent(t, { type: "done" });
+    const flight = s.getState().activeSessionId;
+
+    const r = sessionStore(storage);
+    let st = r.getState();
+    expect(st.sessions).toHaveLength(2);
+    expect(st.activeSessionId).toBe(flight);
+    expect(st.thread[0]).toMatchObject({ text: "flight tomorrow" });
+    expect(st.totals.turns).toBe(0);
+
+    // Switch to the restored dinner session and run a turn: its events land on the new item, not the old t1.
+    const dinner = st.sessions[1].id;
+    r.switchSession(dinner);
+    const n = r.beginTurn(utter("we're six"));
+    expect(n).not.toBe(st.thread[0].turnId);
+    const ids = r.getState().thread.map((i) => i.id);
+    expect(new Set(ids).size).toBe(ids.length);
+    r.applyTurnEvent(n, { type: "route", kind: "edit", decision: "patch", ms: 160, engine: "jev", reason: "", patches: 1 });
+    r.applyTurnEvent(n, a2ui({ version: "1.0", updateDataModel: { surfaceId: "s2", path: "/booking/guests", value: 6 } }, "knob"));
+    r.applyTurnEvent(n, { type: "done" });
+    st = r.getState();
+    expect(agentOf(r, n)).toMatchObject({ status: "done", updatedSurfaceId: "s2" });
+    expect(st.surfaces.s2.data).toMatchObject({ booking: { guests: 6 } });
+    const seqs = st.wire.map((w) => w.seq);
+    expect(new Set(seqs).size).toBe(seqs.length);
+  });
+
+  test("a reload while a turn was pending shows that turn as stopped", () => {
+    const storage = memory();
+    const s = sessionStore(storage);
+    dinnerTurn(s);
+    const dinner = s.getState().activeSessionId;
+    s.newSession();
+    const t = s.beginTurn(utter("flight tomorrow"));
+    // Deleting another session saves while this turn is still pending.
+    s.deleteSession(dinner);
+    expect(agentOf(s, t)?.status).toBe("pending");
+    const r = sessionStore(storage);
+    expect(r.getState().thread).toHaveLength(2);
+    expect(agentOf(r, t)?.status).toBe("done");
+    expect(r.getState().activeTurnId).toBeNull();
+  });
+
+  test("blocked storage: the app runs, sessions just are not saved", () => {
+    const blocked = {
+      getItem: () => {
+        throw new Error("SecurityError");
+      },
+      setItem: () => {
+        throw new Error("SecurityError");
+      },
+    };
+    const err = spyOn(console, "error").mockImplementation(() => {});
+    try {
+      let now = 0;
+      const s = createStore({ storage: blocked, clock: () => ++now, defer: (fn) => fn() });
+      dinnerTurn(s);
+      s.newSession();
+      expect(s.getState().sessions).toHaveLength(2);
+    } finally {
+      err.mockRestore();
+    }
+  });
+
+  test("a corrupt saved value is skipped", () => {
+    const storage = memory();
+    storage.map.set("bb-sessions-v1", "{nope");
+    const err = spyOn(console, "error").mockImplementation(() => {});
+    try {
+      const st = sessionStore(storage).getState();
+      expect(st.sessions).toHaveLength(1);
+      expect(st.thread).toEqual([]);
+    } finally {
+      err.mockRestore();
+    }
   });
 });

@@ -1,11 +1,29 @@
-import { memo, useCallback, useMemo, useRef, useState, type ReactNode, type RefCallback } from "react";
-import { ArrowDownIcon, KeyboardIcon, MicIcon, MousePointerClickIcon, RotateCcwIcon } from "lucide-react";
+import { Fragment, memo, useCallback, useMemo, useRef, useState, type ReactNode, type RefCallback } from "react";
+import {
+  ArrowDownIcon,
+  ChevronDownIcon,
+  KeyboardIcon,
+  LayoutTemplateIcon,
+  MicIcon,
+  MousePointerClickIcon,
+  RotateCcwIcon,
+} from "lucide-react";
 import type { CatalogComponent } from "@shared/a2ui";
 import { deriveKnobs } from "@shared/knobs";
 import { Surface } from "@/a2ui/Surface";
 import { Button } from "@/components/ui/button";
 import { ThreadWave } from "@/fx/ThreadWave";
-import { buildTimeline, isTurnFinished, pickInteractiveSurface } from "@/format";
+import {
+  buildTimeline,
+  entryTurnId,
+  formatMs,
+  formatSeconds,
+  isTurnFinished,
+  openTurnIds,
+  pickInteractiveSurface,
+  type TimelineEntry,
+} from "@/format";
+import type { WidgetName } from "@shared/protocol";
 import { cn } from "@/lib/utils";
 import type { AgentItem, SurfaceState, ThreadItem, UserItem } from "@/state";
 import { retryTurn, sendAction } from "@/turns";
@@ -20,7 +38,19 @@ type Props = {
   newestSurfaceId: string | null;
   decision: boolean;
   replaying: boolean;
+  /**
+   * "stage" (layout A): no header (the top bar has the title), a column as wide as a screen, and room at the
+   * bottom for the floating voice dock. "classic" (the default) is the previous layout, unchanged.
+   */
+  layout?: "classic" | "stage";
+  /** Earlier turns fold to one line (what was said, what was built); the newest and the interactive screen stay open. */
+  foldEarlier?: boolean;
 };
+
+/** Stage column: px-8 on each side, so the content is exactly --surface-w wide. The bottom padding keeps the newest
+ * screen's last button above the dock (dock 70 px + 22 px gap + 24 px air, rounded up). */
+const STAGE_COLUMN = "max-w-[calc(var(--surface-w)+4rem)] gap-7 px-8 pt-7 pb-[136px]";
+const CLASSIC_COLUMN = "max-w-[46rem] gap-8 px-10 pt-4 pb-10";
 
 /** The thread's scroller, shared with the wave's empty view so the hand-back after a wave lines up exactly. */
 const SCROLLER = "h-full overflow-y-auto [overflow-anchor:none] [scrollbar-gutter:stable]";
@@ -31,7 +61,16 @@ const EXAMPLES = [
   "Split a 120 euro bill between four, Jonas only had drinks.",
 ];
 
-export function Thread({ thread, surfaces, newestSurfaceId, decision, replaying }: Props) {
+export function Thread({
+  thread,
+  surfaces,
+  newestSurfaceId,
+  decision,
+  replaying,
+  layout = "classic",
+  foldEarlier = false,
+}: Props) {
+  const stage = layout === "stage";
   const timeline = useMemo(() => buildTimeline(thread, surfaces), [thread, surfaces]);
   const interactiveId = pickInteractiveSurface(timeline, surfaces, newestSurfaceId);
   const newest = newestSurfaceId ? surfaces[newestSurfaceId] : undefined;
@@ -44,14 +83,92 @@ export function Thread({ thread, surfaces, newestSurfaceId, decision, replaying 
   }, [thread]);
   const { viewportRef, contentRef, atBottom, scrollToBottom } = useStickToBottom({ mode: "thread" });
 
+  const open = useMemo(() => (foldEarlier ? openTurnIds(timeline, interactiveId) : null), [foldEarlier, timeline, interactiveId]);
+  /** Folded turns opened by a click. Turn ids never repeat on a page, so stale entries are harmless. */
+  const [expanded, setExpanded] = useState<ReadonlySet<string>>(() => new Set());
+  const toggleTurn = useCallback((turnId: string, row: HTMLElement) => {
+    setExpanded((prev) => {
+      const next = new Set(prev);
+      if (next.has(turnId)) next.delete(turnId);
+      else next.add(turnId);
+      return next;
+    });
+    // After the stick-to-bottom observer has run (next frame), bring the row back into view: an opened turn must be
+    // seen, and scrolling up also tells the thread to stop following the bottom.
+    requestAnimationFrame(() => requestAnimationFrame(() => row.scrollIntoView({ block: "nearest" })));
+  }, []);
+  /** Per folded turn: its user line and agent item, and the first entry, where the one-line row goes. */
+  const turns = useMemo(() => {
+    const m = new Map<string, { user?: UserItem; agent?: AgentItem; first: TimelineEntry }>();
+    if (!open) return m;
+    for (const e of timeline) {
+      const id = entryTurnId(e);
+      if (id === null || open.has(id) || e.kind === "surface") continue;
+      const t = m.get(id) ?? { first: e };
+      if (e.kind === "user") t.user = e.item;
+      else t.agent = e.item;
+      m.set(id, t);
+    }
+    return m;
+  }, [open, timeline]);
+
+  const renderEntry = (e: TimelineEntry): ReactNode => {
+    if (e.kind === "user") return <UserLine key={e.item.id} item={e.item} />;
+    if (e.kind === "surface") {
+      return (
+        <div key={`surface-${e.surfaceId}`} className="flex flex-col items-start gap-2">
+          <Surface surfaceId={e.surfaceId} interactive={e.surfaceId === interactiveId} onAction={sendAction} />
+          <p className="font-mono text-[0.75rem] text-muted-foreground">applied directly · {e.surfaceId}</p>
+        </div>
+      );
+    }
+    const item = e.item;
+    const awaitingRoute =
+      item.mode === "a2ui" && decision && routable && item.retry.input.type === "utterance" && !item.metrics.route;
+    return (
+      <AgentEntry
+        key={item.id}
+        item={item}
+        surfaceExists={item.surfaceId ? item.surfaceId in surfaces : false}
+        surfaceOwned={item.surfaceId ? owners.get(item.surfaceId) === item.id : false}
+        interactive={item.surfaceId !== undefined && item.surfaceId === interactiveId}
+        awaitingRoute={awaitingRoute}
+      />
+    );
+  };
+
+  const renderTimelineEntry = (e: TimelineEntry): ReactNode => {
+    const id = entryTurnId(e);
+    const folded = id !== null ? turns.get(id) : undefined;
+    if (!id || !folded) return renderEntry(e);
+    const isOpen = expanded.has(id);
+    if (folded.first !== e) return isOpen ? renderEntry(e) : null;
+    const surfaceId = folded.agent?.surfaceId;
+    return (
+      <Fragment key={`turn-${id}`}>
+        <FoldedTurn
+          turnId={id}
+          user={folded.user}
+          agent={folded.agent}
+          bricks={surfaceId ? countBricks(surfaces[surfaceId]) : 0}
+          expanded={isOpen}
+          onToggle={toggleTurn}
+        />
+        {isOpen && renderEntry(e)}
+      </Fragment>
+    );
+  };
+
   return (
     <section aria-label="Thread" className="flex h-full min-h-0 flex-col">
-      <header className="flex h-14 shrink-0 items-baseline gap-3 px-10 pt-[1.1rem]">
-        <h1 className="text-[1.0625rem] font-semibold tracking-tight">Brick Box</h1>
-        <p className="truncate text-[0.8125rem] text-muted-foreground">
-          Every screen built on the spot from a box of bricks.
-        </p>
-      </header>
+      {!stage && (
+        <header className="flex h-14 shrink-0 items-baseline gap-3 px-10 pt-[1.1rem]">
+          <h1 className="text-[1.0625rem] font-semibold tracking-tight">Brick Box</h1>
+          <p className="truncate text-[0.8125rem] text-muted-foreground">
+            Every screen built on the spot from a box of bricks.
+          </p>
+        </header>
+      )}
       <div className="relative min-h-0 flex-1">
         <ThreadWave empty={<EmptyView />}>
           <div ref={viewportRef} className={SCROLLER}>
@@ -62,40 +179,15 @@ export function Thread({ thread, surfaces, newestSurfaceId, decision, replaying 
               <div
                 ref={contentRef}
                 inert={replaying}
-                className="mx-auto flex w-full max-w-[46rem] flex-col gap-8 px-10 pt-4 pb-10"
+                className={cn(
+                  "mx-auto flex w-full flex-col",
+                  stage ? STAGE_COLUMN : CLASSIC_COLUMN,
+                  // Once turns fold, the column sits on the bottom edge: a fold shortens the thread above, and the
+                  // newest screen must not move when that happens (it would jump up once the thread fits the view).
+                  turns.size > 0 && "min-h-full justify-end",
+                )}
               >
-                {timeline.map((e) => {
-                  if (e.kind === "user") return <UserLine key={e.item.id} item={e.item} />;
-                  if (e.kind === "surface") {
-                    return (
-                      <div key={`surface-${e.surfaceId}`} className="flex flex-col items-start gap-2">
-                        <Surface
-                          surfaceId={e.surfaceId}
-                          interactive={e.surfaceId === interactiveId}
-                          onAction={sendAction}
-                        />
-                        <p className="font-mono text-[0.75rem] text-muted-foreground">applied directly · {e.surfaceId}</p>
-                      </div>
-                    );
-                  }
-                  const item = e.item;
-                  const awaitingRoute =
-                    item.mode === "a2ui" &&
-                    decision &&
-                    routable &&
-                    item.retry.input.type === "utterance" &&
-                    !item.metrics.route;
-                  return (
-                    <AgentEntry
-                      key={item.id}
-                      item={item}
-                      surfaceExists={item.surfaceId ? item.surfaceId in surfaces : false}
-                      surfaceOwned={item.surfaceId ? owners.get(item.surfaceId) === item.id : false}
-                      interactive={item.surfaceId !== undefined && item.surfaceId === interactiveId}
-                      awaitingRoute={awaitingRoute}
-                    />
-                  );
-                })}
+                {timeline.map(renderTimelineEntry)}
               </div>
             )}
           </div>
@@ -106,7 +198,9 @@ export function Thread({ thread, surfaces, newestSurfaceId, decision, replaying 
           tabIndex={atBottom ? -1 : 0}
           aria-hidden={atBottom}
           className={cn(
-            "absolute bottom-4 left-1/2 flex -translate-x-1/2 items-center gap-1.5 rounded-full border bg-card px-3.5 py-1.5 font-mono text-[0.75rem] text-foreground",
+            "absolute left-1/2 flex -translate-x-1/2 items-center gap-1.5 rounded-full border bg-card px-3.5 py-1.5 font-mono text-[0.75rem] text-foreground",
+            // Above the stage's voice dock.
+            stage ? "bottom-[120px]" : "bottom-4",
             "transition-opacity duration-150 motion-reduce:transition-none hover:bg-accent",
             atBottom ? "pointer-events-none opacity-0" : "opacity-100",
           )}
@@ -186,6 +280,82 @@ const UserLine = memo(function UserLine({ item }: { item: UserItem }) {
   );
 });
 
+function countBricks(surface: SurfaceState | undefined): number {
+  if (!surface) return 0;
+  let n = 0;
+  for (const entry of Object.values(surface.components)) if (entry.status === "ok") n++;
+  return n;
+}
+
+const WIDGET_LABEL: Record<WidgetName, string> = {
+  RestaurantWidget: "Restaurant widget",
+  FlightSearchWidget: "Flight search widget",
+};
+
+/** What a folded turn built, in words: the widget, page or text answer by name, else the caption or brick count. */
+function builtLabel(agent: AgentItem | undefined, bricks: number): string {
+  if (!agent) return "no answer";
+  if (agent.widget) return WIDGET_LABEL[agent.widget.name] ?? "Widget";
+  if (agent.html !== undefined) return "HTML page";
+  if (agent.text !== undefined) return "Text answer";
+  if (agent.caption) return agent.caption;
+  if (bricks > 0) return `${bricks} ${bricks === 1 ? "brick" : "bricks"}`;
+  if (agent.updatedSurfaceId) return "updated in place";
+  if (agent.status === "error") return "failed";
+  return agent.mode === "widgets" ? "no widget" : agent.mode === "html" ? "no page" : "no screen";
+}
+
+/** An earlier turn as one line: how it was asked, what was said, what was built and how long composing took. */
+const FoldedTurn = memo(function FoldedTurn(props: {
+  turnId: string;
+  user?: UserItem;
+  agent?: AgentItem;
+  bricks: number;
+  expanded: boolean;
+  onToggle: (turnId: string, row: HTMLElement) => void;
+}) {
+  const { turnId, user, agent, bricks, expanded, onToggle } = props;
+  const via = VIA[user?.via ?? agent?.retry.via ?? "text"];
+  const Icon = via.icon;
+  const said = user?.text ?? agent?.retry.display ?? "";
+  const built = builtLabel(agent, bricks);
+  // Measured only: compose time, or the decision model's time for a patch.
+  const usage = agent?.metrics.usage;
+  const route = agent?.metrics.route;
+  const time = usage ? formatSeconds(usage.compose_ms) : route?.decision === "patch" ? formatMs(route.ms) : "";
+  return (
+    <button
+      type="button"
+      aria-expanded={expanded}
+      aria-label={`${expanded ? "Fold" : "Show"} earlier turn: ${said}`}
+      onClick={(ev) => onToggle(turnId, ev.currentTarget)}
+      className={cn(
+        "bb-appear grid w-full grid-cols-[auto_minmax(0,1.1fr)_auto_minmax(0,1fr)_auto_auto] items-center gap-2.5 rounded-xl border border-dashed border-input/80 px-3.5 py-2.5",
+        "text-left text-[0.8125rem] text-muted-foreground outline-none transition-colors duration-150 motion-reduce:transition-none",
+        "hover:bg-card/70 hover:text-foreground focus-visible:ring-3 focus-visible:ring-ring/50 [&_svg.lucide]:[stroke-width:1.75]",
+        expanded && "border-solid bg-card/60",
+      )}
+    >
+      <Icon aria-hidden className="size-[15px] shrink-0" />
+      <span className={cn("truncate", user?.via === "tap" && "font-mono text-[0.75rem]")}>
+        {user?.via === "tap" ? said : `“${said}”`}
+      </span>
+      <span aria-hidden className="text-input">
+        →
+      </span>
+      <span className="flex min-w-0 items-center gap-1.5">
+        <LayoutTemplateIcon aria-hidden className="size-[15px] shrink-0" />
+        <span className="truncate">{built}</span>
+      </span>
+      <span className="font-mono text-[0.75rem] tabular-nums">{time}</span>
+      <ChevronDownIcon
+        aria-hidden
+        className={cn("size-4 shrink-0 transition-transform duration-150 motion-reduce:transition-none", expanded && "rotate-180")}
+      />
+    </button>
+  );
+});
+
 type AgentProps = {
   item: AgentItem;
   surfaceExists: boolean;
@@ -202,9 +372,9 @@ const AgentEntry = memo(function AgentEntry(props: AgentProps) {
       {item.status === "error" && <ErrorLine item={item} />}
       {item.mode === "a2ui" ? (
         // Reserved even when empty: the caption lands late and must not push the chip down.
-        <p className="min-h-[1.5em] w-full max-w-[560px] truncate text-[0.9375rem] text-muted-foreground">{item.caption}</p>
+        <p className="min-h-[1.5em] w-full max-w-(--surface-w) truncate text-[0.9375rem] text-muted-foreground">{item.caption}</p>
       ) : (
-        item.caption && <p className="w-full max-w-[560px] truncate text-[0.9375rem] text-muted-foreground">{item.caption}</p>
+        item.caption && <p className="w-full max-w-(--surface-w) truncate text-[0.9375rem] text-muted-foreground">{item.caption}</p>
       )}
       <TurnChip item={item} />
     </article>
@@ -266,7 +436,7 @@ function InPlaceLine({ surfaceId, pending = false }: { surfaceId?: string; pendi
 function SurfaceSkeleton() {
   // Mirrors Surface's pre-root frame (a2ui/Surface.tsx) class for class, so the swap is invisible.
   return (
-    <div className="relative w-full max-w-[560px] rounded-xl border bg-card p-5 text-card-foreground">
+    <div className="relative w-full max-w-(--surface-w) rounded-xl border bg-card p-5 text-card-foreground">
       <div className="flex flex-col gap-3" aria-busy="true" aria-label="Building">
         <div className="bb-skeleton h-7 w-2/5" />
         <div className="bb-skeleton h-10 w-full" />
@@ -278,7 +448,7 @@ function SurfaceSkeleton() {
 
 function WidgetSkeleton() {
   return (
-    <div aria-label="Waiting for the widget" className="w-full max-w-[560px] rounded-xl border bg-card">
+    <div aria-label="Waiting for the widget" className="w-full max-w-(--surface-w) rounded-xl border bg-card">
       <div className="border-b px-5 py-3.5">
         <div className="bb-skeleton h-5 w-1/3" />
       </div>
@@ -293,7 +463,7 @@ function WidgetSkeleton() {
 
 function TextReply({ text }: { text: string }) {
   return (
-    <div className="w-full max-w-[560px]">
+    <div className="w-full max-w-(--surface-w)">
       <p className="mb-1.5 font-mono text-[0.6875rem] uppercase tracking-[0.12em] text-muted-foreground">
         no widget fits · text reply
       </p>
@@ -306,7 +476,7 @@ function ErrorLine({ item }: { item: AgentItem }) {
   return (
     <div
       role="alert"
-      className="flex w-full max-w-[560px] items-center gap-3 rounded-lg border border-destructive/30 bg-card py-1.5 pr-1.5 pl-3.5 text-[0.875rem]"
+      className="flex w-full max-w-(--surface-w) items-center gap-3 rounded-lg border border-destructive/30 bg-card py-1.5 pr-1.5 pl-3.5 text-[0.875rem]"
     >
       <span aria-hidden className="size-1.5 shrink-0 rounded-full bg-destructive" />
       <span className="min-w-0 flex-1 truncate text-destructive" title={item.error}>

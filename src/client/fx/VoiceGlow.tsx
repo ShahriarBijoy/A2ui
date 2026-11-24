@@ -16,7 +16,18 @@ const readSweep = () => ({ processing: glowPhase(store.getState()) === "processi
  * The composer's glow: the live microphone while Space is held, a sweeping beam while a turn runs, gone
  * otherwise. The stream is the voice lane's own recording (micTap), never a second microphone.
  */
-export function VoiceGlow({ phase, className, children }: { phase: GlowPhase; className?: string; children: ReactNode }) {
+export function VoiceGlow({
+  phase,
+  className,
+  theme = "light",
+  children,
+}: {
+  phase: GlowPhase;
+  className?: string;
+  /** The host's background: "dark" for the stage's voice dock. */
+  theme?: "light" | "dark";
+  children: ReactNode;
+}) {
   const stream = useSyncExternalStore(micStream.subscribe, micStream.get, () => null);
   const reduced = useReducedMotion();
   // Created once and sampled by the beam's own frame loop.
@@ -24,7 +35,7 @@ export function VoiceGlow({ phase, className, children }: { phase: GlowPhase; cl
   return (
     <VoiceBeam
       type="default"
-      theme="light"
+      theme={theme}
       className={className}
       active={phase !== "off"}
       stream={phase === "listening" ? stream : null}

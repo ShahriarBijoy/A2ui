@@ -13,12 +13,25 @@ import type { A2uiOrigin, Knob, SurfaceSnapshot, ThreadEntry, TurnInput, TurnReq
 import { LIMITS } from "@shared/protocol";
 import { resolveActionContext } from "@/a2ui/evaluate";
 import { applyMessage, containsDemoData, type ApplyResult } from "@/a2ui/processor";
-import type { AgentItem, AppState, StoreApi, SurfaceState, ThreadItem, TurnMetrics, WireEntry } from "@/state";
+import {
+  countTurns,
+  loadSessions,
+  MAX_SESSIONS,
+  saveSessions,
+  sessionIcon,
+  sessionTitle,
+  UNTITLED,
+  type SessionSnapshot,
+  type SessionStorage,
+} from "@/sessions";
+import type { AgentItem, AppState, SessionMeta, StoreApi, SurfaceState, ThreadItem, TurnMetrics, WireEntry } from "@/state";
 
 /** The wire log is for reading on stage; older entries are not needed. */
 const WIRE_LIMIT = 400;
 
-export function initialState(): AppState {
+const EMPTY_SESSION: SessionMeta = { id: "session", title: UNTITLED, icon: null, createdAt: 0, updatedAt: 0, turns: 0 };
+
+export function initialState(session: SessionMeta = EMPTY_SESSION): AppState {
   return {
     mode: "a2ui",
     decision: true,
@@ -33,6 +46,8 @@ export function initialState(): AppState {
     transcript: { final: "", interim: "", listening: false },
     replaying: false,
     recordings: {},
+    sessions: [session],
+    activeSessionId: session.id,
   };
 }
 
@@ -155,17 +170,184 @@ function firstUi(metrics: TurnMetrics, now: number): TurnMetrics {
   return metrics.clientFirstUiMs === undefined ? { ...metrics, clientFirstUiMs: now - metrics.startedAt } : metrics;
 }
 
-export function createStore(): StoreApi {
-  let state = initialState();
+export type StoreOptions = {
+  /** Where sessions are saved. None (the default) keeps them for this page only. */
+  storage?: SessionStorage | null;
+  /** Wall clock for session times (Date.now). */
+  clock?: () => number;
+  /** Runs a save after the current event, so saving never delays a render. Default: a 0 ms timer. */
+  defer?: (fn: () => void) => void;
+};
+
+export function createStore(opts: StoreOptions = {}): StoreApi {
+  const storage = opts.storage ?? null;
+  const clock = opts.clock ?? (() => Date.now());
+  const defer = opts.defer ?? ((fn: () => void) => void setTimeout(fn, 0));
+  let state: AppState;
   const listeners = new Set<() => void>();
   let wireSeq = 0;
   let turnSeq = 0;
   let itemSeq = 0;
   let surfaceSeq = 0;
-  /** Every surface id seen this session, so nextSurfaceId never repeats one, even after Esc. */
+  let sessionSeq = 0;
+  /** Every surface id seen this page, so nextSurfaceId never repeats one, even after Esc. */
   const seenSurfaceIds = new Set<string>();
-  /** Surfaces that have been made the newest once; a later root on them is an update, not a new step. */
+  /** Surfaces of the open session that have been made the newest once; a later root on them is an update, not a new step. */
   const promotedSurfaceIds = new Set<string>();
+  /** The sessions that are not open, by id. The open one lives in `state`. */
+  const others = new Map<string, SessionSnapshot>();
+  /** Turns of a session that was left or deleted while they ran: their late events must land nowhere. */
+  const retiredTurns = new Set<string>();
+
+  // ── Sessions ──
+  const freshMeta = (): SessionMeta => {
+    const now = clock();
+    const id = "ses-" + now.toString(36) + "-" + (++sessionSeq).toString(36) + Math.random().toString(36).slice(2, 6);
+    return { id, title: UNTITLED, icon: null, createdAt: now, updatedAt: now, turns: 0 };
+  };
+
+  const sortSessions = (list: SessionMeta[]): SessionMeta[] => list.slice().sort((a, b) => b.updatedAt - a.updatedAt);
+
+  /** The open session's meta, recomputed from its thread and screens; `touch` marks it as just used. */
+  const withOpenMeta = (s: AppState, touch: boolean): AppState => {
+    const index = s.sessions.findIndex((m) => m.id === s.activeSessionId);
+    const old = index >= 0 ? s.sessions[index] : { ...freshMeta(), id: s.activeSessionId };
+    const title = sessionTitle(s.thread);
+    const icon = sessionIcon(s.surfaces);
+    const turns = countTurns(s.thread);
+    const updatedAt = touch ? clock() : old.updatedAt;
+    if (index >= 0 && old.title === title && old.icon === icon && old.turns === turns && old.updatedAt === updatedAt) return s;
+    const meta: SessionMeta = { ...old, title, icon, turns, updatedAt };
+    return { ...s, sessions: sortSessions([meta, ...s.sessions.filter((m) => m.id !== meta.id)]) };
+  };
+
+  /** The open session as a snapshot. Leaving it stops its running turns for good. */
+  const snapshotOpen = (s: AppState, leaving: boolean): SessionSnapshot => {
+    let thread = s.thread;
+    if (leaving) {
+      if (s.activeTurnId) retiredTurns.add(s.activeTurnId);
+      thread = s.thread.map((i) => {
+        if (i.kind !== "agent" || (i.status !== "pending" && i.status !== "streaming")) return i;
+        retiredTurns.add(i.turnId);
+        return { ...i, status: "done" as const };
+      });
+    }
+    const meta = s.sessions.find((m) => m.id === s.activeSessionId) ?? { ...freshMeta(), id: s.activeSessionId };
+    return {
+      meta: { ...meta, title: sessionTitle(thread), icon: sessionIcon(s.surfaces), turns: countTurns(thread) },
+      thread,
+      surfaces: s.surfaces,
+      newestSurfaceId: s.newestSurfaceId,
+      wire: s.wire,
+      pool: { predicted: [], used: s.pool.used, counts: s.pool.counts },
+    };
+  };
+
+  /** `base` with `snap` as the open session. Settings, totals, transcript and recordings stay. */
+  const openSnapshot = (snap: SessionSnapshot, base: AppState): AppState => {
+    promotedSurfaceIds.clear();
+    for (const surface of Object.values(snap.surfaces)) {
+      seenSurfaceIds.add(surface.id);
+      if (surface.components.root !== undefined) promotedSurfaceIds.add(surface.id);
+    }
+    return {
+      ...base,
+      thread: snap.thread,
+      surfaces: snap.surfaces,
+      newestSurfaceId: snap.newestSurfaceId,
+      activeTurnId: null,
+      replaying: false,
+      wire: snap.wire,
+      pool: { predicted: [], used: snap.pool.used, counts: snap.pool.counts },
+      activeSessionId: snap.meta.id,
+    };
+  };
+
+  /** `base` with a fresh empty session open. */
+  const openFresh = (base: AppState, meta: SessionMeta): AppState => {
+    promotedSurfaceIds.clear();
+    return {
+      ...base,
+      thread: [],
+      surfaces: {},
+      newestSurfaceId: null,
+      activeTurnId: null,
+      replaying: false,
+      wire: [],
+      pool: { predicted: [], used: [], counts: {} },
+      activeSessionId: meta.id,
+    };
+  };
+
+  /** At most MAX_SESSIONS: the oldest go first, never the open one. */
+  const capSessions = (list: SessionMeta[], keep: string): SessionMeta[] => {
+    const out = list.slice();
+    for (let i = out.length - 1; i >= 0 && out.length > MAX_SESSIONS; i--) {
+      if (out[i].id === keep) continue;
+      others.delete(out[i].id);
+      out.splice(i, 1);
+    }
+    return out;
+  };
+
+  let saveQueued = false;
+  /** Saves every session after the current event. Never per streamed event: at turn ends and session changes. */
+  const save = () => {
+    if (!storage || saveQueued) return;
+    saveQueued = true;
+    defer(() => {
+      saveQueued = false;
+      try {
+        const s = state;
+        const open = snapshotOpen(s, false);
+        const snaps: SessionSnapshot[] = [];
+        for (const m of s.sessions) {
+          const snap = m.id === s.activeSessionId ? open : others.get(m.id);
+          if (snap) snaps.push(snap);
+        }
+        saveSessions(storage, snaps);
+      } catch (err) {
+        // Saving is a convenience; the stage keeps running without it.
+        console.error("[sessions] could not save sessions", err);
+      }
+    });
+  };
+
+  /** Restored ids must not collide with this page's: a new "t1" would find the old turn's item. */
+  const seedCounters = (snaps: readonly SessionSnapshot[]) => {
+    const n = (s: string, re: RegExp) => {
+      const m = re.exec(s);
+      return m ? Number(m[1]) : 0;
+    };
+    for (const snap of snaps) {
+      for (const item of snap.thread) {
+        turnSeq = Math.max(turnSeq, n(item.turnId, /^t(\d+)$/));
+        itemSeq = Math.max(itemSeq, n(item.id, /^[ua](\d+)$/));
+      }
+      for (const w of snap.wire) wireSeq = Math.max(wireSeq, w.seq);
+    }
+  };
+
+  // Open the most recent saved session, or a fresh one. Storage trouble never stops the app.
+  {
+    let loaded: SessionSnapshot[] = [];
+    if (storage) {
+      try {
+        loaded = loadSessions(storage);
+      } catch (err) {
+        console.error("[sessions] could not load saved sessions; starting fresh", err);
+        loaded = [];
+      }
+    }
+    seedCounters(loaded);
+    const first = loaded[0];
+    if (first) {
+      for (const snap of loaded.slice(1)) others.set(snap.meta.id, snap);
+      state = openSnapshot(first, { ...initialState(first.meta), sessions: loaded.map((s) => s.meta) });
+    } else {
+      state = initialState(freshMeta());
+    }
+  }
 
   const set = (next: AppState) => {
     if (next === state) return;
@@ -273,17 +455,82 @@ export function createStore(): StoreApi {
 
     clearThread() {
       promotedSurfaceIds.clear();
-      set({
-        ...state,
-        thread: [],
-        surfaces: {},
-        newestSurfaceId: null,
-        activeTurnId: null,
-        // The replay turn's own done/failTurn can no longer find its item after this, so reset here.
-        replaying: false,
-        wire: [],
-        pool: { predicted: [], used: [], counts: {} },
-      });
+      set(
+        withOpenMeta(
+          {
+            ...state,
+            thread: [],
+            surfaces: {},
+            newestSurfaceId: null,
+            activeTurnId: null,
+            // The replay turn's own done/failTurn can no longer find its item after this, so reset here.
+            replaying: false,
+            wire: [],
+            pool: { predicted: [], used: [], counts: {} },
+          },
+          false,
+        ),
+      );
+      save();
+    },
+
+    newSession() {
+      if (state.thread.length === 0) return;
+      const leaving = snapshotOpen(state, true);
+      others.set(leaving.meta.id, leaving);
+      const meta = freshMeta();
+      const listed = state.sessions.map((m) => (m.id === leaving.meta.id ? leaving.meta : m));
+      const sessions = capSessions(sortSessions([meta, ...listed]), meta.id);
+      set({ ...openFresh(state, meta), sessions });
+      save();
+    },
+
+    switchSession(id) {
+      if (id === state.activeSessionId) return;
+      const target = others.get(id);
+      if (!target) return;
+      const leaving = snapshotOpen(state, true);
+      others.delete(id);
+      let sessions: SessionMeta[];
+      if (leaving.thread.length > 0) {
+        others.set(leaving.meta.id, leaving);
+        sessions = state.sessions.map((m) => (m.id === leaving.meta.id ? leaving.meta : m));
+      } else {
+        // An empty session is not worth keeping once you leave it.
+        sessions = state.sessions.filter((m) => m.id !== leaving.meta.id);
+      }
+      set({ ...openSnapshot(target, state), sessions });
+      save();
+    },
+
+    deleteSession(id) {
+      if (id !== state.activeSessionId) {
+        if (!state.sessions.some((m) => m.id === id)) return;
+        others.delete(id);
+        set({ ...state, sessions: state.sessions.filter((m) => m.id !== id) });
+        save();
+        return;
+      }
+      snapshotOpen(state, true);
+      const rest = state.sessions.filter((m) => m.id !== id);
+      const next = rest.find((m) => others.has(m.id));
+      const snap = next ? others.get(next.id) : undefined;
+      if (snap) {
+        others.delete(snap.meta.id);
+        set({ ...openSnapshot(snap, state), sessions: rest });
+      } else {
+        const meta = freshMeta();
+        set({ ...openFresh(state, meta), sessions: [meta] });
+      }
+      save();
+    },
+
+    deleteAllSessions() {
+      snapshotOpen(state, true);
+      others.clear();
+      const meta = freshMeta();
+      set({ ...openFresh(state, meta), sessions: [meta] });
+      save();
     },
 
     beginTurn({ input, display, via, replay = false }) {
@@ -300,20 +547,26 @@ export function createStore(): StoreApi {
         replay,
         retry: { input, display, via },
       };
-      set({
-        ...state,
-        thread: [...state.thread, user, agent],
-        activeTurnId: turnId,
-        pool: { ...state.pool, used: [] },
-        // A replay re-shows old numbers; session totals count only turns measured in this session.
-        totals: replay ? state.totals : { ...state.totals, turns: state.totals.turns + 1 },
-        replaying: replay ? true : state.replaying,
-        recordings: { ...state.recordings, [turnId]: { display, via, mode: state.mode, events: [] } },
-      });
+      set(
+        withOpenMeta(
+          {
+            ...state,
+            thread: [...state.thread, user, agent],
+            activeTurnId: turnId,
+            pool: { ...state.pool, used: [] },
+            // A replay re-shows old numbers; page totals count only turns measured on this page visit.
+            totals: replay ? state.totals : { ...state.totals, turns: state.totals.turns + 1 },
+            replaying: replay ? true : state.replaying,
+            recordings: { ...state.recordings, [turnId]: { display, via, mode: state.mode, events: [] } },
+          },
+          true,
+        ),
+      );
       return turnId;
     },
 
     applyTurnEvent(turnId, ev) {
+      if (retiredTurns.has(turnId)) return;
       const index = findAgentIndex(state.thread, turnId);
       if (index < 0) return;
       const now = performance.now();
@@ -433,10 +686,17 @@ export function createStore(): StoreApi {
         // numbers), but session totals and pool use counts must not count the same turn twice.
         s = { ...s, totals: state.totals, pool: { ...s.pool, counts: state.pool.counts } };
       }
-      set({ ...s, thread: withAgent(s.thread, index, a) });
+      const next: AppState = { ...s, thread: withAgent(s.thread, index, a) };
+      if (ev.type !== "done") {
+        set(next);
+        return;
+      }
+      set(withOpenMeta(next, true));
+      save();
     },
 
     failTurn(turnId, message) {
+      if (retiredTurns.has(turnId)) return;
       const index = findAgentIndex(state.thread, turnId);
       if (index < 0) return;
       const a = state.thread[index] as AgentItem;
@@ -448,7 +708,8 @@ export function createStore(): StoreApi {
         set(s);
         return;
       }
-      set({ ...s, thread: withAgent(s.thread, index, { ...a, status: "error", error: message }) });
+      set(withOpenMeta({ ...s, thread: withAgent(s.thread, index, { ...a, status: "error", error: message }) }, true));
+      save();
     },
 
     applyA2ui(msg, origin, turnId) {
@@ -542,7 +803,17 @@ export function surfaceStreaming(s: AppState, surfaceId: string): boolean {
   );
 }
 
-export const store: StoreApi = createStore();
+function browserStorage(): SessionStorage | null {
+  try {
+    return typeof localStorage === "undefined" ? null : localStorage;
+  } catch (err) {
+    // Some privacy modes throw on access; sessions then last for the page only.
+    console.warn("[sessions] localStorage unavailable; sessions last until the page reloads", err);
+    return null;
+  }
+}
+
+export const store: StoreApi = createStore({ storage: browserStorage() });
 
 /** Selectors must return state slices (stable references), never fresh arrays or objects. */
 export function useStore<T>(selector: (s: AppState) => T): T {
