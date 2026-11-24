@@ -5,7 +5,7 @@ import { setAt } from "@shared/pointer";
 import type { SurfaceState } from "../src/client/state";
 import { FIXTURE_CATALOG_ID } from "../src/client/a2ui/fixtures";
 import { applyMessage } from "../src/client/a2ui/processor";
-import { PATCH_EXPECT, changedLeaves, checkPatchOutcome, countControl, dataLeaves, dataOnlyViolations, listedOptions, parseTime, planPatch, summaryNotices, timeControls } from "./smoke";
+import { PATCH_EXPECT, changedLeaves, checkPatchOutcome, countControl, dataLeaves, dataOnlyViolations, listedOptions, parseTime, planPatch, summaryNotices, timeControls, weatherBricks, weatherCheck } from "./smoke";
 
 // The talk clock (DEV_NOW); date knobs list today..today+14 from it.
 const NOW = new Date(2026, 10, 25, 18, 45);
@@ -293,5 +293,41 @@ describe("dataOnlyViolations", () => {
 
   test("dataLeaves: strings trimmed, numbers as text, nested", () => {
     expect([...dataLeaves({ a: [" x ", 4.5, null, { b: "y", c: true }], d: "" })]).toEqual(["x", "4.5", "y"]);
+  });
+});
+
+describe("weather lines", () => {
+  test("pass only when weather data arrived (a weather fetch, ok, records ≥ 1); a search is noted", () => {
+    expect(weatherCheck([{ source: "weather", ok: true, records: 1, ms: 310 }])).toEqual({ ok: true, reason: null, notes: ["weather 310 ms / 1 rec"] });
+    expect(weatherCheck([{ source: "weather", ok: false, records: 0, ms: 120, error: 'No place called "X" was found' }])).toEqual({
+      ok: false,
+      reason: "weather data did not arrive",
+      notes: ['weather failed: No place called "X" was found'],
+    });
+    expect(weatherCheck([{ source: "search", ok: true, records: 3, ms: 3000 }])).toEqual({ ok: false, reason: "no weather data line", notes: ["1 search made for a weather line"] });
+    expect(weatherCheck([])).toMatchObject({ ok: false, reason: "no weather data line" });
+    expect(weatherCheck([{ source: "weather", ok: true, records: 1, ms: 300 }, { source: "search", ok: true, records: 1, ms: 2000 }]).ok).toBe(true);
+  });
+
+  test("weatherBricks names the area Chart, bound Icons, the days List and the credit the screen drew", () => {
+    const msgs = [
+      { version: "1.0", createSurface: { surfaceId: "w", catalogId: FIXTURE_CATALOG_ID } },
+      {
+        version: "1.0",
+        updateComponents: {
+          surfaceId: "w",
+          components: [
+            { id: "root", component: "Column", children: ["hours", "days", "credit"] },
+            { id: "hours", component: "Chart", type: "area", items: { "@path": "/weather/hours" } },
+            { id: "days", component: "List", children: { path: "/weather/days", componentId: "d" } },
+            { id: "d", component: "Icon", name: { "@path": "icon" } },
+            { id: "credit", component: "Text", text: "Weather data by Open-Meteo.com" },
+          ],
+        },
+      },
+    ];
+    let surfaces = {};
+    for (const m of msgs) surfaces = applyMessage(surfaces, m, { now: 1, turnId: "t" }).surfaces;
+    expect(weatherBricks((surfaces as Record<string, SurfaceState>).w).sort()).toEqual(["area Chart", "bound Icon", "credit", "days List"]);
   });
 });

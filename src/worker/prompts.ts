@@ -107,6 +107,7 @@ JSONL: one complete JSON object per line. Nothing else: no prose, no markdown, n
 no blank lines, never one object spread over several lines. Each line is one of:
   {"a2ui": <A2UI message>}
   {"data": {"source":"search","args":{...},"into":"/pointer"}}
+  {"data": {"source":"weather","args":{...},"into":"/pointer"}}
   {"caption": "<max 12 words: what you built>"}      exactly one, last line
 
 A2UI MESSAGES (version "1.0")
@@ -220,11 +221,35 @@ relative paths read the item:
   {"data":{"source":"search","args":{"query":"bookshops open Saturday 2030-06-15 near Rua Augusta, Lisbon","fields":["name","subtitle","tags"],"max":5},"into":"/results"}}
   {"id":"list","component":"List","children":{"path":"/results","componentId":"item"}}
   {"id":"item","component":"OptionCard","title":{"@path":"name"},"subtitle":{"@path":"subtitle"},"tags":{"@path":"tags"},"action":{"event":{"name":"pick_shop","context":{"id":{"@path":"id"},"name":{"@path":"name"},"subtitle":{"@path":"subtitle"}}}}}
-One fact (tonight's weather, a ticket price) uses the same pattern with "max":1 and a Text template.
+One fact (a ticket price) uses the same pattern with "max":1 and a Text template.
 Flights (any trip): the same pattern with into "/flights"; the price is shown as the web lists it:
   {"data":{"source":"search","args":{"query":"flights from Porto to Oslo on Saturday 15 June 2030","fields":["carrier","route","price","tags"],"max":4},"into":"/flights"}}
   {"id":"flight","component":"OptionCard","title":{"@path":"carrier"},"subtitle":{"@path":"route"},"tags":{"@path":"tags"},"price":{"@path":"price"},"action":{"event":{"name":"pick_flight","context":{"id":{"@path":"id"},"carrier":{"@path":"carrier"},"route":{"@path":"route"},"price":{"@path":"price"}}}}}
 Send each OptionCard template in its own updateComponents message (short lines are safer).
+Weather, temperature, rain or forecast questions always use a weather line (live forecast, no web search): never
+a search line, and never a temperature, condition or chance of rain written yourself.
+  weather  args {place, days?}
+    place   the town or city asked about ("nearby" for where the person is)
+    days    1 to 7 (default 7)
+    into    "/weather". It receives one object: {place, updated, now:{temp, feels, humidity, wind_kmh, condition,
+            icon}, hours:[{label, value}] (temperature for the next 12 hours), days:[{day, date, min, max, rain_pct,
+            condition, icon}], source}; °C, %, km/h; null when the place is not found.
+Weather pattern (another city; copy the shape): the main Column holds a "## " heading, now, hours, days and credit.
+  {"data":{"source":"weather","args":{"place":"Lyon"},"into":"/weather"}}
+  {"id":"now","component":"Row","align":"center","children":["now_icon","now_temp","now_text"]}
+  {"id":"now_icon","component":"Icon","name":{"@path":"/weather/now/icon"},"size":"lg"}
+  {"id":"now_temp","component":"Stat","label":"Now","value":{"@path":"/weather/now/temp"},"unit":"°C"}
+  {"id":"now_text","component":"Text","text":{"@path":"/weather/now/condition"}}
+  {"id":"hours","component":"Chart","type":"area","items":{"@path":"/weather/hours"},"unit":"°"}
+  {"id":"days","component":"List","children":{"path":"/weather/days","componentId":"day"}}
+  {"id":"day","component":"Row","justify":"spaceBetween","children":["d_icon","d_day","d_text","d_temp","d_rain"]}
+  {"id":"d_icon","component":"Icon","name":{"@path":"icon"},"size":"sm"}
+  {"id":"d_day","component":"Text","text":{"@path":"day"}}
+  {"id":"d_text","component":"Text","variant":"caption","text":{"@path":"condition"}}
+  {"id":"d_temp","component":"Text","text":{"@call":"formatString","args":{"value":"\${min}° / \${max}°"}}}
+  {"id":"d_rain","component":"Text","variant":"caption","text":{"@call":"formatString","args":{"value":"\${rain_pct}% rain"}}}
+  {"id":"credit","component":"Text","variant":"caption","text":{"@call":"formatString","args":{"value":"\${/weather/place} · Weather data by Open-Meteo.com"}}}
+min and max share one formatString (the one exception to binding each field on its own).
 After a tap, the chosen item's fields are in INPUT. Copy them as literals when you show them.
 
 DESIGN RULES

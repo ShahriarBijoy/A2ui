@@ -14,6 +14,7 @@ import { route } from "./router";
 import { runSearch } from "./search";
 import { createSonioxKey } from "./soniox";
 import { parseTurnRequest, runTurn, sseResponse, type TurnDeps } from "./turn";
+import { fetchWeather } from "./weather";
 
 type AppEnv = { Bindings: Env };
 
@@ -74,6 +75,7 @@ app.post("/api/turn", async (c) => {
     search: (req, signal) => runSearch(req, webSearch, context, signal),
     // An arrow, not a bare fetch reference: workerd throws "Illegal invocation" on a detached fetch.
     ogImages: (urls, signal, timeoutMs) => fetchOgImages(urls, (input, init) => fetch(input, init), signal, { timeoutMs }),
+    weather: (req, signal) => fetchWeather(req, (input, init) => fetch(input, init), signal),
     now: () => performance.now(),
     composeTimeoutMs: LIMITS.composeTimeoutMs,
     routeGuardMs: LIMITS.routerTimeoutMs + 400,

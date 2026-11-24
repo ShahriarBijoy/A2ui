@@ -2,6 +2,7 @@ import { describe, expect, test } from "bun:test";
 import type { Knob, RouteResult, TurnEvent, TurnRequest } from "@shared/protocol";
 import type { Llm, LlmUsage, Prompt, TextStream, ThinkingSetting, WidgetsReply } from "./claude";
 import type { SearchOutcome, SearchRequest } from "./search";
+import { MAX_WEATHER_PER_TURN, type WeatherOutcome, type WeatherRecord, type WeatherRequest } from "./weather";
 import { COMPOSER_RETRY_NOTE, composerUnreachableNote } from "./prompts";
 import {
   bindsPath,
@@ -963,6 +964,161 @@ describe("runTurn: live search data lines", () => {
     const events = await p;
     expect(events.map(label)).toEqual(["llm:createSurface", "caption", "usage", "done"]);
     expect(signal!.aborted).toBe(true);
+  });
+});
+
+describe("runTurn: weather data lines", () => {
+  const CREATE = '{"a2ui":{"version":"1.0","createSurface":{"surfaceId":"s3","catalogId":"http://test/catalog/brick-box/v1"}}}';
+  const ROOT = '{"a2ui":{"version":"1.0","updateComponents":{"surfaceId":"s3","components":[{"id":"root","component":"Column","children":["hours","days"]},{"id":"hours","component":"Chart","type":"area","items":{"@path":"/weather/hours"}},{"id":"days","component":"List","children":{"path":"/weather/days","componentId":"day"}},{"id":"day","component":"Text","text":{"@path":"day"}}]}}}';
+  const WEATHER = (place: string, extra = "") => `{"data":{"source":"weather","args":{"place":"${place}"${extra}},"into":"/weather"}}`;
+  const record: WeatherRecord = {
+    place: "Porto, Portugal",
+    updated: "15:00",
+    now: { temp: 14, feels: 13, humidity: 80, wind_kmh: 12, condition: "Light rain", icon: "rain" },
+    hours: [{ label: "15:00", value: 14 }],
+    days: [{ day: "Today", date: "2030-06-15", min: 11, max: 16, rain_pct: 60, condition: "Light rain", icon: "rain" }],
+    source: "https://open-meteo.com/",
+  };
+  const label = (e: TurnEvent) => (e.type === "a2ui" ? `${e.origin}:${Object.keys(e.msg)[1]}` : e.type);
+  const valueOf = (e: TurnEvent | undefined) => (e as { msg: { updateDataModel: { surfaceId: string; path: string; value: unknown } } }).msg.updateDataModel;
+
+  test("a weather line delivers one object to its path, then a fetch event (source weather, records 1), then done; no search", async () => {
+    const asked: WeatherRequest[] = [];
+    let searched = false;
+    const events = await collect(
+      request({ decision: false }),
+      deps({
+        llm: fakeLlm([`${CREATE}\n${ROOT}\n${WEATHER("Porto")}\n{"caption":"Weather"}\n`]),
+        weather: async (r) => {
+          asked.push(r);
+          return { ok: true, record };
+        },
+        search: async () => {
+          searched = true;
+          return { ok: false, error: "unused" };
+        },
+      }),
+    );
+    expect(asked).toEqual([{ place: "Porto", days: 7 }]);
+    expect(searched).toBe(false);
+    // The fake lookup answers at once, so its data lands before the caption.
+    expect(events.map(label)).toEqual(["llm:createSurface", "llm:updateComponents", "data:updateDataModel", "fetch", "caption", "usage", "done"]);
+    expect(valueOf(events[2])).toEqual({ surfaceId: "s3", path: "/weather", value: record });
+    expect(events[3]).toEqual({ type: "fetch", source: "weather", query: "Porto", ok: true, records: 1, ms: expect.any(Number) });
+  });
+
+  test("an unknown place delivers null and a failed fetch event with the reason", async () => {
+    const warnings: string[] = [];
+    const events = await collect(
+      request({ decision: false }),
+      deps({
+        llm: fakeLlm([`${CREATE}\n${ROOT}\n${WEATHER("Xqzzy")}\n{"caption":"Weather"}\n`]),
+        weather: async () => ({ ok: false, error: 'No place called "Xqzzy" was found' }),
+        warn: (m) => void warnings.push(m),
+      }),
+    );
+    expect(valueOf(events.find((e) => e.type === "a2ui" && e.origin === "data"))).toEqual({ surfaceId: "s3", path: "/weather", value: null });
+    expect(events.find((e) => e.type === "fetch")).toEqual({
+      type: "fetch",
+      source: "weather",
+      query: "Xqzzy",
+      ok: false,
+      records: 0,
+      ms: expect.any(Number),
+      error: 'No place called "Xqzzy" was found',
+    });
+    expect(warnings).toContain('weather failed (No place called "Xqzzy" was found): Xqzzy');
+    expect(events.at(-1)).toEqual({ type: "done" });
+  });
+
+  test("place nearby is the venue's city; days is passed; a line without a place is skipped and counted", async () => {
+    const asked: WeatherRequest[] = [];
+    const weather = async (r: WeatherRequest): Promise<WeatherOutcome> => {
+      asked.push(r);
+      return { ok: true, record };
+    };
+    await collect(request({ decision: false }), deps({ llm: fakeLlm([`${CREATE}\n${WEATHER("nearby", ',"days":3')}\n`]), weather }));
+    expect(asked).toEqual([{ place: ctx.city, days: 3 }]);
+    const events = await collect(request({ decision: false }), deps({ llm: fakeLlm([`${CREATE}\n{"data":{"source":"weather","args":{},"into":"/weather"}}\n{"caption":"x"}\n`]), weather }));
+    expect(asked).toHaveLength(1);
+    expect(events.some((e) => e.type === "fetch")).toBe(false);
+    expect(events.find((e) => e.type === "usage")).toMatchObject({ skipped_lines: 1 });
+  });
+
+  test("weather lines never take a search slot: 3 searches and a weather line all run", async () => {
+    const searches = [1, 2, 3].map((i) => `{"data":{"source":"search","args":{"query":"thing ${i}","fields":["name"]},"into":"/r${i}"}}`);
+    const started: string[] = [];
+    const search = async (r: SearchRequest): Promise<SearchOutcome> => {
+      started.push(r.query);
+      return { ok: true, records: [{ id: "r1", name: "x", source: "https://example.org/" }], dropped: 0, searches: 1, inputTokens: 1, outputTokens: 1 };
+    };
+    const events = await collect(
+      request({ decision: false }),
+      deps({ llm: fakeLlm([`${CREATE}\n${WEATHER("Porto")}\n${searches.join("\n")}\n{"caption":"x"}\n`]), search, weather: async () => ({ ok: true, record }) }),
+    );
+    expect(started).toEqual(["thing 1", "thing 2", "thing 3"]);
+    const fetches = events.filter((e) => e.type === "fetch") as Extract<TurnEvent, { type: "fetch" }>[];
+    expect(fetches.every((f) => f.ok)).toBe(true);
+    expect(fetches.map((f) => f.source).sort()).toEqual(["search", "search", "search", "weather"]);
+  });
+
+  test("at most ${MAX_WEATHER_PER_TURN} weather lines per turn; a repeated path reuses its lookup", async () => {
+    const lines = [1, 2, 3, 4].map((i) => `{"data":{"source":"weather","args":{"place":"City ${i}"},"into":"/w${i}"}}`);
+    const asked: string[] = [];
+    const events = await collect(
+      request({ decision: false }),
+      deps({
+        llm: fakeLlm([`${CREATE}\n${lines.join("\n")}\n${lines[0]}\n{"caption":"x"}\n`]),
+        weather: async (r) => {
+          asked.push(r.place);
+          return { ok: true, record };
+        },
+      }),
+    );
+    expect(MAX_WEATHER_PER_TURN).toBe(3);
+    expect(asked).toEqual(["City 1", "City 2", "City 3"]);
+    expect(events.filter((e) => e.type === "fetch")).toContainEqual({ type: "fetch", source: "weather", query: "City 4", ok: false, records: 0, ms: 0, error: "too many weather lines" });
+    expect(events.filter((e) => e.type === "fetch")).toHaveLength(4);
+  });
+
+  test("a weather lookup past its own budget: null, fetch ok:false, the request is aborted; missing dep fails visibly", async () => {
+    let aborted = false;
+    const events = await collect(
+      request({ decision: false }),
+      deps({
+        llm: fakeLlm([`${CREATE}\n${WEATHER("Porto")}\n{"caption":"x"}\n`]),
+        weather: (_r, signal) => {
+          signal.addEventListener("abort", () => (aborted = true));
+          return new Promise<WeatherOutcome>(() => {});
+        },
+        fetchTimeoutMs: 10_000,
+        weatherTimeoutMs: 30,
+      }),
+    );
+    expect(events.find((e) => e.type === "fetch")).toMatchObject({ source: "weather", ok: false, error: "timed out after 30 ms" });
+    expect(valueOf(events.find((e) => e.type === "a2ui" && e.origin === "data")).value).toBeNull();
+    expect(aborted).toBe(true);
+    const none = await collect(request({ decision: false }), deps({ llm: fakeLlm([`${CREATE}\n${WEATHER("Porto")}\n`]) }));
+    expect(none.find((e) => e.type === "fetch")).toMatchObject({ source: "weather", ok: false, error: "weather is not configured" });
+  });
+
+  test("a weather List left outside root is retried once like a search List (template under the requested path)", async () => {
+    const orphan = '{"a2ui":{"version":"1.0","updateComponents":{"surfaceId":"s3","components":[{"id":"root","component":"Column","children":["t"]},{"id":"t","component":"Text","text":"## Weather"},{"id":"days","component":"List","children":{"path":"/weather/days","componentId":"day"}},{"id":"day","component":"Text","text":{"@path":"day"}}]}}}';
+    const llm = fakeLlm([`${CREATE}\n${orphan}\n${WEATHER("Porto")}\n{"caption":"x"}\n`]);
+    let calls = 0;
+    await collect(
+      request({ decision: false }),
+      deps({
+        llm,
+        weather: async () => {
+          calls++;
+          return { ok: true, record };
+        },
+      }),
+    );
+    expect(llm.prompts).toHaveLength(2);
+    expect(llm.prompts[1].user).toContain("The data for /weather/days is already requested and arriving");
+    expect(calls).toBe(1);
   });
 });
 

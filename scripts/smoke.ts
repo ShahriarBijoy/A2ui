@@ -41,7 +41,7 @@ const MAX_BLOCKS = 7;
  * The held-out lines exist only as summaries in lane-W-report.md; this wording is reconstructed and
  * matches scripts/live-search.ts (imported by copy, since importing that script would run it).
  */
-const HELD_OUT: readonly { id: string; title: string; say: string }[] = [
+const HELD_OUT: readonly { id: string; title: string; say: string; weather?: true }[] = [
   { id: "lisbon", title: "Held-out: Lisbon trip", say: "Plan a 3-day trip to Lisbon in March." },
   { id: "phones", title: "Held-out: phone plans", say: "Compare two phone plans for me." },
   { id: "dog", title: "Held-out: adopt a dog", say: "I want to adopt a dog. What do I need?" },
@@ -51,6 +51,9 @@ const HELD_OUT: readonly { id: string; title: string; say: string }[] = [
   { id: "plans3", title: "Held-out: three cheapest plans", say: "Compare the three cheapest mobile phone plans in Germany." },
   { id: "hamburg", title: "Held-out: Saturday in Hamburg", say: "Plan a Saturday in Hamburg for two of us, with times." },
   { id: "cafe", title: "Held-out: café with photo", say: "Show me a nice café near the venue with a photo and its rating." },
+  // Added with the weather data source (2026-11-24): test inputs only, never prompt text. Judged by weatherCheck too.
+  { id: "weather-today", title: "Held-out: weather today", say: "What's the weather in Bremen today?", weather: true },
+  { id: "weather-weekend", title: "Held-out: rain this weekend", say: "Will it rain in Hamburg this weekend?", weather: true },
 ];
 
 // ── CLI ───────────────────────────────────────────────────────────────────────
@@ -92,7 +95,8 @@ function demoKey(): string {
 
 // ── Jobs ──────────────────────────────────────────────────────────────────────
 
-type Job = { id: string; title: string; group: string; mode: Mode; steps: ScenarioStep[]; runs: number };
+/** needs "weather": the line passes only if weather data arrived (weatherCheck). */
+type Job = { id: string; title: string; group: string; mode: Mode; steps: ScenarioStep[]; runs: number; needs?: "weather" };
 
 function buildJobs(opts: Options): Job[] {
   const wanted = (id: string, group: string) => !opts.only || opts.only.has(id) || opts.only.has(group);
@@ -101,7 +105,9 @@ function buildJobs(opts: Options): Job[] {
     if (wanted(s.id, s.group)) jobs.push({ id: s.id, title: s.title, group: s.group, mode: "a2ui", steps: s.steps, runs: opts.runs });
   }
   for (const h of HELD_OUT) {
-    if (wanted(h.id, "heldout")) jobs.push({ id: h.id, title: h.title, group: "heldout", mode: "a2ui", steps: [{ say: h.say }], runs: opts.runs });
+    // "--only weather" selects the weather lines.
+    if (!wanted(h.id, "heldout") && !(h.weather && opts.only?.has("weather"))) continue;
+    jobs.push({ id: h.id, title: h.title, group: "heldout", mode: "a2ui", steps: [{ say: h.say }], runs: opts.runs, ...(h.weather ? { needs: "weather" as const } : {}) });
   }
   for (const mode of ["widgets", "html"] as const) {
     for (const s of SCENARIOS) {
@@ -332,6 +338,38 @@ function findTapTarget(surface: SurfaceState, prefix: string): { node: Node; act
 
 function sameJson(a: JsonValue | undefined, b: unknown): boolean {
   return JSON.stringify(a) === JSON.stringify(b);
+}
+
+// ── Weather lines ─────────────────────────────────────────────────────────────
+
+type FetchLike = { source: string; ok: boolean; records: number; ms: number; error?: string };
+
+/**
+ * A weather line passes only if weather data arrived: a "weather" fetch with ok and records ≥ 1. A search made
+ * for it is noted (the prompt says weather never searches), not failed.
+ */
+export function weatherCheck(fetches: readonly FetchLike[]): { ok: boolean; reason: string | null; notes: string[] } {
+  const weather = fetches.filter((f) => f.source === "weather");
+  const arrived = weather.filter((f) => f.ok).reduce((n, f) => n + f.records, 0);
+  const notes = weather.map((f) => (f.ok ? `weather ${f.ms} ms / ${f.records} rec` : `weather failed: ${f.error ?? "unknown"}`));
+  const searches = fetches.filter((f) => f.source === "search").length;
+  if (searches > 0) notes.push(`${searches} search${searches === 1 ? "" : "es"} made for a weather line`);
+  if (arrived >= 1) return { ok: true, reason: null, notes };
+  return { ok: false, reason: weather.length ? "weather data did not arrive" : "no weather data line", notes };
+}
+
+/** Which weather bricks the screen drew (informational): an area Chart, a bound Icon, a List over the days. */
+export function weatherBricks(surface: SurfaceState): string[] {
+  const out = new Set<string>();
+  for (const c of Object.values(surface.components)) {
+    if (c.status !== "ok") continue;
+    const p = c.def as unknown as Record<string, unknown>;
+    if (c.def.component === "Chart" && p.type === "area") out.add("area Chart");
+    if (c.def.component === "Icon" && isPlainObject(p.name)) out.add("bound Icon");
+    if (c.def.component === "List" && isChildTemplate(p.children) && /days/.test(p.children.path)) out.add("days List");
+    if (c.def.component === "Text" && JSON.stringify(p.text ?? "").includes("Open-Meteo")) out.add("credit");
+  }
+  return [...out];
 }
 
 // ── Patch outcome (a patch step is judged by what it changed) ─────────────────
@@ -598,7 +636,14 @@ function evaluate(
     patch: null,
   };
   for (const f of fetches) {
-    if (!f.ok) notes.push(`${f.source} failed: ${f.error ?? "unknown"}`);
+    if (!f.ok && f.source !== "weather") notes.push(`${f.source} failed: ${f.error ?? "unknown"}`);
+  }
+  if (job.needs === "weather") {
+    const w = weatherCheck(fetches);
+    notes.push(...w.notes);
+    if (w.reason) reasons.push(w.reason);
+  } else {
+    for (const f of fetches) if (!f.ok && f.source === "weather") notes.push(`weather failed: ${f.error ?? "unknown"}`);
   }
   if (agent.status === "error") reasons.push(`error: ${agent.error ?? "unknown"}`);
   else if (agent.status !== "done") reasons.push(`turn ended as ${agent.status}`);
@@ -616,6 +661,7 @@ function evaluate(
       result.blocks = visibleBlocks(surface);
       if (!nodes.some((n) => n.entry.status === "ok")) reasons.push("nothing rendered from root");
       if (result.blocks > MAX_BLOCKS) reasons.push(`${result.blocks} visible blocks`);
+      if (job.needs === "weather") notes.push(`bricks: ${weatherBricks(surface).join(", ") || "none of area Chart, bound Icon, days List, credit"}`);
       const lost = orphans(surface);
       if (lost.length) notes.push(`not reachable from root: ${lost.join(", ")}`);
       const invented = dataOnlyViolations(surface, delivered);
@@ -832,7 +878,8 @@ function scenarioChecks(results: StepResult[]): string[] {
   for (const r of results) {
     if (r.job.mode !== "a2ui") continue;
     const key = `${r.job.id}|${r.run}`;
-    const prev = runs.get(key) ?? { group: r.job.group, ok: true };
+    const group = r.job.needs === "weather" ? "weather" : r.job.group;
+    const prev = runs.get(key) ?? { group, ok: true };
     runs.set(key, { group: prev.group, ok: prev.ok && r.status === "pass" });
   }
   const line = (label: string, group: string, target: string) => {
@@ -846,6 +893,7 @@ function scenarioChecks(results: StepResult[]): string[] {
     line("Wildcards (bill, packing, quiz)", "wildcard", "≥ 80%"),
     line("Contrast (pink)", "contrast", "–"),
     line("Held-out lines", "heldout", "–"),
+    line("Weather lines (held-out)", "weather", "100%"),
   ].filter((l): l is string => l !== null);
 }
 
@@ -997,7 +1045,7 @@ async function main(): Promise<void> {
     `- Script tree: ${gitHead()}. Models reported by the Worker: ${models.join(", ") || "–"}.`,
     ...(opts.note ? [`- Note: ${opts.note}`] : []),
     `- a2ui: every scenario (all steps) and ${HELD_OUT.length} held-out lines, ${opts.runs}× each, decision model on. widgets and html: each scenario's opening line once, in the modes it lists.`,
-    "- Pass: at least one component rendered (widgets: a widget or text; html: a page); 0 refused and 0 validation errors in the real client processor; ≤ 7 visible blocks; no error; on a step that expects OptionCards, at least one OptionCard drawn by a List from data with a non-empty title (\"options N\" in the notes); every Image url and Rating value on screen was delivered by a data event in that session (\"invented: ids\" otherwise); no Alert or Badge on the summary step after a confirm_ tap (\"notice on summary: ids\").",
+    "- Pass: at least one component rendered (widgets: a widget or text; html: a page); 0 refused and 0 validation errors in the real client processor; ≤ 7 visible blocks; no error; on a step that expects OptionCards, at least one OptionCard drawn by a List from data with a non-empty title (\"options N\" in the notes); every Image url and Rating value on screen was delivered by a data event in that session (\"invented: ids\" otherwise); no Alert or Badge on the summary step after a confirm_ tap (\"notice on summary: ids\"); a weather line also needs weather data to arrive (a \"weather\" fetch, ok, records ≥ 1).",
     ...(opts.strict ? ["- --strict: a step also fails when its expected bricks or data are missing."] : []),
     "- Patch step (\"We're six, and later.\"), judged by its result in the real processor: if the screen before it has a people count (Stepper/Slider) and a time control (ChoicePicker of HH:mm, time or date+time DateTimeInput) with a later time on the same date, the route must patch with no usage event, the count must be 6, one time control must move later on the same date, and no other data value may change. Otherwise the route must compose, and a patch fails (\"later dropped\"). Per-run values are under \"Patch checks\".",
     "- Visible block (controller ruling): a top-level visual unit inside the root container. The root is unwrapped through Cards, single-child Columns and the first tab; each child of the main Column counts once, whatever it holds (a label/value Row, a List, a nested Column or Card, a Button).",

@@ -379,3 +379,66 @@ delivered in that session. Code evaluated: **6943acb** (smoke "Script tree"). No
 - Flight: step 2 options 2,3,3; search 2842 ms median (2823-3191); data 5.50 s; seat map 3/3; confirm 3/3.
 - 0 Alerts, 0 Badges, 0 refused, 0 invented, 0 "notice on summary" in these 36 lines. Widgets and HTML lines pass.
 - Raw captures: session scratchpad `bricks-eval/` (fix-dinner.md, fix-flight.md, raw-fix-*).
+
+## Live weather from Open-Meteo (branch weather, 2026-11-24 ~15:00-15:25 Berlin)
+Docs checked (open-meteo.com/en/docs, /en/docs/geocoding-api, /en/terms, the GitHub README for the licence) and live
+calls from the dev machine. Code: src/worker/weather.ts; saved answers in src/worker/fixtures/open-meteo-*.json.
+- Geocoding `GET https://geocoding-api.open-meteo.com/v1/search?name=<place>&count=1&language=en&format=json`, no key:
+  Bremen → `results[0]` {name, latitude, longitude, country "Germany", admin1, timezone "Europe/Berlin", ...}; a qualifier
+  after a comma works ("Hamburg, Germany"). **No match is HTTP 200 `{"generationtime_ms":...}` with no `results` key**
+  (also a 1-character name). ~0.10-0.15 s.
+- Forecast `GET https://api.open-meteo.com/v1/forecast` with latitude, longitude, current=temperature_2m,
+  apparent_temperature,relative_humidity_2m,wind_speed_10m,weather_code, hourly=temperature_2m,precipitation_probability,
+  weather_code, daily=weather_code,temperature_2m_max,temperature_2m_min,precipitation_probability_max, timezone=auto,
+  forecast_days=7; no key. `current.time` is place-local "YYYY-MM-DDTHH:mm" on a 15-minute grid (`interval` 900);
+  hourly starts at 00:00 of the local day (168 entries, counted); units °C, %, km/h (the defaults); `utc_offset_seconds` is
+  fixed per answer. Errors: HTTP 400 `{"error":true,"reason":"..."}` (checked with latitude 953). ~0.13 s.
+- WMO code table: the docs page (read through a summariser); the live answer contained 2, 3, 45, 48 and 61. The
+  mapping goes by code ranges (`wmoCondition`), so an undocumented code inside a group still reads sensibly.
+- Terms: the free API is for **non-commercial use only**; < 10,000 calls/day, 5,000/hour, 600/minute (per IP; per
+  Cloudflare user for Workers). Data CC BY 4.0. README: "Include an attribution link next to any location where
+  Open-Meteo data is displayed", e.g. [Weather data by Open-Meteo.com](https://open-meteo.com/). The Text brick has no
+  links, so the screen shows the credit as plain text (composer pattern); the record carries source
+  https://open-meteo.com/. The licence page itself came back empty when fetched.
+
+Rulings:
+- A "weather" data line makes one geocoding and one forecast request, 4 s for both (WEATHER_TIMEOUT_MS), aborted
+  when the client leaves; at most 3 weather lines per turn, counted on their own (they never take a search slot); a
+  retry or a repeated line for the same path reuses the lookup. Unknown place → `null` to `into` and a fetch event
+  ok:false "No place called "X" was found". "nearby"/"here" → STATE.city. No LLM call (the chip counts no LLM call).
+- **"Now" is the forecast's own `current.time`** (the place's local time), never the venue clock or DEV_NOW: under
+  DEV_NOW=2026-11-25T18:45 the weather still labels the real day "Today". On stage (no DEV_NOW) both agree.
+- forecast_days is always 7 (with fewer days an evening request runs out of hours); `days` (1-7) only trims the list.
+  Hours: 12 hourly temperatures from the current local hour. Numbers rounded to integers (-0 → 0); a null stays null.
+- Icons from the existing ICON_NAMES: 0-1 sun; 2-3 cloud; 45-48 cloud (fog); 50-59 umbrella (drizzle); 60-69 rain;
+  70-79 snow; 80-84 rain (showers); 85-86 snow; 95-99 rain (thunderstorm: the set has no lightning icon); any other
+  code has no condition and no icon.
+- Icon.name may be bound (`{"@path"}`), checked when drawn (outside the set: nothing); Chart type "area" (one
+  min..max scale, y labels at max/midpoint/min, x labels thinned to at most 6). a2ui.ts and catalog.ts changed for
+  these two (contract files; brief item 3).
+
+Eval at **a59ed91** (in-process Bun Worker, wrangler vars + .dev.vars keys, DEV_NOW=2026-11-25T18:45, composer
+claude-sonnet-5-5, search claude-haiku-5-5; 2026-11-24 15:19-15:23 Berlin):
+
+| line set | command | result | bar |
+|---|---|---|---|
+| weather | `--only weather --runs 3` | **6/6** | 6/6 |
+| flight | `--only flight --runs 5 --strict` | **5/5 scenario runs**, 22/22 lines | 5/5 |
+| dinner | `--only dinner --runs 5` | **5/5 scenario runs**, 22/22 lines | ≥ 4/5 |
+| other held-out | `--only lisbon,phones,dog,gift,haircut,plans3,hamburg,cafe --runs 1` | **8/8** | – |
+- Weather ("What's the weather in Bremen today?" / "Will it rain in Hamburg this weekend?"): first UI 1.85 s
+  (1.42-2.81) / 1.37 s (1.35-1.38); data arrived 2.15 s (1.73-3.38) / 1.67 s (1.62-1.89), before the screen was done
+  (5.03 / 4.75 s); weather fetch 94-398 ms; 0 web searches. Bricks: bound Icon 6/6, days List 6/6, credit 6/6, area
+  Chart 5/6 (Hamburg run 1 drew no hours chart, 4 blocks); 4-5 blocks. Days requested: Bremen 3, 3, 5; Hamburg 7, 7, 7.
+- Flight: options per run 2,2,2,1,3; search 2289 ms (1808-2922); data 4.63 s (4.26-5.40); seat map 5/5, confirm 5/5.
+  Widgets FlightSearchWidget 902 ms; HTML 1/1.
+- Dinner: places 1,2,2,3,1; search 3318 ms (2195-4470); data 5.59 s (4.49-6.75). "We're six, and later." patched
+  5/5 by result, 180 ms median (159-186), no LLM (run 5: chips 19:00/19:30/20:00/20:30, no 21:00, so +30 min by the I3 rule). Step 2 expect
+  4/5 (one DateTimeInput, informational). Widgets RestaurantWidget 5 places 4.29 s; HTML 1/1.
+- Held-out 8/8 (searches: gift 5, plans3 3, hamburg 5, cafe 4 records). No flight, dinner or held-out turn sent a
+  weather line.
+- Probe without a place ("What's the weather today?", --runs 3, same setup and code; the line was added to smoke.ts
+  for the run only, not committed): **3/3**, weather query "Bremen" (STATE.city) 3/3, 0 searches, no input or Button
+  added, 5 blocks, all four weather bricks 3/3; data arrived 2.11 s (1.56-2.58), weather fetch 49/377/929 ms.
+- Screenshots: the stage layout from a static build, with a saved session rebuilt from captured weather turns through
+  the real store (session scratchpad weather-shots/). Raw captures and reports: session scratchpad weather-eval/.

@@ -105,14 +105,16 @@ export type SeatMapComponent = Base<"SeatMap"> & {
   value: DynamicString;
 };
 export type StatComponent = Base<"Stat"> & { label: DynamicString; value: DynamicString | DynamicNumber; unit?: DynamicString };
-export type IconComponent = Base<"Icon"> & { name: IconName; size?: "sm" | "md" | "lg" };
+/** name: a literal from the icon set, or bound to data holding one (checked when drawn: anything else draws nothing). */
+export type IconComponent = Base<"Icon"> & { name: IconName | PathBinding; size?: "sm" | "md" | "lg" };
 /** Read-only comparison. Each cell reads `field` of its row; a null or missing cell is blank. */
 export type TableComponent = Base<"Table"> & {
   columns: { label: DynamicString; field: string }[];
   rows: PathBinding | JsonObject[];
 };
 export type ChartComponent = Base<"Chart"> & {
-  type?: "bar";
+  /** "bar" (default): horizontal bars; "area": a series over time (hours, days) as a filled line. */
+  type?: "bar" | "area";
   items: PathBinding | { label: string; value: number }[];
   unit?: DynamicString;
 };

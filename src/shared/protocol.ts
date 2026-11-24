@@ -111,8 +111,11 @@ export type Flight = {
   /** Source URL. */
   source?: string;
 };
-/** "search" = live web search, the only data source (owner direction: no fixed data, no demo generator). */
-export type DataSource = "search";
+/**
+ * Live data sources only (owner direction: no fixed data, no demo generator): "search" = live web search,
+ * "weather" = Open-Meteo forecast (one object per line, no LLM call).
+ */
+export type DataSource = "search" | "weather";
 
 /** Props of the two hand-built widgets in "widgets" mode. */
 export type RestaurantWidgetProps = { places: Place[]; kind?: string; max_walk_min?: number };
