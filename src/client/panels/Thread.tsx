@@ -20,7 +20,17 @@ type Props = {
   newestSurfaceId: string | null;
   decision: boolean;
   replaying: boolean;
+  /**
+   * "stage" (layout A): no header (the top bar has the title), a column as wide as a screen, and room at the
+   * bottom for the floating voice dock. "classic" (the default) is the previous layout, unchanged.
+   */
+  layout?: "classic" | "stage";
 };
+
+/** Stage column: px-8 on each side, so the content is exactly --surface-w wide. The bottom padding keeps the newest
+ * screen's last button above the dock (dock 70 px + 22 px gap + 24 px air, rounded up). */
+const STAGE_COLUMN = "max-w-[calc(var(--surface-w)+4rem)] gap-7 px-8 pt-7 pb-[136px]";
+const CLASSIC_COLUMN = "max-w-[46rem] gap-8 px-10 pt-4 pb-10";
 
 /** The thread's scroller, shared with the wave's empty view so the hand-back after a wave lines up exactly. */
 const SCROLLER = "h-full overflow-y-auto [overflow-anchor:none] [scrollbar-gutter:stable]";
@@ -31,7 +41,8 @@ const EXAMPLES = [
   "Split a 120 euro bill between four, Jonas only had drinks.",
 ];
 
-export function Thread({ thread, surfaces, newestSurfaceId, decision, replaying }: Props) {
+export function Thread({ thread, surfaces, newestSurfaceId, decision, replaying, layout = "classic" }: Props) {
+  const stage = layout === "stage";
   const timeline = useMemo(() => buildTimeline(thread, surfaces), [thread, surfaces]);
   const interactiveId = pickInteractiveSurface(timeline, surfaces, newestSurfaceId);
   const newest = newestSurfaceId ? surfaces[newestSurfaceId] : undefined;
@@ -46,12 +57,14 @@ export function Thread({ thread, surfaces, newestSurfaceId, decision, replaying 
 
   return (
     <section aria-label="Thread" className="flex h-full min-h-0 flex-col">
-      <header className="flex h-14 shrink-0 items-baseline gap-3 px-10 pt-[1.1rem]">
-        <h1 className="text-[1.0625rem] font-semibold tracking-tight">Brick Box</h1>
-        <p className="truncate text-[0.8125rem] text-muted-foreground">
-          Every screen built on the spot from a box of bricks.
-        </p>
-      </header>
+      {!stage && (
+        <header className="flex h-14 shrink-0 items-baseline gap-3 px-10 pt-[1.1rem]">
+          <h1 className="text-[1.0625rem] font-semibold tracking-tight">Brick Box</h1>
+          <p className="truncate text-[0.8125rem] text-muted-foreground">
+            Every screen built on the spot from a box of bricks.
+          </p>
+        </header>
+      )}
       <div className="relative min-h-0 flex-1">
         <ThreadWave empty={<EmptyView />}>
           <div ref={viewportRef} className={SCROLLER}>
@@ -62,7 +75,7 @@ export function Thread({ thread, surfaces, newestSurfaceId, decision, replaying 
               <div
                 ref={contentRef}
                 inert={replaying}
-                className="mx-auto flex w-full max-w-[46rem] flex-col gap-8 px-10 pt-4 pb-10"
+                className={cn("mx-auto flex w-full flex-col", stage ? STAGE_COLUMN : CLASSIC_COLUMN)}
               >
                 {timeline.map((e) => {
                   if (e.kind === "user") return <UserLine key={e.item.id} item={e.item} />;
@@ -106,7 +119,9 @@ export function Thread({ thread, surfaces, newestSurfaceId, decision, replaying 
           tabIndex={atBottom ? -1 : 0}
           aria-hidden={atBottom}
           className={cn(
-            "absolute bottom-4 left-1/2 flex -translate-x-1/2 items-center gap-1.5 rounded-full border bg-card px-3.5 py-1.5 font-mono text-[0.75rem] text-foreground",
+            "absolute left-1/2 flex -translate-x-1/2 items-center gap-1.5 rounded-full border bg-card px-3.5 py-1.5 font-mono text-[0.75rem] text-foreground",
+            // Above the stage's voice dock.
+            stage ? "bottom-[108px]" : "bottom-4",
             "transition-opacity duration-150 motion-reduce:transition-none hover:bg-accent",
             atBottom ? "pointer-events-none opacity-0" : "opacity-100",
           )}
@@ -202,9 +217,9 @@ const AgentEntry = memo(function AgentEntry(props: AgentProps) {
       {item.status === "error" && <ErrorLine item={item} />}
       {item.mode === "a2ui" ? (
         // Reserved even when empty: the caption lands late and must not push the chip down.
-        <p className="min-h-[1.5em] w-full max-w-[560px] truncate text-[0.9375rem] text-muted-foreground">{item.caption}</p>
+        <p className="min-h-[1.5em] w-full max-w-(--surface-w) truncate text-[0.9375rem] text-muted-foreground">{item.caption}</p>
       ) : (
-        item.caption && <p className="w-full max-w-[560px] truncate text-[0.9375rem] text-muted-foreground">{item.caption}</p>
+        item.caption && <p className="w-full max-w-(--surface-w) truncate text-[0.9375rem] text-muted-foreground">{item.caption}</p>
       )}
       <TurnChip item={item} />
     </article>
@@ -266,7 +281,7 @@ function InPlaceLine({ surfaceId, pending = false }: { surfaceId?: string; pendi
 function SurfaceSkeleton() {
   // Mirrors Surface's pre-root frame (a2ui/Surface.tsx) class for class, so the swap is invisible.
   return (
-    <div className="relative w-full max-w-[560px] rounded-xl border bg-card p-5 text-card-foreground">
+    <div className="relative w-full max-w-(--surface-w) rounded-xl border bg-card p-5 text-card-foreground">
       <div className="flex flex-col gap-3" aria-busy="true" aria-label="Building">
         <div className="bb-skeleton h-7 w-2/5" />
         <div className="bb-skeleton h-10 w-full" />
@@ -278,7 +293,7 @@ function SurfaceSkeleton() {
 
 function WidgetSkeleton() {
   return (
-    <div aria-label="Waiting for the widget" className="w-full max-w-[560px] rounded-xl border bg-card">
+    <div aria-label="Waiting for the widget" className="w-full max-w-(--surface-w) rounded-xl border bg-card">
       <div className="border-b px-5 py-3.5">
         <div className="bb-skeleton h-5 w-1/3" />
       </div>
@@ -293,7 +308,7 @@ function WidgetSkeleton() {
 
 function TextReply({ text }: { text: string }) {
   return (
-    <div className="w-full max-w-[560px]">
+    <div className="w-full max-w-(--surface-w)">
       <p className="mb-1.5 font-mono text-[0.6875rem] uppercase tracking-[0.12em] text-muted-foreground">
         no widget fits · text reply
       </p>
@@ -306,7 +321,7 @@ function ErrorLine({ item }: { item: AgentItem }) {
   return (
     <div
       role="alert"
-      className="flex w-full max-w-[560px] items-center gap-3 rounded-lg border border-destructive/30 bg-card py-1.5 pr-1.5 pl-3.5 text-[0.875rem]"
+      className="flex w-full max-w-(--surface-w) items-center gap-3 rounded-lg border border-destructive/30 bg-card py-1.5 pr-1.5 pl-3.5 text-[0.875rem]"
     >
       <span aria-hidden className="size-1.5 shrink-0 rounded-full bg-destructive" />
       <span className="min-w-0 flex-1 truncate text-destructive" title={item.error}>

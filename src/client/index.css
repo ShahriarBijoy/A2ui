@@ -30,6 +30,9 @@
   --color-highlight: var(--highlight);
   --color-highlight-foreground: var(--highlight-foreground);
   --color-highlight-soft: var(--highlight-soft);
+  --color-panel: var(--panel);
+  --color-highlight-ink: var(--highlight-ink);
+  --color-panel-foreground: var(--panel-foreground);
   --radius-sm: calc(var(--radius) * 0.5);
   --radius-md: calc(var(--radius) * 0.75);
   --radius-lg: var(--radius);
@@ -40,11 +43,11 @@
 }
 
 :root {
-  --background: #edece5;
+  --background: #f2f1ec;
   --foreground: #1a1c17;
-  --card: #f7f6f1;
+  --card: #fbfaf6;
   --card-foreground: #1a1c17;
-  --popover: #f7f6f1;
+  --popover: #fbfaf6;
   --popover-foreground: #1a1c17;
   --primary: #1a1c17;
   --primary-foreground: #f7f6f1;
@@ -55,14 +58,21 @@
   --accent: #dde1d2;
   --accent-foreground: #1a1c17;
   --destructive: #a63e26;
-  --border: #d5d4ca;
+  --border: #d8d7cd;
   --input: #b9b8ac;
   --ring: #1a1c17;
   /* used bricks, changed values */
   --highlight: #e0714f;
   --highlight-foreground: #1a1c17;
   --highlight-soft: #f3c9b9;
+  /* highlight as text or an icon on a light ground (the soft tint's ink) */
+  --highlight-ink: #b85a35;
+  /* the stage's side columns (sessions rail, under-the-hood panel) */
+  --panel: #e9e8e1;
+  --panel-foreground: #3d4238;
   --radius: 14px;
+  /* width of a screen in the thread; the stage layout widens it */
+  --surface-w: 560px;
 }
 
 @layer base {
@@ -133,11 +143,31 @@
   animation: bb-pulse 1.2s ease-in-out infinite;
 }
 
+/* Stage chrome (rail, top bar, dock, hood): one icon stroke everywhere. Screens keep their own. */
+.bb-chrome svg.lucide {
+  stroke-width: 1.75;
+}
+
+/* Stage voice dock: the mic breathes while it listens. */
+@keyframes bb-mic-pulse {
+  0%,
+  100% {
+    box-shadow: 0 0 0 6px color-mix(in srgb, var(--highlight) 28%, transparent);
+  }
+  50% {
+    box-shadow: 0 0 0 11px color-mix(in srgb, var(--highlight) 12%, transparent);
+  }
+}
+.bb-mic-live {
+  animation: bb-mic-pulse 1.6s ease-in-out infinite;
+}
+
 /* U14: reduced motion turns off fades, flashes and pulses. */
 @media (prefers-reduced-motion: reduce) {
   .bb-appear,
   .bb-flash,
-  .bb-skeleton {
+  .bb-skeleton,
+  .bb-mic-live {
     animation: none !important;
   }
 }

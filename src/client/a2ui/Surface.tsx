@@ -109,7 +109,7 @@ export function Surface(props: {
       // U8: older surfaces stay visible as history but cannot be used.
       inert={!interactive}
       className={cn(
-        "relative w-full max-w-[560px] rounded-xl border bg-card p-5 text-card-foreground",
+        "relative w-full max-w-(--surface-w) rounded-xl border bg-card p-5 text-card-foreground",
         "transition-opacity duration-150 motion-reduce:transition-none",
         !interactive && "opacity-55",
       )}

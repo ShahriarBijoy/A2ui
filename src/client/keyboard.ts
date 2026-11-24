@@ -85,6 +85,14 @@ function asElement(t: EventTarget | null): Element | null {
   return typeof Element !== "undefined" && t instanceof Element ? t : null;
 }
 
+/**
+ * Inside an open menu or dialog (portalled outside #root). Esc there closes the popup; it must not also clear the
+ * conversation, and 1/2/3/D must not change settings behind a confirm.
+ */
+export function isInPopup(el: Element | null): boolean {
+  return el !== null && el.closest('[role="menu"], [role="dialog"], [role="alertdialog"], [role="listbox"]') !== null;
+}
+
 /** A focused element inside the app (button, chip, switch, tab, slider thumb) that Space would otherwise activate. */
 function isFocusedControl(el: Element | null): boolean {
   return el !== null && el.closest("#root") !== null;
@@ -132,6 +140,7 @@ export function useKeyboardShortcuts(onShortcut: (s: Shortcut) => void): void {
     const onKeyDown = (e: KeyboardEvent) => {
       if (e.defaultPrevented) return;
       const el = asElement(e.target);
+      if (isInPopup(el)) return;
       if (isTypingTarget(el)) {
         // Esc leaves the text field so the next key is a shortcut again (mouse-free use).
         if (e.key === "Escape" && el instanceof HTMLElement) el.blur();
