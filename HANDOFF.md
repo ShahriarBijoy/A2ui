@@ -24,7 +24,7 @@ The owner raised the Anthropic spend limit. The key answers again (Haiku 1.3 s, 
 - **Remaining (owner-dependent):** (the API key works again)
   1. The owner's live mic rehearsal in Chrome (checklist below). Save good turns with Shift+R, export with Shift+E, and paste them into `src/client/replays.json` (shipped F-key replays), then redeploy.
   2. ~~Confirm the venue and date~~ **Confirmed by the owner 2026-11-24:** JAAI, Konsul-Smidt-Straße 8p, Wed 25 Nov 18:00.
-  3. **Flights: owner chose web search (2026-11-24); merged.** Talk-clock flight chains: 10/10 at a94ccbf (final), 10/10 at d7a9e70, 8/10 at f35faaa; dinner 5/5 at a94ccbf. See NOTES "Flights from live web search". Production numbers: see the deploy entry below.
+  3. **Flights: owner chose web search (2026-11-24); merged.** Talk-clock flight chains: 10/10 at a94ccbf (final), 10/10 at d7a9e70, 8/10 at f35faaa; dinner 5/5 at a94ccbf. See NOTES "Flights from live web search". Deployed e65bae2 (2026-11-24 ~03:56): production flight smoke 3/3 strict (NOTES "Production flight smoke after the flights merge").
   4. Re-run `bun run smoke` against production during the evening before the talk (18:30–19:30) and commit `scripts/smoke-results.md`. Those are the numbers for the talk.
 - **Parked minors** are in the ledger. The notable ones: block count can reach 8; the patch caption shows a raw ISO value for merged date+time patches; PLAN §9.3 should say "A2UI v1.0" (upstream marks it stable).
 - **Talk content notes:** the §9.1 beats now depend on what the composer builds, since there are no scripted flows; replay is the safety net. The closing line's N/M comes from the session totals, which replays don't change. Don't quote vendor numbers (§9.3).

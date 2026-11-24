@@ -269,3 +269,9 @@ Prompt cache read 5193 tokens after the first call.
 
 ## Prompt changes log
 (Step 7.)
+
+## Production flight smoke after the flights merge (e65bae2, real clock ~03:57 Tue 24 Nov, 3 runs, --strict)
+- **3/3 scenario runs pass; 14/14 lines** (a2ui steps 1–4 3/3 each; widgets 1/1, html 1/1). Report: session scratchpad prod-flight.md (not committed: talk numbers come from the evening smoke).
+- Step 2 ("To New York, give me options."): first UI 2.46 s (1.44–2.80), screen done 5.06 s (4.81–5.27), data arrived 5.62 s (5.15–8.22), Worker search 2942 ms (2837–5155); options per run 4, 3, 2.
+- Example cards (run 1): SWISS · BRE → JFK · 1 stop · from €429 · [economy, last-minute deal] (swiss.com); Lufthansa · BRE → JFK · 1 stop · from $494 · [round trip] (kayak.com). Fares are as the source page lists them; labels are the search model's reading.
+- Dinner was not run on production at this hour (no dinner places open at ~04:00); the dinner check at the talk clock is the in-process 5/5 at a94ccbf.
