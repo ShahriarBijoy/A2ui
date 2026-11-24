@@ -277,3 +277,36 @@ Prompt cache read 5193 tokens after the first call.
 - Dinner on production right after (real clock ~05:00, 2 runs, --strict): opener 2/2 with places 2 and 3 (search 2717/3508 ms); "We're six, and later." patched correctly 2/2 (Guests 2 → 6, time 19:00 → 20:00, 153/199 ms); one run failed only because the tap-place step drew 8 visible blocks (smoke limit 7; parked minor). Widgets dinner: RestaurantWidget with 5 places in 4.10 s.
 - Places per dinner run before the flights change: 1–3 (talk clock, 615d559), 2/4/1 (production 787b35e); after: 1,1,3,1,2 (a94ccbf), 2,3 (production e65bae2). No clear thinning.
 - Widgets flight with a destination on production ("Find me flights from Bremen to New York tomorrow."): FlightSearchWidget with 3 live flights (e.g. SWISS · BRE → JFK · 1 stop · from €429).
+
+## Brick catalog: 27 bricks (branch brick-catalog, 2026-11-24 ~06:19-06:25 Berlin)
+Ten bricks added (Icon, Table, Chart, Timeline, Image, Badge, Alert, Accordion, Progress, Rating) plus an optional
+`icon` on OptionCard and Button. Image urls come from the source page's og:image (Worker, 1.5 s / 64 KB per page);
+Rating values only from search fields. Setup: the Hono app served in-process by Bun (port 5288; wrangler.jsonc vars +
+.dev.vars keys), DEV_NOW=2026-11-25T18:45, composer claude-sonnet-5-5, search/widgets/html claude-haiku-5-5.
+Smoke judge gains "invented: ids": every Image url / Rating value on screen must equal a value a data event
+delivered in that session. Code evaluated: **6943acb** (smoke "Script tree"). No prompt revision was needed.
+
+| line set | command | result | bar |
+|---|---|---|---|
+| flight | `--only flight --runs 10 --strict` | **10/10 scenario runs**, 42/42 lines | ≥ 9/10 |
+| dinner | `--only dinner --runs 10` | **9/10 scenario runs**, 41/42 lines | ≥ 9/10 |
+| held-out | `--only heldout --runs 1` | **8/8** (5 earlier + 3 new) | – |
+- Flight: step 2 options per run 2,2,2,2,1,2,3,2,2,2; search 2348 ms median (2111-2968); data arrived 4.69 s (4.03-5.36).
+  Medians: step 1 first UI 1.32 s / screen 4.01 s; step 2 1.71 / 4.48 s; tap → seat map 1.56 / 3.72 s; confirm 1.62 / 2.91 s.
+  Every step-2 flight card carried `icon: "plane"` (10/10). New bricks elsewhere: 3 Alerts on confirm summaries.
+- Dinner: places per run 2,2,2,3,3,1,1,2,4,2; search 3455 ms median (2650-4399); data 5.84 s (5.09-6.77).
+  "We're six, and later." patched 9/10 by result, 156 ms median (132-166), no LLM. **Miss (run 8): the router patched
+  Guests only** (reason "edit 0.95: Guests → 6"): the step-2 Time chips were 19:00/19:30/20:00/20:30 with 20:00
+  selected, so "one hour later" (21:00) was not an option; the judge failed it as "later dropped". Decision model, not
+  the catalog change. Step 2 expect 2/10 (time as a DateTimeInput, not chips; informational, as before).
+  Dinner cards carried `icon: "utensils"` (10/10). Alerts in 14 of 42 dinner turns (mostly confirm summaries; step-2
+  hours notes paraphrase the tapped item's search fields, traced e.g. "Open Wednesday until 23:00"), Badges in 2.
+- Held-out: plans3 drew a Table bound to the search path (3 live records) and an info Alert; hamburg chose OptionCards
+  (icon map-pin) over a Timeline; cafe drew Image + Rating bound to data fields, but its single record (yelp.com) had
+  rating null and the page answered 403 to the og:image lookup, so neither showed (correct: nothing invented).
+  dog passed this time (6 blocks). 0 refused, 0 validation errors, 0 "invented", 0 icons dropped in all 92 turns.
+- Widgets and HTML lines unchanged: FlightSearchWidget 730 ms; RestaurantWidget 5 places in 3.81 s; HTML 2/2.
+- og:image probe from the dev machine (Bun, same code): hamburg-travel.com found (warm 112 ms; the first, cold attempt
+  hit the 1.5 s cap), germanycompass.com found, hamburg.com has no og tag, yelp.com and tripadvisor.com 403,
+  lufthansa.com 200 once then 403 (bot protection). A photo filled end to end in a live turn was not observed.
+- Raw captures and reports: session scratchpad `bricks-eval/` (flight.md, dinner.md, heldout.md, raw-*).
