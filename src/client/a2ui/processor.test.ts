@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import type { SurfaceState } from "@/state";
-import { DINNER_STEP_2, FLIGHT_SEAT_MAP, REFUSED } from "./fixtures";
+import { DINNER_STEP_2, FLIGHT_SEAT_MAP, GALLERY, NEW_BRICKS, REFUSED } from "./fixtures";
 import { applyMessage, DEFAULT_CHECK_MESSAGE } from "./processor";
 
 const CAT = "https://example.test/catalog/brick-box/v1";
@@ -213,6 +213,130 @@ describe("lenient @checks", () => {
   });
 });
 
+describe("new bricks", () => {
+  /** One updateComponents on a fresh surface; returns the entry for each id and the result. */
+  function put(components: Record<string, unknown>[]) {
+    const { surfaces, results } = run([
+      { version: v, createSurface: { surfaceId: "s1", catalogId: CAT } },
+      { version: v, updateComponents: { surfaceId: "s1", components } },
+    ]);
+    return { comps: surfaces.s1.components, res: results[1] };
+  }
+  const status = (components: Record<string, unknown>[], id: string) => put(components).comps[id]?.status;
+  const one = (c: Record<string, unknown>) => status([{ id: "x", ...c }], "x");
+
+  test("Icon with an unknown name is refused", () => {
+    expect(one({ component: "Icon", name: "plane" })).toBe("ok");
+    expect(one({ component: "Icon", name: "rocket-ship" })).toBe("refused");
+    expect(one({ component: "Icon" })).toBe("refused");
+    expect(one({ component: "Icon", name: { "@path": "/icon" } })).toBe("refused");
+  });
+
+  test("Icon size outside sm|md|lg is refused", () => {
+    for (const size of ["sm", "md", "lg"]) expect(one({ component: "Icon", name: "clock", size })).toBe("ok");
+    expect(one({ component: "Icon", name: "clock", size: "xl" })).toBe("refused");
+    expect(one({ component: "Icon", name: "clock", size: 24 })).toBe("refused");
+  });
+
+  test("Table without columns is refused", () => {
+    const rows = [{ name: "A" }];
+    expect(one({ component: "Table", rows })).toBe("refused");
+    expect(one({ component: "Table", columns: [], rows })).toBe("refused");
+    expect(one({ component: "Table", columns: [{ label: "Name" }], rows })).toBe("refused");
+    expect(one({ component: "Table", columns: [{ label: "Name", field: "name" }] })).toBe("refused");
+  });
+
+  test("Table rows may be a path or a literal array", () => {
+    const columns = [{ label: "Name", field: "name" }, { label: "Price", field: "price" }];
+    expect(one({ component: "Table", columns, rows: { "@path": "/plans" } })).toBe("ok");
+    expect(one({ component: "Table", columns, rows: [{ name: "A", price: null }, { name: "B" }] })).toBe("ok");
+    expect(one({ component: "Table", columns, rows: "A, B" })).toBe("refused");
+    expect(one({ component: "Table", columns, rows: [1, 2] })).toBe("refused");
+  });
+
+  test("Chart items must be a path or an array of {label, value}", () => {
+    expect(one({ component: "Chart", items: { "@path": "/prices" }, unit: "€" })).toBe("ok");
+    expect(one({ component: "Chart", type: "bar", items: [{ label: "A", value: 3 }, { label: "B", value: 0 }] })).toBe("ok");
+    // A numeric string is a number (as for path-bound items); text is not.
+    expect(one({ component: "Chart", items: [{ label: "A", value: "3" }] })).toBe("ok");
+    expect(one({ component: "Chart", items: [{ label: "A", value: "€3" }] })).toBe("refused");
+    expect(one({ component: "Chart", items: [{ value: 3 }] })).toBe("refused");
+    expect(one({ component: "Chart" })).toBe("refused");
+    expect(one({ component: "Chart", type: "pie", items: [{ label: "A", value: 3 }] })).toBe("refused");
+  });
+
+  test("Timeline items must be a path or an array of {title, time?, detail?}", () => {
+    expect(one({ component: "Timeline", items: { "@path": "/plan" } })).toBe("ok");
+    expect(one({ component: "Timeline", items: [{ title: "Breakfast", time: "09:00" }, { title: "Museum", detail: "2 h" }] })).toBe("ok");
+    expect(one({ component: "Timeline", items: [{ time: "09:00" }] })).toBe("refused");
+    expect(one({ component: "Timeline" })).toBe("refused");
+  });
+
+  test("Image without alt is refused", () => {
+    expect(one({ component: "Image", url: { "@path": "image" }, alt: { "@path": "name" } })).toBe("ok");
+    expect(one({ component: "Image", url: { "@path": "image" } })).toBe("refused");
+    expect(one({ component: "Image", alt: "Photo" })).toBe("refused");
+    expect(one({ component: "Image", url: { "@path": "image" }, alt: "Photo", aspect: "tall" })).toBe("refused");
+  });
+
+  test("Badge and Alert reject unknown variants", () => {
+    for (const variant of ["neutral", "success", "warning", "danger"]) expect(one({ component: "Badge", text: "Open", variant })).toBe("ok");
+    expect(one({ component: "Badge", text: "Open", variant: "info" })).toBe("refused");
+    expect(one({ component: "Badge" })).toBe("refused");
+    for (const variant of ["info", "warning", "success"]) expect(one({ component: "Alert", text: "Heads up", variant })).toBe("ok");
+    expect(one({ component: "Alert", title: "T", text: "Heads up", variant: "danger" })).toBe("refused");
+    expect(one({ component: "Alert", title: "Only a title" })).toBe("refused");
+  });
+
+  test("Accordion items must name child ids and those children are reachable", () => {
+    expect(one({ component: "Accordion", items: [{ title: "A", child: "a" }] })).toBe("ok");
+    expect(one({ component: "Accordion", items: [] })).toBe("refused");
+    expect(one({ component: "Accordion", items: [{ title: "A" }] })).toBe("refused");
+    expect(one({ component: "Accordion", items: [{ title: "A", child: 3 }] })).toBe("refused");
+  });
+
+  test("Progress needs a value; max must be positive", () => {
+    expect(one({ component: "Progress", value: 40 })).toBe("ok");
+    expect(one({ component: "Progress", value: { "@path": "/done" }, max: 5, label: "Packed" })).toBe("ok");
+    expect(one({ component: "Progress" })).toBe("refused");
+    expect(one({ component: "Progress", value: 1, max: 0 })).toBe("refused");
+  });
+
+  test("Rating max must be between 1 and 10", () => {
+    expect(one({ component: "Rating", value: { "@path": "rating" } })).toBe("ok");
+    expect(one({ component: "Rating", value: { "@path": "rating" }, max: 10 })).toBe("ok");
+    expect(one({ component: "Rating", value: { "@path": "rating" }, max: 11 })).toBe("refused");
+    expect(one({ component: "Rating", value: { "@path": "rating" }, max: 0 })).toBe("refused");
+    expect(one({ component: "Rating", value: { "@path": "rating" }, max: 2.5 })).toBe("refused");
+    expect(one({ component: "Rating" })).toBe("refused");
+  });
+
+  test("OptionCard icon outside the icon set is refused", () => {
+    expect(one({ component: "OptionCard", title: "A", icon: "plane" })).toBe("ok");
+    expect(one({ component: "OptionCard", title: "A", icon: null })).toBe("ok");
+    expect(one({ component: "OptionCard", title: "A", icon: "airplane" })).toBe("refused");
+    const action = { event: { name: "go" } };
+    expect(status([{ id: "b", component: "Button", child: "l", action, icon: "check" }, { id: "l", component: "Text", text: "Go" }], "b")).toBe("ok");
+    expect(status([{ id: "b", component: "Button", child: "l", action, icon: "tick" }, { id: "l", component: "Text", text: "Go" }], "b")).toBe("refused");
+  });
+
+  test("a refused new brick leaves the rest of the surface rendering", () => {
+    const { comps, res } = put([
+      { id: "root", component: "Column", children: ["title", "icon", "badge", "acc"] },
+      { id: "title", component: "Text", text: "## Plans" },
+      { id: "icon", component: "Icon", name: "rocket-ship" },
+      { id: "badge", component: "Badge", text: "Cheapest", variant: "success" },
+      { id: "acc", component: "Accordion", items: [{ title: "Details", child: "detail" }] },
+      { id: "detail", component: "Text", text: "Fine print" },
+    ]);
+    expect(comps.icon).toMatchObject({ status: "refused", component: "Icon" });
+    for (const id of ["root", "title", "badge", "acc", "detail"]) expect(comps[id].status).toBe("ok");
+    expect(res.refused).toBe(1);
+    expect(res.errors).toHaveLength(1);
+    expect(res.errors[0].path).toBe("/components/2/name");
+  });
+});
+
 describe("updateDataModel", () => {
   test("changedPaths and hasDemoData; the creating turn's fill leaves no flash stamp", () => {
     const { surfaces, results } = run([
@@ -271,8 +395,8 @@ describe("deleteSurface", () => {
 });
 
 describe("fixtures", () => {
-  test("dinner and seat map apply cleanly", () => {
-    for (const f of [DINNER_STEP_2, FLIGHT_SEAT_MAP]) {
+  test("dinner, seat map and the galleries apply cleanly", () => {
+    for (const f of [DINNER_STEP_2, FLIGHT_SEAT_MAP, GALLERY, NEW_BRICKS]) {
       const { results } = run(f.messages);
       expect(results.flatMap((r) => r.errors)).toEqual([]);
     }

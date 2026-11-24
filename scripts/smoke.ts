@@ -1,5 +1,5 @@
 /**
- * Step 13 smoke run (PLAN §8): every scenario in src/shared/scenarios.ts plus five held-out lines,
+ * Step 13 smoke run (PLAN §8): every scenario in src/shared/scenarios.ts plus the held-out lines (HELD_OUT),
  * driven through the real client code (store, turn client, A2UI processor, knobs) against a running
  * Brick Box, by default the deployed one.
  *   bun run smoke [baseUrl] [--runs 3] [--only dinner,flight,heldout] [--out scripts/smoke-results.md] [--raw dir] [--note "..."] [--strict]
@@ -47,6 +47,10 @@ const HELD_OUT: readonly { id: string; title: string; say: string }[] = [
   { id: "dog", title: "Held-out: adopt a dog", say: "I want to adopt a dog. What do I need?" },
   { id: "gift", title: "Held-out: gift for mum", say: "Find a gift for my mum, around 50 euros." },
   { id: "haircut", title: "Held-out: haircut Saturday", say: "Book a haircut for Saturday morning." },
+  // Added with the ten new bricks (2026-11-24): test inputs only, never prompt text.
+  { id: "plans3", title: "Held-out: three cheapest plans", say: "Compare the three cheapest mobile phone plans in Germany." },
+  { id: "hamburg", title: "Held-out: Saturday in Hamburg", say: "Plan a Saturday in Hamburg for two of us, with times." },
+  { id: "cafe", title: "Held-out: café with photo", say: "Show me a nice café near the venue with a photo and its rating." },
 ];
 
 // ── CLI ───────────────────────────────────────────────────────────────────────
@@ -158,6 +162,12 @@ function renderOrder(surface: SurfaceState): Node[] {
         if (isPlainObject(first) && typeof first.child === "string") visit(first.child, scope, inList, depth + 1);
         break;
       }
+      case "Accordion": {
+        // The renderer opens the first section; the others are closed until tapped.
+        const first = Array.isArray(p.items) ? p.items[0] : undefined;
+        if (isPlainObject(first) && typeof first.child === "string") visit(first.child, scope, inList, depth + 1);
+        break;
+      }
       // A Button's child is its label; every other brick is a leaf.
     }
   };
@@ -165,7 +175,7 @@ function renderOrder(surface: SurfaceState): Node[] {
   return out;
 }
 
-/** Accepted components that no reference chain from root reaches (any tab, any template, Button labels): never drawn. */
+/** Accepted components that no reference chain from root reaches (any tab, any Accordion section, any template, Button labels): never drawn. */
 function orphans(surface: SurfaceState): string[] {
   const reached = new Set<string>();
   const stack = ["root"];
@@ -180,6 +190,9 @@ function orphans(surface: SurfaceState): string[] {
     if (Array.isArray(p.children)) for (const c of p.children) if (typeof c === "string") stack.push(c);
     if (isChildTemplate(p.children)) stack.push(p.children.componentId);
     if (Array.isArray(p.tabs)) for (const t of p.tabs) if (isPlainObject(t) && typeof t.child === "string") stack.push(t.child);
+    if (typeOf(entry) === "Accordion" && Array.isArray(p.items)) {
+      for (const t of p.items) if (isPlainObject(t) && typeof t.child === "string") stack.push(t.child);
+    }
   }
   return Object.keys(surface.components).filter((id) => surface.components[id].status === "ok" && !reached.has(id));
 }
@@ -227,6 +240,82 @@ export function listedOptions(surface: SurfaceState): number {
       return false;
     }
   }).length;
+}
+
+/** Every component reachable from root (all tabs, all Accordion sections, templates expanded over the data), with its scope. */
+function allNodes(surface: SurfaceState): Node[] {
+  const out: Node[] = [];
+  const seen = new Set<string>();
+  const visit = (id: string, scope: string, inList: boolean, depth: number): void => {
+    const key = id + "@" + scope;
+    if (depth > 64 || seen.has(key)) return;
+    seen.add(key);
+    const entry = surface.components[id];
+    if (!entry) return;
+    out.push({ id, entry, scope, inList });
+    const p = propsOf(entry);
+    if (typeof p.child === "string") visit(p.child, scope, inList, depth + 1);
+    const kids = p.children;
+    if (Array.isArray(kids)) {
+      for (const c of kids) if (typeof c === "string") visit(c, scope, inList || typeOf(entry) === "List", depth + 1);
+    } else if (isChildTemplate(kids)) {
+      const st = templateState(kids, surface.data, scope);
+      if (st.kind === "items") for (const item of st.items) visit(kids.componentId, item.scope, true, depth + 1);
+    }
+    const sections = typeOf(entry) === "Accordion" ? p.items : typeOf(entry) === "Tabs" ? p.tabs : undefined;
+    if (Array.isArray(sections)) for (const t of sections) if (isPlainObject(t) && typeof t.child === "string") visit(t.child, scope, inList, depth + 1);
+  };
+  visit("root", "/", false, 0);
+  return out;
+}
+
+/** Every string and number leaf of a value, as trimmed strings (how the data-only judge compares). */
+export function dataLeaves(value: unknown, into: Set<string> = new Set()): Set<string> {
+  if (typeof value === "string") {
+    if (value.trim() !== "") into.add(value.trim());
+  } else if (typeof value === "number") {
+    if (Number.isFinite(value)) into.add(String(value));
+  } else if (Array.isArray(value)) {
+    for (const v of value) dataLeaves(v, into);
+  } else if (isPlainObject(value)) {
+    for (const v of Object.values(value)) dataLeaves(v, into);
+  }
+  return into;
+}
+
+/**
+ * Image urls and Rating values must come from live data (owner rule: no fact nobody stated). Returns the ids of
+ * Image / Rating components whose shown url / value is not among the values data events delivered in this
+ * session (`delivered`, see dataLeaves). A literal copy of a delivered value (a tapped item's fields) is fine;
+ * nothing shown (null, empty) is fine. Compared as trimmed strings, so 4.5 and "4.5" match.
+ */
+export function dataOnlyViolations(surface: SurfaceState, delivered: ReadonlySet<string>): string[] {
+  const bad = new Set<string>();
+  for (const n of allNodes(surface)) {
+    const type = typeOf(n.entry);
+    if (n.entry.status !== "ok" || (type !== "Image" && type !== "Rating")) continue;
+    const prop = propsOf(n.entry)[type === "Image" ? "url" : "value"];
+    let shown: JsonValue | undefined;
+    try {
+      shown = resolve(prop as Parameters<typeof resolve>[0], { data: surface.data, scope: n.scope });
+    } catch {
+      shown = undefined;
+    }
+    if (shown === undefined || shown === null) continue;
+    const text = toText(shown).trim();
+    if (text !== "" && !delivered.has(text)) bad.add(n.id);
+  }
+  return [...bad];
+}
+
+/**
+ * A confirm tap gets a summary step (composer rule 8) that must not carry an Alert or Badge: there they state things
+ * no data line said ("You can pick a seat later", "Confirmed"). Ids of the Alerts / Badges drawn on such a step.
+ */
+export function summaryNotices(surface: SurfaceState, tappedAction: string | null): string[] {
+  if (!tappedAction?.startsWith("confirm_")) return [];
+  const ids = allNodes(surface).filter((n) => n.entry.status === "ok" && (typeOf(n.entry) === "Alert" || typeOf(n.entry) === "Badge")).map((n) => n.id);
+  return [...new Set(ids)];
 }
 
 /** First OptionCard or Button (render order) whose action name starts with the prefix. */
@@ -479,6 +568,7 @@ function evaluate(
   say: string | null,
   pre: PreStep | null,
   strict: boolean,
+  delivered: ReadonlySet<string>,
 ): StepResult {
   const state = st.getState();
   const events: Timed[] = state.recordings[agent.turnId]?.events ?? [];
@@ -528,6 +618,11 @@ function evaluate(
       if (result.blocks > MAX_BLOCKS) reasons.push(`${result.blocks} visible blocks`);
       const lost = orphans(surface);
       if (lost.length) notes.push(`not reachable from root: ${lost.join(", ")}`);
+      const invented = dataOnlyViolations(surface, delivered);
+      if (invented.length) reasons.push(`invented: ${invented.join(", ")}`);
+      const tapped = agent.retry.input.type === "action" ? agent.retry.input.action.name : null;
+      const notices = summaryNotices(surface, tapped);
+      if (notices.length) reasons.push(`notice on summary: ${notices.join(", ")}`);
       if (expect?.bricks || expect?.data) {
         const types = new Set<string>(Object.values(surface.components).flatMap((c) => (c.status === "ok" ? [c.def.component] : [])));
         const missing = (expect.bricks ?? []).filter((b) => !types.has(b));
@@ -805,6 +900,7 @@ async function runJob(job: Job, run: number, opts: Options, key: string, results
     },
   });
   let blocked: string | null = null;
+  const delivered = new Set<string>();
   for (let i = 0; i < job.steps.length; i++) {
     const step = job.steps[i];
     const notes: string[] = [];
@@ -848,7 +944,11 @@ async function runJob(job: Job, run: number, opts: Options, key: string, results
     }
     const agent = lastAgent(st);
     if (!agent || agent === before) throw new Error("the turn client started no turn");
-    const r = evaluate(job, run, i, st, agent, step.expect, notes, say, pre, opts.strict);
+    // Values live data delivered in this session so far (any turn): the data-only judge's reference.
+    for (const { ev } of st.getState().recordings[agent.turnId]?.events ?? []) {
+      if (ev.type === "a2ui" && ev.origin === "data") dataLeaves(ev.msg, delivered);
+    }
+    const r = evaluate(job, run, i, st, agent, step.expect, notes, say, pre, opts.strict, delivered);
     const patchMiss = r.patch
       ? !r.patch.ok
       : step.expect?.patchOnly === true && (r.route !== "patch" || r.reasons.some((x) => x.startsWith("LLM was called")));
@@ -896,8 +996,8 @@ async function main(): Promise<void> {
     `- Run: ${berlinTime(started)} to ${berlinTime(ended)} (Europe/Berlin), from a dev machine in Germany; times are client-observed from request start.`,
     `- Script tree: ${gitHead()}. Models reported by the Worker: ${models.join(", ") || "–"}.`,
     ...(opts.note ? [`- Note: ${opts.note}`] : []),
-    `- a2ui: every scenario (all steps) and five held-out lines, ${opts.runs}× each, decision model on. widgets and html: each scenario's opening line once, in the modes it lists.`,
-    "- Pass: at least one component rendered (widgets: a widget or text; html: a page); 0 refused and 0 validation errors in the real client processor; ≤ 7 visible blocks; no error; on a step that expects OptionCards, at least one OptionCard drawn by a List from data with a non-empty title (\"options N\" in the notes).",
+    `- a2ui: every scenario (all steps) and ${HELD_OUT.length} held-out lines, ${opts.runs}× each, decision model on. widgets and html: each scenario's opening line once, in the modes it lists.`,
+    "- Pass: at least one component rendered (widgets: a widget or text; html: a page); 0 refused and 0 validation errors in the real client processor; ≤ 7 visible blocks; no error; on a step that expects OptionCards, at least one OptionCard drawn by a List from data with a non-empty title (\"options N\" in the notes); every Image url and Rating value on screen was delivered by a data event in that session (\"invented: ids\" otherwise); no Alert or Badge on the summary step after a confirm_ tap (\"notice on summary: ids\").",
     ...(opts.strict ? ["- --strict: a step also fails when its expected bricks or data are missing."] : []),
     "- Patch step (\"We're six, and later.\"), judged by its result in the real processor: if the screen before it has a people count (Stepper/Slider) and a time control (ChoicePicker of HH:mm, time or date+time DateTimeInput) with a later time on the same date, the route must patch with no usage event, the count must be 6, one time control must move later on the same date, and no other data value may change. Otherwise the route must compose, and a patch fails (\"later dropped\"). Per-run values are under \"Patch checks\".",
     "- Visible block (controller ruling): a top-level visual unit inside the root container. The root is unwrapped through Cards, single-child Columns and the first tab; each child of the main Column counts once, whatever it holds (a label/value Row, a List, a nested Column or Card, a Button).",

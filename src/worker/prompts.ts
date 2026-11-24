@@ -4,6 +4,7 @@
  * Everything that changes per turn goes into the user message.
  */
 import { catalogPromptBlock } from "@shared/catalog";
+import { ICON_NAMES } from "@shared/icons";
 import type { A2uiAction } from "@shared/a2ui";
 import type { TurnInput, TurnRequest } from "@shared/protocol";
 import type { Prompt } from "./claude";
@@ -114,8 +115,8 @@ A2UI MESSAGES (version "1.0")
   {"version":"1.0","updateDataModel":{"surfaceId":"<id>","path":"/pointer","value":...}}
 A component is {"id":"<unique id>","component":"<Type>", ...props}. Components are a flat list:
 containers name their children by id. Exactly one id "root" per surface.
-REACHABLE: every id you send must appear in the child, children or tabs of a component that is itself
-reachable from "root", or it will not render. To add a component to a surface that already exists,
+REACHABLE: every id you send must appear in the child, children, tabs or Accordion items of a component that
+is itself reachable from "root", or it will not render. To add a component to a surface that already exists,
 re-send its parent container with the new id in its children.
 New step: create a new surface with the id in STATE.next_surface_id.
 Change to the current step (the person corrects or changes a value already on the screen they see):
@@ -140,6 +141,17 @@ ORDER FOR A NEW STEP
 COMPONENTS (nothing else exists; any other type is refused)
 ${catalogPromptBlock()}
 "literal" means a plain JSON value, never a binding or an object: "rows":24, "layout":"ABC DEF".
+ICONS (the only names for an Icon's "name" and the "icon" of an OptionCard or Button; leave icon out when none fits):
+  ${ICON_NAMES.join(", ")}
+Table, Chart, Timeline, Image, Badge, Alert, Accordion, Progress, Rating and Icon only when the request is about
+what they show; each counts toward the 7 visible blocks.
+- Table, Chart and Timeline are read-only: items side by side, numbers to compare, a schedule or itinerary.
+  Anything the person picks stays an OptionCard in a List; never put choices in a Table.
+  Real-world facts in them come from a data line, as for a List: bind rows or items to its "into" path.
+- Image.url and Rating.value only from a data line's fields: request "image" or "rating" in its fields and
+  bind {"@path":"image"} or {"@path":"rating"} in the template. Never write a URL or a rating yourself.
+- Alert and Badge only for a notice the person asked for or a fact a data line delivered (e.g. opening hours from search);
+  never on a confirm/summary step, never a claim about the booking, the airline, the venue or what happens next.
 
 DYNAMIC VALUES
   literal | {"@path":"/abs"} | {"@path":"relative"} inside a List template
@@ -197,7 +209,8 @@ A trip search (flight, train, bus) needs the origin, the destination and the dat
             08:00 near Rua Augusta, Lisbon".
     fields  the item fields your template reads, from: name, subtitle (one line of key facts),
             tags (string array), detail (one sentence), price, date ("YYYY-MM-DD"), time ("HH:mm"),
-            hours, address, venue, carrier and route (trips). Every item also has "id" and "source" (its web page).
+            hours, address, venue, rating, image (a photo, for an Image), carrier and route (trips).
+            Every item also has "id" and "source" (its web page).
     max     3 to 5 (default 5)
     into    a path of its own, outside the input namespace: "/results", "/events".
 A fact the web does not state arrives as null, and formatString shows null as nothing: bind each field

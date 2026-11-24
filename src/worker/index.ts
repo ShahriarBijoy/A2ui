@@ -6,6 +6,7 @@ import { Hono } from "hono";
 import { CATALOG_PATH, catalogJson } from "@shared/catalog";
 import { LIMITS } from "@shared/protocol";
 import { anthropicLlm, anthropicWebSearch, composerRefusalFallbackFor, composerThinkingFor } from "./claude";
+import { fetchOgImages } from "./ogImage";
 import { predictBricks } from "./predict";
 import { promptContext } from "./prompts";
 import { rateLimit } from "./ratelimit";
@@ -71,6 +72,8 @@ app.post("/api/turn", async (c) => {
       : {}),
     context,
     search: (req, signal) => runSearch(req, webSearch, context, signal),
+    // An arrow, not a bare fetch reference: workerd throws "Illegal invocation" on a detached fetch.
+    ogImages: (urls, signal, timeoutMs) => fetchOgImages(urls, (input, init) => fetch(input, init), signal, { timeoutMs }),
     now: () => performance.now(),
     composeTimeoutMs: LIMITS.composeTimeoutMs,
     routeGuardMs: LIMITS.routerTimeoutMs + 400,

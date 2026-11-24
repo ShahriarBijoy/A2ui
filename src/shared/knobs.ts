@@ -495,6 +495,9 @@ const RELATIVE_HINT: Record<Flavour, string> = {
  * the Time mass on 18:00 without it). A direction with no option at all (the last or first chip) gets
  * a sentinel criterion instead: tying both directions to one target made "later" at 21:00 patch
  * 20:00 (9 backwards patches in 15 measured cases); the sentinel turns it into a partial edit.
+ * Chips that stop short of one hour (20:00 selected, last chip 20:30) name the nearest option in
+ * that direction: without a clause "We're six, and later." patched Guests only or composed (2 of 7
+ * chip screens in the brick-catalog evals, both without a chip one hour on).
  */
 /**
  * Date-only knobs change only on a named day. With "pick one day after" for a bare "later", a
@@ -536,14 +539,28 @@ function relativeHint(knob: ChoiceKnob, flavour: Flavour): { text: string; senti
   for (const dir of ["later", "earlier"] as const) {
     const target = hhmm((cur + (dir === "later" ? 60 : 1380)) % 1440);
     const any = circular || mins.some((m) => (dir === "later" ? m > cur : m < cur));
+    const nearest = circular ? null : nearestOption(knob, cur, dir);
     if (keys.has(target)) {
       text += " If the speaker only says " + dir + " without a time, pick " + target + " (one hour " + dir + ").";
+    } else if (nearest !== null) {
+      text += " If the speaker only says " + dir + " without a time, pick " + nearest + " (the next " + dir + " time).";
     } else if (!any && !keys.has(dir)) {
       sentinels[dir] = (dir === "later" ? "Later" : "Earlier") + " than " + hhmm(cur) + ", which is not available";
       text += " If the speaker only says " + dir + ", pick " + dir + ".";
     }
   }
   return { text: text + count, sentinels };
+}
+
+/** Key of the option closest to `cur` strictly in one direction (linear chips), or null when there is none. */
+function nearestOption(knob: ChoiceKnob, cur: number, dir: "later" | "earlier"): string | null {
+  let best: { key: string; m: number } | null = null;
+  for (const o of knob.options) {
+    const m = minutesOf(o.value);
+    if (m === null || (dir === "later" ? m <= cur : m >= cur)) continue;
+    if (best === null || (dir === "later" ? m < best.m : m > best.m)) best = { key: o.key, m };
+  }
+  return best ? best.key : null;
 }
 
 function minutesOf(v: JsonValue): number | null {

@@ -1,5 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import { BRICKS } from "@shared/catalog";
+import { ICON_NAMES } from "@shared/icons";
 import type { TurnRequest } from "@shared/protocol";
 import { COMPOSER_SYSTEM_PROMPT, composerUnreachableNote, composerPrompt, HTML_INSTRUCTION, htmlPrompt, promptContext, widgetsPrompt } from "./prompts";
 
@@ -42,6 +43,24 @@ describe("composer prompt", () => {
     expect(COMPOSER_SYSTEM_PROMPT).not.toContain("2026-");
     expect(COMPOSER_SYSTEM_PROMPT).not.toContain("http");
     expect(COMPOSER_SYSTEM_PROMPT).not.toContain("undefined");
+  });
+
+  test("composer prompt names every icon and the data-only rule for Image and Rating", () => {
+    const lines = COMPOSER_SYSTEM_PROMPT.split("\n");
+    const at = lines.findIndex((l) => l.startsWith("ICONS ("));
+    expect(at).toBeGreaterThan(-1);
+    expect(lines[at + 1].trim()).toBe(ICON_NAMES.join(", "));
+    expect(lines[at]).toContain("leave icon out when none fits");
+    const flat = COMPOSER_SYSTEM_PROMPT.replace(/\s+/g, " ");
+    expect(flat).toContain('Image.url and Rating.value only from a data line\'s fields: request "image" or "rating" in its fields');
+    expect(flat).toContain("Never write a URL or a rating yourself.");
+    expect(flat).toContain("Anything the person picks stays an OptionCard in a List; never put choices in a Table.");
+    expect(flat).toContain("each counts toward the 7 visible blocks");
+    // Spec anti-goal: no notice states a fact nobody stated.
+    expect(flat).toContain("Alert and Badge only for a notice the person asked for or a fact a data line delivered (e.g. opening hours from search); never on a confirm/summary step, never a claim about the booking, the airline, the venue or what happens next.");
+    expect(flat).toContain("rating, image (a photo, for an Image), carrier and route (trips)");
+    // The 7-block design rule is still there.
+    expect(flat).toContain("At most 7 visible blocks.");
   });
 
   test("every example line is valid JSON", () => {
@@ -109,7 +128,7 @@ describe("composer prompt", () => {
 
   test("structure rules: reachable ids, new content is a new step, value shapes, STATE defaults, not-available screen", () => {
     const flat = COMPOSER_SYSTEM_PROMPT.replace(/\s+/g, " ");
-    expect(flat).toContain("every id you send must appear in the child, children or tabs of a component that is itself reachable from \"root\", or it will not render");
+    expect(flat).toContain("every id you send must appear in the child, children, tabs or Accordion items of a component that is itself reachable from \"root\", or it will not render");
     expect(flat).toContain("A request for a new kind of content to choose from (options, results, a list of items) is a new step");
     expect(flat).toContain("ChoicePicker a string array");
     expect(flat).toContain("When the person did not say one but STATE implies it, use it");

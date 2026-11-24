@@ -287,3 +287,95 @@ Production build (`bun run build`) served statically from `dist/client` (no Work
 - Key box: with the stored key removed the stage shows the key box; `?k=` brings the stage back. `?classic` renders the previous layout on the same store and plays F1.
 - 1920×1080, 1600×900, 1366×768: no horizontal scroll (scrollWidth = viewport width). At 1366×768 after F6 the "Confirm flight" button ends at y=506 and the dock starts at y=676. 14 sessions with long titles: the rail list scrolls, titles end in an ellipsis, the delete button shows on hover.
 - Not checked here (needs a real mic and the Worker): live Space-to-talk in layout A, the "heard" tile state, the listening glow in the dark dock (the processing sweep was seen during replays).
+## Brick catalog: 27 bricks (branch brick-catalog, 2026-11-24 ~06:19-06:25 Berlin)
+Ten bricks added (Icon, Table, Chart, Timeline, Image, Badge, Alert, Accordion, Progress, Rating) plus an optional
+`icon` on OptionCard and Button. Image urls come from the source page's og:image (Worker, 1.5 s / 64 KB per page);
+Rating values only from search fields. Setup: the Hono app served in-process by Bun (port 5288; wrangler.jsonc vars +
+.dev.vars keys), DEV_NOW=2026-11-25T18:45, composer claude-sonnet-5-5, search/widgets/html claude-haiku-5-5.
+Smoke judge gains "invented: ids": every Image url / Rating value on screen must equal a value a data event
+delivered in that session. Code evaluated: **6943acb** (smoke "Script tree"). No prompt revision was needed.
+
+| line set | command | result | bar |
+|---|---|---|---|
+| flight | `--only flight --runs 10 --strict` | **10/10 scenario runs**, 42/42 lines | ≥ 9/10 |
+| dinner | `--only dinner --runs 10` | **9/10 scenario runs**, 41/42 lines | ≥ 9/10 |
+| held-out | `--only heldout --runs 1` | **8/8** (5 earlier + 3 new) | – |
+- Flight: step 2 options per run 2,2,2,2,1,2,3,2,2,2; search 2348 ms median (2111-2968); data arrived 4.69 s (4.03-5.36).
+  Medians: step 1 first UI 1.32 s / screen 4.01 s; step 2 1.71 / 4.48 s; tap → seat map 1.56 / 3.72 s; confirm 1.62 / 2.91 s.
+  Every step-2 flight card carried `icon: "plane"` (10/10). New bricks elsewhere: 3 Alerts on confirm summaries.
+- Dinner: places per run 2,2,2,3,3,1,1,2,4,2; search 3455 ms median (2650-4399); data 5.84 s (5.09-6.77).
+  **"We're six, and later." (the talk's headline patch) passed 9/10 by result**, 156 ms median (132-166), no LLM.
+  **Miss (run 8), cause not established:** the router patched Guests only (reason "edit 0.95: Guests → 6") and the
+  judge failed it as "later dropped". That step-2 screen had Time chips 19:00-20:30 with 20:00 selected, so "one hour
+  later" (21:00) was not an option, and it carried a new Alert, "Closes at 9PM: Kitchen may stop earlier. Pick a time
+  before closing." (the tapped place's data said Wed 12PM-9PM). The partial-edit rule says such a turn should compose.
+  No "later dropped" miss appears in the earlier evals in this file.
+  Step-2 screens per run (time control · Alert):
+
+  | run | time control (initial) | Alert on step 2 | tapped item's hours (search fields) |
+  |---|---|---|---|
+  | 1 | DateTimeInput (20:00) | "Open Monday to Friday 11:30–22:30 · Reservations advised, places limited" | Mon-Fri 11:30–22:30 |
+  | 2 | DateTimeInput (19:30) | – | Wed until 23:00 |
+  | 3 | DateTimeInput (20:00) | – | Wed 12:00-22:00 |
+  | 4 | DateTimeInput (20:00) | – | Sun-Fri from 12:00 |
+  | 5 | DateTimeInput (20:00) | "Hours unconfirmed: Wednesday dinner hours are not confirmed…" | dinner hours not confirmed |
+  | 6 | ChoicePicker 19:30-21:00, 4 chips (["20:00"]) | – | Wed 09:00-23:00 |
+  | 7 | DateTimeInput (20:00) | – | Mon-Fri 11:30-22:30 |
+  | 8 | ChoicePicker 19:00-20:30, 4 chips (["20:00"]) | "Closes at 9PM: … Pick a time before closing." | Wed 12PM-9PM |
+  | 9 | DateTimeInput (19:30) | – | Mon-Fri until 22:30 |
+  | 10 | DateTimeInput (19:30) | "Kitchen open until 21:00 tonight." | Wed 12PM-9PM |
+
+  Step 2 expect (ChoicePicker present) 2/10; earlier rates 2/3 (d7a9e70) and 4/5 (a94ccbf). Informational (not part of
+  the bar), but lower; the 8 DateTimeInput time knobs all patched correctly.
+  Dinner cards carried `icon: "utensils"` (10/10).
+- **Alerts and Badges on the talk path** (not judged by smoke): 17 Alerts and 2 Badges in the 80 a2ui dinner + flight turns, although
+  the prompt says new bricks only when the request is about them. Hours notes on dinner step 2 paraphrase the tapped
+  item's search fields (traced). Some confirm-summary Alerts state things no data line said: "No seat was picked. You can
+  choose one at check-in." / "Seat not chosen. You can pick one later." (flight), "Thursday dinner is not needed. Your
+  table is set for tonight." (dinner run 9), and "Confirmed"/"booked" wording for a booking the app does not make.
+  Left as measured: the bars were met, so no prompt revision was made (a change would orphan these numbers). Proposed
+  for the controller: one prompt line, e.g. "Alert and Badge only for a notice the person asked for or a fact from a data
+  line; never on a summary.", then a re-run of flight and dinner ×10.
+- Held-out: plans3 drew a Table bound to the search path (3 live records) and an info Alert; hamburg chose OptionCards
+  (icon map-pin) over a Timeline; cafe drew Image + Rating bound to data fields, but its single record (yelp.com) had
+  rating null and the page answered 403 to the og:image lookup, so neither showed (correct: nothing invented).
+  dog passed this time (6 blocks). 0 refused, 0 validation errors, 0 "invented", 0 icons dropped in all 92 turns.
+- Widgets and HTML lines unchanged: FlightSearchWidget 730 ms; RestaurantWidget 5 places in 3.81 s; HTML 2/2.
+- Not measured: brick prediction (Jev) now asks 27 questions instead of 17; the ten new predictHints were never run, so
+  which pool tiles light while speaking (and the latency) is unknown.
+- og:image probe from the dev machine (Bun, same code): hamburg-travel.com found (warm 112 ms; the first, cold attempt
+  hit the 1.5 s cap), germanycompass.com found, hamburg.com has no og tag, yelp.com and tripadvisor.com 403,
+  lufthansa.com 200 once then 403 (bot protection). A photo filled end to end in a live turn was not observed.
+- Raw captures and reports: session scratchpad `bricks-eval/` (flight.md, dinner.md, heldout.md, raw-*).
+
+## Brick catalog follow-up: Alerts/Badges only from data or the person (bc6b828, talk clock, in-process Bun server, 2026-11-24 ~14:25)
+- Prompt line: Alert and Badge only for a notice the person asked for or a fact a data line delivered; never on a confirm/summary step. Smoke judge: "notice on summary" fails a confirm step that draws an Alert or Badge.
+- **Flight --runs 10 --strict: 10/10, 42/42 lines.** Step 2 options per run 4,3,2,2,3,4,3,3,2,3; data arrived 4.89 s (4.03–5.38), search 2614 ms (2135–3174).
+- **Dinner --runs 10: 9/10.** Opener places 3,4,2,2,1,1,2,2,2,2; "We're six, and later." patched 9/10 (median 160 ms); the miss routed compose ("partial edit: Time") instead of patching, so the screen was rebuilt by the composer (2.2 s) rather than patched.
+- Alerts/Badges across the 20 runs: 1 (dinner run 1, "Kitchen open Wednesday 17:30-22:00", from the search fields). None on a summary step; none stating an unstated fact. Before the line: 17 Alerts + 2 Badges in 80 turns.
+
+## Brick catalog fix round (review I1-I3 + minors; eval at 67f18a0, talk clock, in-process Bun server, 2026-11-24 ~14:56 Berlin)
+- I1 64a181d: an Image without an http(s) url draws nothing, streaming or not (no skeleton box that collapses at `done`);
+  the box appears once a url exists, skeleton until load, hidden on error.
+- I2 bdd62a5: og:image lookup reads only up to "</head>" or 32 KB (OG_IMAGE_MAX_BYTES 32768) and scans meta tags without
+  regex attribute matching (one forward pass). Bun bench: a 32 KB run of letters in one tag 0.83 ms, 3,200 attributes
+  0.69 ms, a normal head 0.02 ms (was 6.1 s for 64 KB of letters, per the review). Test: four 32 KB pathological heads < 20 ms each.
+- I3 3a548ad (knobs.ts, decision model only; composer prompt unchanged): a bare "later"/"earlier" on time chips with no
+  option exactly one hour away names the nearest chip in that direction ("pick 20:30 (the next later time)"); the
+  sentinel stays only when no chip exists in that direction.
+- Minors 67f18a0: image lookups get min(1.5 s, turn budget left - 0.5 s) and are skipped under 0.3 s (M1); data is listed
+  as delivered before its SSE write and held entries flush one by one, so a photo update cannot be lost (M2); lookups
+  cover the first 4 records of a search (M3, fewer parallel subrequests); a numeric-string Chart value is accepted
+  like a path-bound one (M6).
+
+| line set | command | result | bar |
+|---|---|---|---|
+| dinner | `--only dinner --runs 5` | **5/5 scenario runs**, 22/22 lines | ≥ 4/5, patch judged by result |
+| flight | `--only flight --runs 3 --strict` | **3/3 scenario runs**, 14/14 lines | 3/3 |
+- Dinner: every step-2 screen used time chips this time (expect 5/5). "We're six, and later." patched 5/5 by result,
+  170 ms median (154-217), no LLM. **Run 1 is the I3 case**: chips 19:00/19:30/20:00/20:30 with 20:00 selected; the
+  router patched Time → 20:30 (+30 min, same date) and Guests → 6. Runs 2-5 had a 21:00 chip and moved +60 min.
+  Places per run 1,3,2,1,2; search 3380 ms median (2936-3546); data arrived 5.44 s (5.20-5.82).
+- Flight: step 2 options 2,3,3; search 2842 ms median (2823-3191); data 5.50 s; seat map 3/3; confirm 3/3.
+- 0 Alerts, 0 Badges, 0 refused, 0 invented, 0 "notice on summary" in these 36 lines. Widgets and HTML lines pass.
+- Raw captures: session scratchpad `bricks-eval/` (fix-dinner.md, fix-flight.md, raw-fix-*).

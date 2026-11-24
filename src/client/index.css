@@ -179,3 +179,30 @@
     animation: none !important;
   }
 }
+
+/* Brick status colours (Badge, Alert, Rating). Muted to sit with the warm light palette. */
+:root {
+  --success: #2f6b3a;
+  --success-soft: #dcebd5;
+  --warning: #8a5a00;
+  --warning-soft: #f6e7c1;
+  --info: #2f5d7c;
+  --info-soft: #dbe7ee;
+  --danger-soft: #f5d9cf;
+  --star: #d08a12;
+}
+@theme inline {
+  --color-success: var(--success);
+  --color-success-soft: var(--success-soft);
+  --color-warning: var(--warning);
+  --color-warning-soft: var(--warning-soft);
+  --color-info: var(--info);
+  --color-info-soft: var(--info-soft);
+  --color-danger-soft: var(--danger-soft);
+  --color-star: var(--star);
+}
+@media (prefers-reduced-motion: reduce) {
+  [data-slot="accordion-content"] {
+    animation: none !important;
+  }
+}

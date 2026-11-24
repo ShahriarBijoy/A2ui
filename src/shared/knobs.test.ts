@@ -372,11 +372,45 @@ describe("buildRouteRequest", () => {
       "Current value: 18:00. If the speaker only says later without a time, pick 19:00 (one hour later). If the speaker only says earlier, pick earlier." + COUNT,
     );
     expect(first.criteria.earlier).toBe("Earlier than 18:00, which is not available");
-    // 20:30: a later chip exists (21:00) but not one hour later → no later clause, no sentinel.
+    // 20:30: a later chip exists (21:00) but not one hour later → the nearest later chip, no sentinel.
     const nearEnd = at("20:30");
-    expect(nearEnd.instructions).toEndWith("Current value: 20:30. If the speaker only says earlier without a time, pick 19:30 (one hour earlier)." + COUNT);
+    expect(nearEnd.instructions).toEndWith(
+      "Current value: 20:30. If the speaker only says later without a time, pick 21:00 (the next later time). If the speaker only says earlier without a time, pick 19:30 (one hour earlier)." + COUNT,
+    );
     expect(nearEnd.criteria.later).toBeUndefined();
     expect(Object.keys(buildRouteRequest("hello", []).questions)).toEqual(["kind"]);
+  });
+
+  test("chips that stop short of one hour: 'later' and 'earlier' name the nearest chip in that direction; none → sentinel", () => {
+    const chips = (values: string[]): CatalogComponent[] => [
+      { id: "time", component: "ChoicePicker", label: "Time", variant: "mutuallyExclusive", options: values.map((t) => ({ label: t, value: t })), value: { "@path": "/b/time" } },
+      { id: "guests", component: "Stepper", label: "Guests", min: 1, max: 12, value: { "@path": "/b/guests" } },
+    ];
+    const q = (values: string[], cur: string) => {
+      const k0 = buildRouteRequest("we're six, and later", deriveKnobs(chips(values), { b: { time: [cur], guests: 2 } }, NOW)).questions.k0;
+      if (k0.type !== "choice") throw new Error("k0 should be a choice");
+      return k0;
+    };
+    const COUNT = " A count of people, such as 'we're six', is not a time.";
+    // The brick-catalog run-8 screen: chips 19:00–20:30, 20:00 selected.
+    const short = q(["19:00", "19:30", "20:00", "20:30"], "20:00");
+    expect(short.instructions).toEndWith(
+      "Current value: 20:00. If the speaker only says later without a time, pick 20:30 (the next later time). If the speaker only says earlier without a time, pick 19:00 (one hour earlier)." + COUNT,
+    );
+    expect(short.criteria.later).toBeUndefined();
+    expect(Object.keys(short.criteria)).toContain("20:30");
+    // The follow-up run-3 screen: 19:30–21:00 with 20:30 selected.
+    const late = q(["19:30", "20:00", "20:30", "21:00"], "20:30");
+    expect(late.instructions).toContain("If the speaker only says later without a time, pick 21:00 (the next later time).");
+    expect(late.instructions).toContain("If the speaker only says earlier without a time, pick 19:30 (one hour earlier).");
+    // Earlier stops short too: 19:30 selected, first chip 19:00.
+    const early = q(["19:00", "19:30", "20:00", "21:00"], "19:30");
+    expect(early.instructions).toContain("If the speaker only says earlier without a time, pick 19:00 (the next earlier time).");
+    expect(early.instructions).toContain("If the speaker only says later without a time, pick 20:00 (the next later time).");
+    // Nothing later at all → the sentinel stays, so the router composes instead of dropping "later".
+    const none = q(["19:00", "19:30", "20:00"], "20:00");
+    expect(none.criteria.later).toBe("Later than 20:00, which is not available");
+    expect(none.instructions).toContain("If the speaker only says later, pick later.");
   });
 
   test("date+time knob → a date question (k<i>) and a time question (k<i>t) over the same path", () => {

@@ -188,6 +188,17 @@ describe("parseSearchArgs", () => {
     expect(parseSearchArgs({ query: "q", max: "0" })).toMatchObject({ req: { max: 1 } });
   });
 
+  test("the model is never asked for image: it is a server field, kept as a flag for the og:image lookup", () => {
+    const r = parseSearchArgs({ query: "cafes near the venue", fields: ["name", "image", "rating"] });
+    expect(r).toEqual({ ok: true, req: { query: "cafes near the venue", fields: ["name", "rating"], max: 5, images: true } });
+    if (r.ok) {
+      const user = searchPrompt(r.req, ctx).user;
+      expect(user).not.toMatch(/^- image/m);
+      expect(user).toContain("- rating:");
+    }
+    expect(parseSearchArgs({ query: "q", fields: ["image"] })).toEqual({ ok: true, req: { query: "q", fields: [...DEFAULT_SEARCH_FIELDS], max: 5, images: true } });
+  });
+
   test("a query is required; long queries are clipped", () => {
     expect(parseSearchArgs({ fields: ["name"] })).toEqual({ ok: false, error: "search: missing 'query'" });
     expect(parseSearchArgs({ query: "  " })).toEqual({ ok: false, error: "search: missing 'query'" });

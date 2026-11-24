@@ -63,7 +63,8 @@ function Node({ id, scope }: { id: string; scope: string }): JSX.Element {
   return (
     <div
       data-a2ui-id={id}
-      className="bb-appear min-w-0"
+      // A brick with nothing to show (an Image without a photo, a Rating without a value) takes no gap.
+      className="bb-appear min-w-0 empty:hidden"
       style={weight ? { flexGrow: weight, flexBasis: 0 } : undefined}
     >
       <AncestryContext value={[...ancestors, id]}>

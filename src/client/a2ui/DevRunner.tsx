@@ -10,7 +10,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { copyReplaysJson } from "@/replay";
 import { store } from "@/store";
 import { abortTurn } from "@/turns";
-import { FIXTURES, GALLERY, type Fixture } from "./fixtures";
+import { FIXTURES, GALLERY, NEW_BRICKS, type Fixture } from "./fixtures";
 
 /** Small gaps between messages so the top-down build (U3) is visible. */
 const STEP_MS = 90;
@@ -77,7 +77,7 @@ export default function DevRunner() {
   return (
     <div className="flex flex-col gap-2" data-testid="dev-runner">
       <div className="flex flex-wrap items-center gap-2">
-        {[...FIXTURES, GALLERY].map((f) => (
+        {[...FIXTURES, GALLERY, NEW_BRICKS].map((f) => (
           <Button key={f.id} type="button" variant="outline" size="sm" onClick={() => runFixture(f)}>
             {f.label}
           </Button>

@@ -3,6 +3,7 @@ import { Badge } from "@/components/ui/badge";
 import { cn } from "@/lib/utils";
 import { isPending, resolveBoolean, resolveString, resolveStringList } from "@/a2ui/evaluate";
 import { store } from "@/store";
+import { BrickIcon } from "./Icon";
 import { evalCtx, InlineSkeleton, useSurfaceEnv, type BrickProps } from "./shared";
 
 export function OptionCard({ def, scope }: BrickProps<OptionCardComponent>) {
@@ -33,6 +34,11 @@ export function OptionCard({ def, scope }: BrickProps<OptionCardComponent>) {
         selected && "border-highlight bg-highlight-soft/40",
       )}
     >
+      {def.icon ? (
+        <span aria-hidden className="flex size-9 shrink-0 items-center justify-center rounded-md border bg-background text-foreground">
+          <BrickIcon name={def.icon} size={18} />
+        </span>
+      ) : null}
       <span className="flex min-w-0 flex-1 flex-col gap-0.5">
         <span className="text-base font-medium leading-snug">
           {pending.title ? <InlineSkeleton className="h-5 w-40" /> : title}
