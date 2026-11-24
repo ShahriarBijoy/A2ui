@@ -69,7 +69,7 @@ The owner raised the Anthropic spend limit. The key answers again (Haiku 1.3 s, 
 - The smoke now judges the "We're six, and later" patch by its result: 7/7 live patches correct (guests 6, time +60 min same date, nothing else). It catches the old false passes.
 
 ## Rehearsal checklist (owner, on the stage machine, Chrome)
-- Open the deployed URL with `?k=<DEMO_KEY>` once; the browser remembers the key (localStorage), so later tabs work without it. "no demo key" / "Demo key missing or wrong" means this step was skipped or the key was mistyped. Allow the mic.
+- Open the deployed URL (no `?k=` needed). A key box asks for the demo key once (`DEMO_KEY` in `.dev.vars`); the browser remembers it (localStorage), so the projector never shows it. Do this before the talk on the stage machine. A wrong key says "That key is not right."; a key that stops working brings the box back. Allow the mic.
 - Hold Space: the transcript appears grey, then final; the glow rises; release, and the turn goes out.
 - Press real F1, F3, F5 and F6: they must play replays, not reload, open help or find, or jump to the address bar. Slots 5–6 may leak in Chrome; if so, use F1–F4 on stage.
 - Shift+R after each good live turn to save it; Shift+E (or DevRunner "Copy replays JSON") to export, so the controller can ship them in `src/client/replays.json`.
