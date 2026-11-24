@@ -1,7 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import { BRICK_NAMES } from "@shared/catalog";
 import type { FetchMetrics } from "@/state";
-import { compactLines, MAX_STRING, pairFetches, payloadSizes, truncate, type TurnMessage } from "./compact";
+import { compactLines, jsonTokens, MAX_STRING, messageName, pairFetches, payloadSizes, prettyRows, truncate, type TurnMessage } from "./compact";
 
 const V = "1.0";
 const comps = (components: object[], surfaceId = "s1"): TurnMessage => ({
@@ -247,6 +247,52 @@ describe("pairFetches", () => {
       [1, "b"],
     ]);
     expect(unpaired).toEqual([]);
+  });
+});
+
+describe("JSON tab rows", () => {
+  test("a header per message, then its pretty lines numbered over the whole turn", () => {
+    const rows = prettyRows([
+      { msg: { version: V, deleteSurface: { surfaceId: "s1" } }, origin: "llm" },
+      { msg: { version: V, updateDataModel: { surfaceId: "s1", path: "/a", value: 1 } }, origin: "knob" },
+    ]);
+    const heads = rows.filter((r) => r.kind === "head");
+    expect(heads.map((h) => (h.kind === "head" ? [h.label, h.origin] : null))).toEqual([
+      ["deleteSurface", "llm"],
+      ["updateDataModel", "knob"],
+    ]);
+    const lines = rows.filter((r) => r.kind === "line");
+    expect(lines.map((r) => (r.kind === "line" ? r.n : 0))).toEqual(lines.map((_, i) => i + 1));
+    expect(lines[0].kind === "line" && lines[0].text).toBe("{");
+    expect(messageName(42)).toBe("invalid");
+  });
+
+  test("JSON lines split into keys, strings, bindings, numbers and literals", () => {
+    expect(jsonTokens('  "value": {"@path": "/a"}, "n": -1.5, "ok": true').map((x) => [x.k, x.v])).toEqual([
+      ["op", "  "],
+      ["key", '"value"'],
+      ["punct", ":"],
+      ["op", " "],
+      ["punct", "{"],
+      ["key", '"@path"'],
+      ["punct", ":"],
+      ["op", " "],
+      ["str", '"/a"'],
+      ["punct", "}"],
+      ["punct", ","],
+      ["op", " "],
+      ["key", '"n"'],
+      ["punct", ":"],
+      ["op", " "],
+      ["num", "-1.5"],
+      ["punct", ","],
+      ["op", " "],
+      ["key", '"ok"'],
+      ["punct", ":"],
+      ["op", " "],
+      ["lit", "true"],
+    ]);
+    expect(jsonTokens('"say \\"hi\\""').map((x) => x.k)).toEqual(["str"]);
   });
 });
 

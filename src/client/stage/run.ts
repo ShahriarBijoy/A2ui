@@ -3,8 +3,8 @@
  * (performance.now(), the same clock as metrics.startedAt) and the turn's recording (its done event). Pure, so every
  * number here is unit tested; a value that was not measured is null and shows as "–".
  */
-import { isPlainObject } from "@shared/a2ui";
-import type { A2uiOrigin } from "@shared/protocol";
+import { A2UI_VERSION, isPlainObject } from "@shared/a2ui";
+import type { A2uiOrigin, TurnInput } from "@shared/protocol";
 import { formatMs, formatSeconds, isTurnFinished } from "@/format";
 import type { AgentItem, ThreadItem, TurnRecording, UserItem, WireEntry } from "@/state";
 import { jsonChars, type TurnMessage } from "./compact";
@@ -22,6 +22,12 @@ export function turnMessages(wire: readonly WireEntry[], turnId: string, started
     out.push({ msg: w.json, origin: w.dir === "down" ? (w.origin as A2uiOrigin) : "renderer", atMs });
   }
   return out;
+}
+
+/** A tap turn starts with the renderer's action: the stream shows what the tap sent before what came back. */
+export function withActionInput(input: TurnInput | undefined, messages: readonly TimedMessage[]): TimedMessage[] {
+  if (input?.type !== "action") return messages.slice();
+  return [{ msg: { version: A2UI_VERSION, action: input.action }, origin: "renderer", atMs: null }, ...messages];
 }
 
 /** ms from the turn's start to its done event, when the turn was recorded on this page (replays and live turns). */

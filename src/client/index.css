@@ -143,6 +143,21 @@
   animation: bb-pulse 1.2s ease-in-out infinite;
 }
 
+/* Dotted canvas: the newest screen's ground and the Run tab's wireframe. Tokens only. */
+.bb-dots {
+  background-color: color-mix(in srgb, var(--background) 55%, var(--panel));
+  background-image: radial-gradient(circle, color-mix(in srgb, var(--foreground) 16%, transparent) 1px, transparent 1.3px);
+  background-size: var(--bb-dot-gap, 14px) var(--bb-dot-gap, 14px);
+  background-position: center;
+}
+
+/* Hood hover: the component a JSON-stream line or a component row names, outlined on the screen. */
+[data-bb-outline] {
+  outline: 2px solid var(--highlight);
+  outline-offset: 2px;
+  border-radius: var(--radius-sm);
+}
+
 /* Stage chrome (rail, top bar, dock, hood): one icon stroke everywhere. Screens keep their own. */
 .bb-chrome svg.lucide {
   stroke-width: 1.75;

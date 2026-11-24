@@ -352,6 +352,61 @@ export function compactLines(messages: readonly TurnMessage[], fetches: readonly
   return finish(drafts);
 }
 
+// ── JSON tab ─────────────────────────────────────────────────────────────────
+
+export type JsonRow =
+  | { kind: "head"; msg: number; origin: TurnMessage["origin"]; label: string }
+  | { kind: "line"; msg: number; n: number; text: string };
+
+/** The name of an A2UI message: its one top-level key besides "version". */
+export function messageName(msg: unknown): string {
+  if (!isPlainObject(msg)) return "invalid";
+  return Object.keys(msg).find((k) => k !== "version") ?? "invalid";
+}
+
+/** Each message pretty-printed under a header row; line numbers run on over the whole turn. */
+export function prettyRows(messages: readonly TurnMessage[]): JsonRow[] {
+  const rows: JsonRow[] = [];
+  let n = 0;
+  messages.forEach((m, i) => {
+    rows.push({ kind: "head", msg: i, origin: m.origin, label: messageName(m.msg) });
+    let text: string;
+    try {
+      text = JSON.stringify(m.msg, null, 2) ?? "null";
+    } catch {
+      text = String(m.msg);
+    }
+    for (const line of text.split("\n")) rows.push({ kind: "line", msg: i, n: ++n, text: line });
+  });
+  return rows;
+}
+
+const JSON_TOKEN = /("(?:[^"\\]|\\.)*")(\s*:)?|(-?\d+(?:\.\d+)?(?:[eE][+-]?\d+)?)|\b(true|false|null)\b|([{}[\],])/g;
+
+/** One pretty-printed JSON line as tokens: keys, strings, numbers, literals and punctuation. */
+export function jsonTokens(line: string): Token[] {
+  const out: Token[] = [];
+  let last = 0;
+  for (const m of line.matchAll(JSON_TOKEN)) {
+    const at = m.index ?? 0;
+    if (at > last) out.push(t("op", line.slice(last, at)));
+    if (m[1] !== undefined && m[2] !== undefined) {
+      out.push(t("key", m[1]), t("punct", m[2]));
+    } else if (m[1] !== undefined) {
+      out.push(t(/^"@/.test(m[1]) ? "bind" : "str", m[1]));
+    } else if (m[3] !== undefined) {
+      out.push(t("num", m[3]));
+    } else if (m[4] !== undefined) {
+      out.push(t("lit", m[4]));
+    } else {
+      out.push(t("punct", m[0]));
+    }
+    last = at + m[0].length;
+  }
+  if (last < line.length) out.push(t("op", line.slice(last)));
+  return out;
+}
+
 export type Payload = {
   /** Characters of the turn's A2UI JSON as sent (compact JSON, one message per line). */
   json: number;

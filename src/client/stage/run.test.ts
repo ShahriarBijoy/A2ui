@@ -14,6 +14,7 @@ import {
   streamHeader,
   tokensPerSecond,
   turnMessages,
+  withActionInput,
   writtenIds,
   type TimedMessage,
 } from "./run";
@@ -76,6 +77,15 @@ describe("turnMessages", () => {
 
   test("no start time: no arrival times", () => {
     expect(turnMessages([wire("t1", 1500, comps())], "t1", null)[0].atMs).toBeNull();
+  });
+});
+
+describe("withActionInput", () => {
+  test("a tap turn begins with the action it sent; a spoken turn is unchanged", () => {
+    const action = { name: "pick_flight", surfaceId: "s2", sourceComponentId: "flight", timestamp: "t", context: { id: "r1" } };
+    const out = withActionInput({ type: "action", action }, []);
+    expect(out).toEqual([{ msg: { version: V, action }, origin: "renderer", atMs: null }]);
+    expect(withActionInput({ type: "utterance", text: "hi" }, [])).toEqual([]);
   });
 });
 
