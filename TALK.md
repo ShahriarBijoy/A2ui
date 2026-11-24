@@ -1,8 +1,8 @@
-# Brick Box: the talk
+# The Future Is Generative UI: the talk
 
 AI Tinkerers Bremen · Wed 25 Nov 2026 · JAAI, Überseestadt · 5 minutes
 
-**The story:** one evening, told live. The meetup ends, you're hungry, friends change plans, tomorrow you fly. Every screen is built on the spot from a box of bricks. Then you show two other ways to build it, let the room ask for something, open the hood, and close.
+**The story:** a concept exploration of generative UI, told as one evening, live. The meetup ends, you're hungry, friends change plans, tomorrow you fly. Every screen is built on the spot from a box of bricks. Then you show two other ways to build it, let the room ask for something, open the hood, and close.
 
 **The three claims** (from the plan, keep them):
 1. UI can be generated for the moment: the agent builds the screen you need right now.
@@ -30,7 +30,7 @@ Every one of them had screens that somebody designed months ago,
 for questions somebody guessed in advance.
 
 Tonight I want to try something different.
-This app has no screens.
+This demo has no screens.
 It has a box of bricks." [point at the bricks panel]
 "Twenty-seven of them. Cards, buttons, a seat map, a chart.
 And an agent that picks the bricks while I talk."
@@ -125,7 +125,7 @@ It sends data, not code."
 
 ### 3:45 · Your turn
 "Okay, your turn.
-Somebody shout something you'd want from an app tonight."
+Somebody shout something you'd want to see tonight."
 
 [Repeat the request out loud so the room hears it, then hold Space and say it.]
 
