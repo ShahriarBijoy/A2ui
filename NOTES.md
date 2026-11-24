@@ -442,3 +442,9 @@ claude-sonnet-5-5, search claude-haiku-5-5; 2026-11-24 15:19-15:23 Berlin):
   added, 5 blocks, all four weather bricks 3/3; data arrived 2.11 s (1.56-2.58), weather fetch 49/377/929 ms.
 - Screenshots: the stage layout from a static build, with a saved session rebuilt from captured weather turns through
   the real store (session scratchpad weather-shots/). Raw captures and reports: session scratchpad weather-eval/.
+
+## Merged build c98ae11 (layout A + 27 bricks + weather + polish/Run view), talk clock, in-process Bun server, 2026-11-24 ~15:55
+- Flight --runs 3 --strict: 3/3, 14/14 lines (options 3,2,2; data 5.20 s median).
+- Dinner --runs 3: 2/3. Opener places 3,2,3; "We're six, and later." patched 3/3 (181 ms median). Miss: run 1 confirm summary drew Badge "Reserved" (smoke "notice on summary"); parked (the talk script never taps confirm).
+- Held-out --runs 1: 10/10, incl. weather-today (weather 210 ms, 1 record, bound Icon + area Chart + days List + credit) and weather-weekend.
+- Production c98ae11: live weather turn first screen 1.6 s, first data 1.9 s, done 5.0 s; JSON stream and Run tab render; no horizontal scroll at 1920×1080.

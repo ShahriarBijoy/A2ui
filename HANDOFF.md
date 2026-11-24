@@ -2,13 +2,13 @@
 
 Written 2026-11-23 when the owner moved from a Code Mode session to a normal one. Keep this file current; delete it when the build is done.
 
-## Resume here (paused 2026-11-24 ~05:40 at the owner's request)
-- **Production is unchanged and stable:** e65bae2 (live web flights, key box, rate limits). Nothing below is deployed.
-- **Redesign approved** (spec `docs/superpowers/specs/2026-11-24-stage-redesign-design.md`, plans in `docs/superpowers/plans/`). Two branches, both pushed to GitHub as backup:
-  - `stage-shell` (worktree `C:/Users/Shahr/AppData/Local/Temp/claude/4400adc4556695d6/dfd733ae-9a40-47f7-b403-5c3fd6ee7705/scratchpad/bb-shell`): layout A, sessions, Clear, drawn brick tiles, folded turns, `?classic` fallback. Done: 7 commits, 514 tests, browser-checked at 1920×1080 / 1600×900 / 1366×768 (screenshots `C:/Users/Shahr/AppData/Local/Temp/claude/4400adc4556695d6/dfd733ae-9a40-47f7-b403-5c3fd6ee7705/scratchpad/shell-shots/`). Report: `.superpowers/sdd/stage-shell-report.md`. Needs the owner's mic check.
-  - `brick-catalog` (worktree `C:/Users/Shahr/AppData/Local/Temp/claude/4400adc4556695d6/dfd733ae-9a40-47f7-b403-5c3fd6ee7705/scratchpad/bb-bricks`): the 10 new bricks + icon props, og:image enrichment. Done: 529 tests; talk-clock eval at 6943acb flight 10/10 strict, dinner 9/10, held-out 8/8. Report: `.superpowers/sdd/brick-catalog-report.md`. **Follow-up in progress** (WIP commit on the branch): a prompt line so Alerts/Badges never state unstated facts + a smoke check; **re-run flight 10 and dinner 10 at the talk clock, then finalise the commit.**
-- **Next steps:** (1) finish the brick-catalog follow-up eval; (2) merge both into master (expect conflicts in `Surface.tsx`, `index.css`, `HANDOFF.md`, `NOTES.md`); full `bun test` + `bunx tsc -b`; (3) deploy from a clean worktree; production smoke (flight 3, dinner 2) + browser checks (F1–F6, New session, Clear, key box); (4) owner rehearsal with the mic. **Go/no-go Wed 25 Nov 12:00**; if missed, production stays e65bae2.
-- The worktrees live in the session scratchpad; if it was cleared, recreate them from the pushed branches.
+## Current state (2026-11-24 ~16:00)
+- **Production:** https://brick-box.shahriarbijoy.workers.dev runs **c98ae11** (version 3d1178d4): layout A (sessions rail, Clear conversation, folded turns, `?classic` fallback), 27 bricks (Icon, Table, Chart incl. area, Timeline, Image, Badge, Alert, Accordion, Progress, Rating), live weather (Open-Meteo), live web search for places/events/fares (one retry on an empty list), the key box, per-IP rate limits, and the hood tabs **Bricks / JSON stream / JSON / Run / Data** with run history. GitHub master = c98ae11.
+- **Talk-clock check at c98ae11 (in-process, DEV_NOW 2026-11-25T18:45):** flight 3/3 strict; dinner 2/3 (the miss: a "Reserved" Badge on the confirm summary — the script never taps confirm); held-out 10/10 incl. both weather lines. Earlier: brick-catalog flight 10/10, dinner 9/10; weather branch weather 6/6, flight 5/5, dinner 5/5.
+- **Production checks:** browser pass at 1920×1080 (key box, F1 replay with JSON stream, a live weather turn with the Run tab: first screen 1.6 s, done 5.0 s, 16/16 components), no horizontal scroll; live flight 2/2 and dinner places 3,3 after the retry fix.
+- **Talk:** script in `TALK.md` (rehearsal page https://claude.ai/artifact/7hBKDMHow71z8f1jD1CjvK). Framing: a concept exploration of generative UI, shown in a small playground (not "an app").
+- **Known minors:** a Badge/Alert can still appear on a confirm summary (1 in 3 at c98ae11); area-chart axis labels are not rounded; no thunder/fog icons (rain/cloud used); Run tab timings show "–" for turns restored after a reload; hood panel is 340–420 px wide.
+- **Owner next:** rehearse with the mic on the stage laptop; before going on stage use the rail menu → Delete all sessions.
 
 ## Read in this order
 1. `PLAN.md`: the spec (authoritative). Build steps in §8, each with an acceptance check.
@@ -60,7 +60,7 @@ The owner raised the Anthropic spend limit. The key answers again (Haiku 1.3 s, 
 - Free plan: 100,000 Worker requests/day (reset 00:00 UTC = 01:00 Bremen; Error 1027 after). Static assets are free and unlimited, so only `/api/*` and `/catalog/*` count. No charge on the Free plan; over the limit the API pauses until the reset. A limiter cannot keep that count down (a refused request already ran the Worker); it protects the Claude/Soniox spend.
 
 ## Stage layout A (branch stage-shell; production keeps the old layout until it merges)
-- The page opens **layout A**: sessions rail (left), top bar + thread + floating voice dock (middle), "Under the hood" (right: Bricks / Wire / Data tabs over the Turns / LLM calls avoided / Tokens totals).
+- The page opens **layout A**: sessions rail (left), top bar + thread + floating voice dock (middle), "Under the hood" (right: Bricks / JSON stream / JSON / Run / Data tabs over the Turns / LLM calls avoided / Tokens totals).
 - **`?classic`** opens the previous layout on the same store and the same sessions (so it opens on the most recent saved session; Esc clears it). If the new layout misbehaves on stage, add `?classic` to the URL; nothing else changes.
 - **Stage flow:** dinner (F1–F3) → **New session** → flight (F4–F6). Dinner stays in the rail; one click on it brings its screens back. F1 and F4 open a fresh session themselves when the open one has turns, so forgetting New session is harmless.
 - **Before the talk:** close every other Brick Box tab (each tab saves its own list; the last one to save wins), then rail "…" menu → **Delete all sessions** (in-page confirm), so no rehearsal titles reach the projector. Sessions live in this browser only (localStorage, newest 20); the page opens on the most recent one, or an empty one after Delete all.
