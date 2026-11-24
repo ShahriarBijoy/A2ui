@@ -105,12 +105,12 @@ export function isHttpUrl(s: string): boolean {
 export type ImageLoad = "loading" | "loaded" | "failed";
 
 /**
- * What the Image brick draws. The box has a fixed aspect, so a skeleton holds the place until the
- * picture loads (no jump on arrival). No usable url: a skeleton while the turn streams (the image
- * update follows the records), nothing after. A url that fails to load hides the brick: no broken icon.
+ * What the Image brick draws. No usable url (null, empty, not http(s)): nothing at all, streaming or
+ * not, so a record without a photo never shows a box that later collapses. Once a url exists the box
+ * appears at its fixed aspect with a skeleton until the picture loads (the one growth, when a real
+ * photo arrives). A url that fails to load hides the brick: no broken-image icon.
  */
-export function imageView(url: string, streaming: boolean, load: ImageLoad): "skeleton" | "image" | "hidden" {
-  if (!isHttpUrl(url)) return streaming ? "skeleton" : "hidden";
-  if (load === "failed") return "hidden";
+export function imageView(url: string, load: ImageLoad): "skeleton" | "image" | "hidden" {
+  if (!isHttpUrl(url) || load === "failed") return "hidden";
   return load === "loaded" ? "image" : "skeleton";
 }

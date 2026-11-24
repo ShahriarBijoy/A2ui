@@ -6,20 +6,20 @@ import { imageView, isHttpUrl, type ImageLoad } from "./items";
 import { evalCtx, useSurfaceEnv, type BrickProps } from "./shared";
 
 /**
- * A photo whose url came from a data line (the Worker reads the result page's og:image). Fixed
- * aspect box, skeleton until it loads, hidden when there is none or it fails (see imageView).
+ * A photo whose url came from a data line (the Worker reads the result page's og:image). Nothing
+ * until a url exists; then a fixed aspect box, skeleton until it loads, hidden if it fails (imageView).
  */
 export function Image({ def, scope }: BrickProps<ImageComponent>) {
   const env = useSurfaceEnv();
   const ctx = evalCtx(env, scope);
   const url = resolveString(def.url, ctx).trim();
   // Keyed on the url: a new picture starts loading from scratch.
-  return <ImageBox key={url} url={url} alt={resolveString(def.alt, ctx)} square={def.aspect === "square"} streaming={env.streaming} />;
+  return <ImageBox key={url} url={url} alt={resolveString(def.alt, ctx)} square={def.aspect === "square"} />;
 }
 
-function ImageBox(props: { url: string; alt: string; square: boolean; streaming: boolean }) {
+function ImageBox(props: { url: string; alt: string; square: boolean }) {
   const [load, setLoad] = useState<ImageLoad>("loading");
-  const view = imageView(props.url, props.streaming, load);
+  const view = imageView(props.url, load);
   if (view === "hidden") return null;
   return (
     <div

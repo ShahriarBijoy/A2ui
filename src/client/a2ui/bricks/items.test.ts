@@ -63,18 +63,17 @@ describe("barWidths", () => {
 });
 
 describe("imageView", () => {
-  test("only an http(s) url is shown; the box holds a skeleton until it loads", () => {
-    expect(imageView("https://example.test/a.jpg", false, "loading")).toBe("skeleton");
-    expect(imageView("https://example.test/a.jpg", false, "loaded")).toBe("image");
-    expect(imageView("javascript:alert(1)", true, "loaded")).toBe("skeleton");
-    expect(imageView("data:image/png;base64,AAAA", false, "loaded")).toBe("hidden");
+  test("no url (null, empty or not http(s)): nothing at all, even while the turn streams (no box that later collapses)", () => {
+    for (const url of ["", "javascript:alert(1)", "data:image/png;base64,AAAA", "/relative.jpg"]) {
+      expect(imageView(url, "loading")).toBe("hidden");
+      expect(imageView(url, "loaded")).toBe("hidden");
+    }
   });
-  test("no url: a skeleton while the turn streams, nothing after", () => {
-    expect(imageView("", true, "loading")).toBe("skeleton");
-    expect(imageView("", false, "loading")).toBe("hidden");
+  test("a url: the box holds a skeleton until the picture loads", () => {
+    expect(imageView("https://example.test/a.jpg", "loading")).toBe("skeleton");
+    expect(imageView("https://example.test/a.jpg", "loaded")).toBe("image");
   });
   test("a url that fails to load hides the brick (no broken-image icon)", () => {
-    expect(imageView("https://example.test/404.jpg", true, "failed")).toBe("hidden");
-    expect(imageView("https://example.test/404.jpg", false, "failed")).toBe("hidden");
+    expect(imageView("https://example.test/404.jpg", "failed")).toBe("hidden");
   });
 });
