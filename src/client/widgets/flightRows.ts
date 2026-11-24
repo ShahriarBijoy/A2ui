@@ -14,9 +14,12 @@ export function flightRowParts(f: Flight): FlightRowParts {
   return { route: f.route, price: f.price, tags: f.tags.slice(0, 3), host: f.source ? hostLabel(f.source) : null };
 }
 
-/** "No flights found." only after a search could run (both ends known); before that nothing was looked up. */
+/**
+ * Neutral once a search could run (both ends known): the props do not say whether it found nothing or failed.
+ * Before that nothing was looked up.
+ */
 export function emptyFlightsText(props: Pick<FlightSearchWidgetProps, "from" | "to">): string {
-  return props.from && props.to ? "No flights found." : "No results yet.";
+  return props.from && props.to ? "No flights to show." : "No results yet.";
 }
 
 const str = (v: JsonValue | undefined): string | null => (typeof v === "string" && v.trim() ? v.trim() : null);

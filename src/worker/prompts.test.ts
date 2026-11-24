@@ -133,6 +133,10 @@ describe("composer prompt", () => {
     expect(flat).toContain(
       "When the person books something with assigned places (seats), let them pick the place with the most specific component before the confirm step; then end that step with one primary Button whose action context carries the chosen place.",
     );
+    // Seat availability is a fact no source states: the seat map is a generic cabin.
+    expect(flat).toContain(
+      'A SeatMap shows a generic cabin: no "taken" seats (seat availability is unknown) and no preselected seat (initial value ""); its confirm Button keeps a required check on the seat.',
+    );
   });
 
   test("the unreachable-List note hands back the requested data paths", () => {

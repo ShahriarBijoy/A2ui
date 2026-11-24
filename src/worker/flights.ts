@@ -2,7 +2,8 @@
  * Widgets mode's flight search on live data (owner decision 2026-11-24: no demo generator). show_flight_search
  * runs the same web search as a2ui data lines (search.ts validates the answer); this module turns the tool input
  * into that search and its records into the widget's rows. A web search finds route-level fare listings, not
- * departures, so a row is carrier · route · fare as listed. Nothing is computed or defaulted.
+ * departures, so a row is carrier · route · fare as listed. Nothing is computed; the only default is the origin,
+ * which is the venue's city when the person names none (shown in the form).
  */
 import type { JsonObject, JsonValue } from "@shared/a2ui";
 import type { Flight } from "@shared/protocol";

@@ -55,8 +55,8 @@ describe("flightRowParts and the empty state", () => {
     expect(flightRowParts(f)).toEqual({ route: null, price: null, tags: [], host: null });
   });
 
-  test("'No flights found.' only once a search could run", () => {
-    expect(emptyFlightsText({ from: "Bremen", to: "Oslo" })).toBe("No flights found.");
+  test("a neutral empty text once a search could run (it may have failed), 'No results yet.' before", () => {
+    expect(emptyFlightsText({ from: "Bremen", to: "Oslo" })).toBe("No flights to show.");
     expect(emptyFlightsText({ from: "Bremen" })).toBe("No results yet.");
   });
 });
