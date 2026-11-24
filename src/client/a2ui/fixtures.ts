@@ -86,7 +86,7 @@ export const FLIGHT_SEAT_MAP = fixture("seatmap", "Flight seat map", [
   { version: "1.0", createSurface: { surfaceId: "s5", catalogId: FIXTURE_CATALOG_ID } },
   {
     version: "1.0",
-    updateDataModel: { surfaceId: "s5", path: "/", value: { flight: { id: "f2", price_eur: 312, demo: true }, seat: "" } },
+    updateDataModel: { surfaceId: "s5", path: "/", value: { flight: { id: "r2", carrier: "Example Air", route: "BRE → JFK · 1 stop", price: "from €312" }, seat: "" } },
   },
   {
     version: "1.0",
@@ -95,7 +95,7 @@ export const FLIGHT_SEAT_MAP = fixture("seatmap", "Flight seat map", [
       components: [
         { id: "root", component: "Column", children: ["title", "route", "seats", "price", "confirm"] },
         { id: "title", component: "Text", text: "## Pick a seat" },
-        { id: "route", component: "Text", variant: "caption", text: "DA 412 · BRE → JFK" },
+        { id: "route", component: "Text", variant: "caption", text: { "@path": "/flight/route" } },
       ],
     },
   },
@@ -116,7 +116,7 @@ export const FLIGHT_SEAT_MAP = fixture("seatmap", "Flight seat map", [
           id: "price",
           component: "Stat",
           label: "Price",
-          value: { "@call": "formatCurrency", args: { value: { "@path": "/flight/price_eur" }, currency: "EUR" } },
+          value: { "@path": "/flight/price" },
         },
         {
           id: "confirm",

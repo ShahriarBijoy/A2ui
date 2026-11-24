@@ -13,6 +13,9 @@ import {
   runSearch,
   SEARCH_SYSTEM_PROMPT,
   searchPrompt,
+  tidyPrice,
+  tidyRecords,
+  tidyTags,
   type SearchRequest,
 } from "./search";
 // A real reply (Haiku 5.5, web_search_20250305, max_uses 1), trimmed: preamble text, two parallel
@@ -140,6 +143,19 @@ describe("normalizeRecords (field filter)", () => {
     expect(dropped).toBe(7);
   });
 
+  test("a requested carrier is required: a trip item without one is dropped; other requests are unaffected", () => {
+    const hosts = new Set(["a.example"]);
+    const items = [
+      { carrier: null, route: "BRE → JFK · 1 stop", price: "€590", source: "https://a.example/1" },
+      { carrier: "KLM", route: null, price: null, source: "https://a.example/2" },
+    ];
+    const out = normalizeRecords(items, ["carrier", "route", "price"], 4, hosts);
+    expect(out.dropped).toBe(1);
+    expect(out.records).toEqual([{ id: "r1", carrier: "KLM", route: null, price: null, source: "https://a.example/2" }]);
+    // Without a requested carrier the same item is kept (the KLM item then holds no requested fact).
+    expect(normalizeRecords(items, ["route", "price"], 4, hosts).records.map((r) => r.route)).toEqual(["BRE → JFK · 1 stop"]);
+  });
+
   test("caps at max; long text is clipped", () => {
     const items: JsonValue[] = Array.from({ length: 9 }, (_, i) => ({ name: "x".repeat(300) + i, source: `https://example.org/${i}` }));
     const { records } = normalizeRecords(items, ["name"], 3, hosts);
@@ -195,10 +211,65 @@ describe("searchPrompt and runSearch", () => {
     expect(searchPrompt({ ...req, fields: ["lineup"] }, ctx).user).toContain("- lineup\n");
   });
 
+  test("trips: carrier and route hints; a narrow exception to the date rule, fares labelled by tags, never estimated", () => {
+    const user = searchPrompt({ ...req, fields: ["carrier", "route", "price", "tags"] }, ctx).user;
+    expect(user).toContain("- carrier: the airline, rail or bus company name only, as a result states it");
+    expect(user).toContain('- route: airports or cities and stops as a result states them, e.g. "OPO → OSL · 1 stop via AMS"; "nonstop" only if a result says so');
+    const flat = SEARCH_SYSTEM_PROMPT.replace(/\s+/g, " ");
+    expect(flat).toContain("Trips (flights, trains, buses) are the one exception to that date rule");
+    expect(flat).toContain("An item is one carrier or route that serves the requested trip, named by a result for this origin and destination");
+    expect(flat).toContain('may be kept only with a tag that says what it is ("round trip", "June fares"); never present it as the fare for the requested date');
+    expect(flat).toContain("No comments in values");
+    // The general rules stay: the date rule for everything else, and no estimates.
+    expect(flat).toContain("leave out items the results do not show meeting it");
+    expect(flat).toContain("Never estimate, round or guess a number, price");
+    expect(SEARCH_SYSTEM_PROMPT).not.toMatch(/\b20\d\d\b/);
+    // No prompt text steers toward the stage scenario (owner rule): no talk place, carrier or date.
+    const talk = /Bremen|New York|JFK|\bBRE\b|\bFRA\b|Lufthansa|Air France|KLM|\bNov\b|November/;
+    expect(SEARCH_SYSTEM_PROMPT).not.toMatch(talk);
+    // The user message names the venue by design; its field hints must not.
+    for (const hint of user.split("\n").filter((l) => l.startsWith("- "))) expect(hint).not.toMatch(talk);
+  });
+
   test("items whose stated hours contradict the requested day or time are left out", () => {
     expect(SEARCH_SYSTEM_PROMPT.replace(/\s+/g, " ")).toContain(
       "Leave out every item whose stated opening hours or dates contradict the requested day or time",
     );
+  });
+
+  test("runSearch asks once more after prose instead of the array, or an empty trip list; sums the measured counts", async () => {
+    const trip: SearchRequest = { query: "flights from Porto to Oslo", fields: ["carrier", "route", "price", "tags"], max: 4 };
+    const text = (t: string) => reply({ blocks: [...reply().blocks.filter((b) => b.type !== "text"), { type: "text", text: t }], searches: 1, inputTokens: 100, outputTokens: 10 });
+    const host = (reply().blocks.find((b) => b.type === "results") as { urls: string[] }).urls[0];
+    const good = text(JSON.stringify([{ carrier: "TAP", route: "OPO → OSL · 1 stop", price: "from €39", tags: ["round trip"], source: host }]));
+    const scripted = (...replies: SearchReply[]) => {
+      let calls = 0;
+      return { fn: async () => replies[calls++], calls: () => calls };
+    };
+    const prose = scripted(text("I could not find fares for that day."), good);
+    const a = await runSearch(trip, prose.fn, ctx, new AbortController().signal);
+    expect(prose.calls()).toBe(2);
+    expect(a).toMatchObject({ ok: true, searches: 2, inputTokens: 200, outputTokens: 20 });
+    expect(a.ok && a.records.map((r) => r.carrier)).toEqual(["TAP"]);
+
+    const empty = scripted(text("[]"), good);
+    expect(await runSearch(trip, empty.fn, ctx, new AbortController().signal)).toMatchObject({ ok: true, searches: 2 });
+    expect(empty.calls()).toBe(2);
+
+    // An empty list of places can be right (kitchens closed): asked once.
+    const places = scripted(text("[]"), good);
+    const p = await runSearch(req, places.fn, ctx, new AbortController().signal);
+    expect(places.calls()).toBe(1);
+    expect(p.ok && p.records).toEqual([]);
+
+    // A second miss stays a miss, with both calls counted; the client leaving stops the retry.
+    const twice = scripted(text("no"), text("still no"));
+    expect(await runSearch(trip, twice.fn, ctx, new AbortController().signal)).toEqual({ ok: false, error: "answer was not a JSON array", searches: 2, inputTokens: 200, outputTokens: 20 });
+    const ctl = new AbortController();
+    const gone = scripted(text("no"), good);
+    ctl.abort();
+    await runSearch(trip, gone.fn, ctx, ctl.signal);
+    expect(gone.calls()).toBe(1);
   });
 
   test("runSearch never throws: a failing call becomes ok:false with a short message", async () => {
@@ -208,5 +279,55 @@ describe("searchPrompt and runSearch", () => {
     expect(out).toEqual({ ok: false, error: "Search failed: boom" });
     const good = await runSearch(req, async () => reply(), ctx, new AbortController().signal);
     expect(good.ok && good.records).toHaveLength(5);
+  });
+});
+
+describe("tidy-up (removes words, never adds or computes a fact)", () => {
+  test("tags: no generic 'flight', no duplicates (any case), and a one-way next to a round-trip label drops both", () => {
+    expect(tidyTags(["flight", "Round trip", "round trip", "Economy", "Flights"])).toEqual(["Round trip", "Economy"]);
+    expect(tidyTags(["one-way outbound", "round trip", "Nov fares"])).toEqual(["Nov fares"]);
+    expect(tidyTags(["One way", "return"])).toBeNull();
+    expect(tidyTags(["round-trip", "1 stop"])).toEqual(["round-trip", "1 stop"]);
+    expect(tidyTags(["flight"])).toBeNull();
+  });
+
+  test("price: bracketed notes and trailing per-person words go; amount, currency and 'from' stay as written", () => {
+    expect(tidyPrice("460 € pro Person")).toBe("460 €");
+    expect(tidyPrice("€460 per person (round trip, Nov 26 out)")).toBe("€460");
+    expect(tidyPrice("from 605 € (Nov. 26 date listed)")).toBe("from 605 €");
+    expect(tidyPrice("From EUR590")).toBe("From EUR590");
+    expect(tidyPrice("$494 pp")).toBe("$494");
+    expect(tidyPrice("39 € p.P.")).toBe("39 €");
+    expect(tidyPrice("€25–€40 [mains]")).toBe("€25–€40");
+    expect(tidyPrice("(round trip)")).toBeNull();
+  });
+
+  test("records: first card per carrier (any case); a fare label only in the price note moves to the tags; places untouched", () => {
+    const out = tidyRecords([
+      { id: "r1", carrier: "Lufthansa", route: "A → B", price: "from 605 € (round trip)", tags: ["flight", "economy"], source: "https://a.example/" },
+      { id: "r2", carrier: "Air France", route: "A → B", price: "460 € pro Person", tags: ["one-way", "round trip"], source: "https://b.example/" },
+      { id: "r3", carrier: "lufthansa", route: "A → B", price: "$494", tags: ["round trip"], source: "https://c.example/" },
+      { id: "r4", carrier: "KLM", route: null, price: null, tags: null, source: "https://d.example/" },
+    ]);
+    expect(out).toEqual([
+      { id: "r1", carrier: "Lufthansa", route: "A → B", price: "from 605 €", tags: ["round trip", "economy"], source: "https://a.example/" },
+      { id: "r2", carrier: "Air France", route: "A → B", price: "460 €", tags: null, source: "https://b.example/" },
+      { id: "r4", carrier: "KLM", route: null, price: null, tags: null, source: "https://d.example/" },
+    ]);
+    const place = { id: "r1", name: "Riva", subtitle: "Mediterranean", tags: ["Italian", "Pizza"], source: "https://riva.example/" };
+    expect(tidyRecords([place, { ...place, id: "r2" }])).toEqual([place, { ...place, id: "r2" }]);
+  });
+
+  test("parseSearchReply tidies before the cap and renumbers ids", () => {
+    const host = (reply().blocks.find((b) => b.type === "results") as { urls: string[] }).urls[0];
+    const items = ["Lufthansa", "LUFTHANSA", "KLM", "Air France"].map((carrier, i) => ({ carrier, route: "A → B", price: `€${100 + i}`, tags: ["flight"], source: host }));
+    const r = reply({ blocks: [...reply().blocks.filter((b) => b.type !== "text"), { type: "text", text: JSON.stringify(items) }] });
+    const out = parseSearchReply(r, { query: "q", fields: ["carrier", "route", "price", "tags"], max: 3 });
+    if (!out.ok) throw new Error(out.error);
+    expect(out.records.map((x) => [x.id, x.carrier, x.tags])).toEqual([
+      ["r1", "Lufthansa", null],
+      ["r2", "KLM", null],
+      ["r3", "Air France", null],
+    ]);
   });
 });

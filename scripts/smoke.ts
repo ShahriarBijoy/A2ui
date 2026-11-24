@@ -2,14 +2,16 @@
  * Step 13 smoke run (PLAN §8): every scenario in src/shared/scenarios.ts plus five held-out lines,
  * driven through the real client code (store, turn client, A2UI processor, knobs) against a running
  * Brick Box, by default the deployed one.
- *   bun run smoke [baseUrl] [--runs 3] [--only dinner,flight,heldout] [--out scripts/smoke-results.md] [--raw dir] [--note "..."]
+ *   bun run smoke [baseUrl] [--runs 3] [--only dinner,flight,heldout] [--out scripts/smoke-results.md] [--raw dir] [--note "..."] [--strict]
  * DEMO_KEY comes from the environment or .dev.vars and is never printed.
  *
  * a2ui runs every scenario (all steps) and every held-out line --runs times; widgets and html run each
  * scenario's opening line once, in the modes the scenario lists.
  * A line passes when: at least one component rendered (widgets: a widget or text; html: a page),
  * no refused components and no validation errors from the real processor, at most 7 visible blocks,
- * no error. A patch step ("We're six, and later.", see PATCH_EXPECT) is judged by its result: on a screen with a
+ * no error, and on a step that expects OptionCards, at least one OptionCard drawn by a List from data with a
+ * non-empty title (an empty list, "Nothing found" or a failed search fails the step). --strict also fails a step
+ * whose expected bricks or data are missing (otherwise they are only noted). A patch step ("We're six, and later.", see PATCH_EXPECT) is judged by its result: on a screen with a
  * people count and a time control that has a later time on the same date, the route must patch with no usage event
  * (no LLM call), the count must be 6, one time control must move later on the same date, and no other data value
  * may change. On a screen without such a time control (or count) the route must compose: a patch there dropped part
@@ -26,7 +28,7 @@ import { deriveKnobs } from "@shared/knobs";
 import { formatPointer, getAt } from "@shared/pointer";
 import type { Knob, Mode, TurnEvent, TurnRequest } from "@shared/protocol";
 import { SCENARIOS, type ScenarioExpect, type ScenarioStep } from "@shared/scenarios";
-import { evalChecks } from "../src/client/a2ui/evaluate";
+import { evalChecks, resolve, toText } from "../src/client/a2ui/evaluate";
 import { templateState } from "../src/client/a2ui/template";
 import type { AgentItem, ComponentEntry, StoreApi, SurfaceState } from "../src/client/state";
 import { createStore } from "../src/client/store";
@@ -49,10 +51,10 @@ const HELD_OUT: readonly { id: string; title: string; say: string }[] = [
 
 // ── CLI ───────────────────────────────────────────────────────────────────────
 
-type Options = { baseUrl: string; runs: number; only: Set<string> | null; out: string; raw: string | null; note: string | null };
+type Options = { baseUrl: string; runs: number; only: Set<string> | null; out: string; raw: string | null; note: string | null; strict: boolean };
 
 function parseArgs(argv: string[]): Options {
-  const opts: Options = { baseUrl: DEFAULT_URL, runs: 3, only: null, out: join("scripts", "smoke-results.md"), raw: null, note: null };
+  const opts: Options = { baseUrl: DEFAULT_URL, runs: 3, only: null, out: join("scripts", "smoke-results.md"), raw: null, note: null, strict: false };
   for (let i = 0; i < argv.length; i++) {
     const a = argv[i];
     const next = () => {
@@ -65,6 +67,7 @@ function parseArgs(argv: string[]): Options {
     else if (a === "--out") opts.out = next();
     else if (a === "--raw") opts.raw = next();
     else if (a === "--note") opts.note = next();
+    else if (a === "--strict") opts.strict = true;
     else if (a.startsWith("--")) throw new Error(`unknown option ${a}`);
     else opts.baseUrl = a.replace(/\/+$/, "");
   }
@@ -209,6 +212,21 @@ function visibleBlocks(surface: SurfaceState): number {
     }
   }
   return 1;
+}
+
+/**
+ * Options the person can really pick from: OptionCards a List draws from data (template items), each with a
+ * non-empty title. Literal cards the composer wrote itself and items whose title is null do not count.
+ */
+export function listedOptions(surface: SurfaceState): number {
+  return renderOrder(surface).filter((n) => {
+    if (!n.inList || n.entry.status !== "ok" || typeOf(n.entry) !== "OptionCard") return false;
+    try {
+      return toText(resolve(propsOf(n.entry).title as Parameters<typeof resolve>[0], { data: surface.data, scope: n.scope })).trim() !== "";
+    } catch {
+      return false;
+    }
+  }).length;
 }
 
 /** First OptionCard or Button (render order) whose action name starts with the prefix. */
@@ -460,13 +478,13 @@ function evaluate(
   notes: string[],
   say: string | null,
   pre: PreStep | null,
+  strict: boolean,
 ): StepResult {
   const state = st.getState();
   const events: Timed[] = state.recordings[agent.turnId]?.events ?? [];
   const m = agent.metrics;
   const reasons: string[] = [];
   const fetches = m.fetches ?? [];
-  // Demo sources answer in 0 ms; only live web searches belong in the search columns.
   const searches = fetches.filter((f) => f.source === "search");
   const result: StepResult = {
     diag: [],
@@ -491,7 +509,6 @@ function evaluate(
   };
   for (const f of fetches) {
     if (!f.ok) notes.push(`${f.source} failed: ${f.error ?? "unknown"}`);
-    else if (f.source !== "search") notes.push(`demo ${f.source}: ${f.records}`);
   }
   if (agent.status === "error") reasons.push(`error: ${agent.error ?? "unknown"}`);
   else if (agent.status !== "done") reasons.push(`turn ended as ${agent.status}`);
@@ -516,8 +533,18 @@ function evaluate(
         const missing = (expect.bricks ?? []).filter((b) => !types.has(b));
         const wrongData = Object.entries(expect.data ?? {}).filter(([path, v]) => !sameJson(getAt(surface.data, path), v));
         result.expectOk = missing.length === 0 && wrongData.length === 0;
-        if (missing.length) notes.push(`expected bricks missing: ${missing.join(", ")}`);
-        if (wrongData.length) notes.push(`expected data differs at ${wrongData.map(([p]) => p).join(", ")}`);
+        const into = strict ? reasons : notes;
+        if (missing.length) into.push(`expected bricks missing: ${missing.join(", ")}`);
+        if (wrongData.length) into.push(`expected data differs at ${wrongData.map(([p]) => p).join(", ")}`);
+      }
+      // A step that offers options must offer real ones (the stage needs something to tap).
+      if (expect?.bricks?.includes("OptionCard")) {
+        const shown = listedOptions(surface);
+        notes.push(`options ${shown}`);
+        if (shown === 0) {
+          const why = searches.length ? searches.map((f) => (f.ok ? `search ${f.records} records` : `search failed`)).join(", ") : "no search";
+          reasons.push(`options list empty (${why})`);
+        }
       }
     }
     const usage = events.some((e) => e.ev.type === "usage");
@@ -821,7 +848,7 @@ async function runJob(job: Job, run: number, opts: Options, key: string, results
     }
     const agent = lastAgent(st);
     if (!agent || agent === before) throw new Error("the turn client started no turn");
-    const r = evaluate(job, run, i, st, agent, step.expect, notes, say, pre);
+    const r = evaluate(job, run, i, st, agent, step.expect, notes, say, pre, opts.strict);
     const patchMiss = r.patch
       ? !r.patch.ok
       : step.expect?.patchOnly === true && (r.route !== "patch" || r.reasons.some((x) => x.startsWith("LLM was called")));
@@ -870,11 +897,12 @@ async function main(): Promise<void> {
     `- Script tree: ${gitHead()}. Models reported by the Worker: ${models.join(", ") || "–"}.`,
     ...(opts.note ? [`- Note: ${opts.note}`] : []),
     `- a2ui: every scenario (all steps) and five held-out lines, ${opts.runs}× each, decision model on. widgets and html: each scenario's opening line once, in the modes it lists.`,
-    "- Pass: at least one component rendered (widgets: a widget or text; html: a page); 0 refused and 0 validation errors in the real client processor; ≤ 7 visible blocks; no error.",
+    "- Pass: at least one component rendered (widgets: a widget or text; html: a page); 0 refused and 0 validation errors in the real client processor; ≤ 7 visible blocks; no error; on a step that expects OptionCards, at least one OptionCard drawn by a List from data with a non-empty title (\"options N\" in the notes).",
+    ...(opts.strict ? ["- --strict: a step also fails when its expected bricks or data are missing."] : []),
     "- Patch step (\"We're six, and later.\"), judged by its result in the real processor: if the screen before it has a people count (Stepper/Slider) and a time control (ChoicePicker of HH:mm, time or date+time DateTimeInput) with a later time on the same date, the route must patch with no usage event, the count must be 6, one time control must move later on the same date, and no other data value may change. Otherwise the route must compose, and a patch fails (\"later dropped\"). Per-run values are under \"Patch checks\".",
     "- Visible block (controller ruling): a top-level visual unit inside the root container. The root is unwrapped through Cards, single-child Columns and the first tab; each child of the main Column counts once, whatever it holds (a label/value Row, a List, a nested Column or Card, a Button).",
     "- first UI: the turn's surface has a root (patch steps: the first knob change). screen done: last composer or knob line, caption, widget or html. data arrived: last live data event. Search ms is the Worker's own measure (the longest search of the turn); records are summed over the turn's searches.",
-    "- Medians with (min–max). \"–\" means not measured. \"expect\" counts the scenario's expected bricks/data (informational, not part of pass).",
+    `- Medians with (min–max). "–" means not measured. "expect" counts the scenario's expected bricks/data (${opts.strict ? "part of pass (--strict)" : "informational, not part of pass"}).`,
     "",
     `**${passed}/${results.length} lines pass.**`,
     "",

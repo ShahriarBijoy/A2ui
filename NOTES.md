@@ -53,7 +53,7 @@ Read this before calling any external API. Items here override PLAN.md where the
 - Vite 8.3, Tailwind 4.3, Hono 4.13, React 19.3, Bun 1.3.8.
 
 ## Owner direction (2026-11-23)
-- **No fixed data, no scripted flows.** `places.json` and the `places` data source were removed (7ca485c, 0b4dcff). Real-world facts come from live web search (`search` data lines; Haiku 5.5 + `web_search_20250305`, max_uses 1, ≤3 searches per turn, 12 s timeout, null for unknown fields, source URL per record). Flights remain a demo generator (badged) pending the owner's choice.
+- **No fixed data, no scripted flows.** `places.json` and the `places` data source were removed (7ca485c, 0b4dcff). Real-world facts come from live web search (`search` data lines; Haiku 5.5 + `web_search_20250305`, max_uses 1, ≤3 searches per turn, 12 s timeout, null for unknown fields, source URL per record). Flights remained a demo generator (badged) pending the owner's choice; superseded 2026-11-24, see "Flights from live web search".
 - Live a2ui (phase 2, dev machine): first UI 0.6–0.9 s; data 4–6 s; 19 searches, 0 failures. `web_search_20260209` is unusable with Haiku 5.5 (invalid_tool_input 5/6, one 99 s run).
 - Query time context (32b33da): queries now name the day and time; whether that improves "open at that hour" is **unproven/partial** (Wed-clock probe 3/6 → 4/7 open per own sources, within noise; 3/7 still contradicted). Don't claim it as a fix.
 - Smoke held-out lines (first version) were reconstructed from summaries; exact intended wording: "Plan a 3-day trip to Lisbon in March", "Compare two phone plans for me", "I want to adopt a dog, what do I need?", "Help me pick a gift for my mum, budget 50 euros", "Book a haircut for Saturday morning".
@@ -92,6 +92,122 @@ Read this before calling any external API. Items here override PLAN.md where the
 - **6/6 scenario runs pass (100%).** Every step 3/3: dinner (places 2/4/1), tap place, **"We're six, and later." patch 173 ms (146–175)**, confirm; flight form, "To New York" (4 demo flights), tap flight → seat map, confirm.
 - Medians: dinner first UI 1.73 s / screen 3.32 s / live data 5.63 s; flight first UI 1.59–2.34 s / screen 4.0–5.1 s. Widgets: RestaurantWidget with 5 live places in 4.03 s; FlightSearchWidget 0.84 s. HTML: first byte ~0.55 s.
 - Direct turns: dinner first UI 0.96 s, data 5.6 s (Bellissima Überseestadt, Restaurant Übersee); concerts in Hamburg data 6.3 s (5 real acts); dog 4.7 s, no search.
+
+## Flights from live web search (owner decision 2026-11-24; branch flights-web)
+Setup: the Hono app served in-process by Bun (dev server off for memory), wrangler.jsonc vars + .dev.vars keys,
+DEV_NOW=2026-11-25T18:45, composer claude-sonnet-5-5, search/widgets/html claude-haiku-5-5;
+`bun run smoke http://localhost:5199 --only flight --runs 10 --strict`. Bar (brief): a run passes when steps 1-3 meet
+their expected bricks (`--strict`) and step 2 shows at least 1 OptionCard drawn from data with a title (smoke "options N").
+- The demo generator (data/flights.ts, source "flights") is gone. A "flights" data line is skipped like any unknown source.
+  Cards are carrier · route · fare as a result lists it (+ tags saying what the fare is); no times, no computed price.
+- Search probes (Haiku + web_search, query "flights from Bremen to New York on Thursday 26 November 2026", fields
+  carrier/route/price/tags, max 4; ~2.5-3.6 s each, 1 search each):
+  - first travel rule, 3 runs: 11 records; 10/11 prices carried notes in parentheses ("460 € pro Person (round trip, Nov. 26
+    outbound)"); 2/11 had carrier null (blank card title).
+  - "price is only the amount" + carrier rule, 4 runs: 15 records; 1 price with parentheses; 2 carrier null.
+  → a requested `carrier` is now required server-side (normalizeRecords drops the item).
+  - final wording (e774dbe), 4 runs, carrier-less items already dropped: 11 records; 2 prices still with parentheses
+    (Haiku noise; values are shown as returned).
+
+| prompt version | runs passing the bar | step 1 form (no data line) | step 2 options ≥1 | step 3 SeatMap | step 4 confirm | records per run | search ms median (min-max) | data arrived median (min-max) |
+|---|---|---|---|---|---|---|---|---|
+| vA f01bcef | **3/10** | 10/10 (0 fetches in 10/10) | 10/10 | **3/10** | 10/10 | 4,4,4,3,2,4,4,3,3,3 | 2755 (2466-3139) | 4.80 s (4.41-6.06) |
+| vB e774dbe | **10/10** | 10/10 (0 fetches in 10/10) | 10/10 | 10/10 | 10/10 | 3,3,3,3,1,3,1,2,3,2 | 2514 (1918-2959) | 5.00 s (3.97-5.71) |
+| vC 9af6f6d | **10/10** | 10/10 (0 fetches in 10/10) | 10/10 | 10/10 | 9/10 | 2,4,1,2,4,3,3,2,2,3 | 2551 (1884-3169) | 5.02 s (4.12-6.15) |
+- vC (9af6f6d) only replaces the travel rule's price examples ("from €605", "€460", which were the route's real
+  fares) with the price hint's neutral "from €39", "€25". Its 4 probe runs still returned 460 € and from 605 €
+  (10 records, 2 prices with parentheses), as the very first probe did before any price example: web values, not echoes.
+  vC step 4 miss (run 8): the seat step's Button was named pick_seat, so the smoke found no confirm_ action (not in the bar).
+  vC step 2 skipped 1 prose line in 7/10, repaired 0; step 1 skipped 1 in 1/10. Every step-2 line made 1 web search (10/10);
+  2 searches dropped 1 item each. vC timings (median, min-max): step 1 first UI 1.64 s (1.45-2.38), screen 4.12 s;
+  step 2 first UI 2.49 s (1.59-2.91), screen 4.93 s; tap → seat map 1.73 / 4.28 s; confirm 1.75 / 2.86 s.
+- vA failure cause (7/10): after pick_flight the composer built a confirm or passengers step (Stepper, Stat) instead of a
+  seat pick; a fare listing has no times, so it no longer read as a booking with assigned seats. vB adds to rule 11:
+  "A flight is such a booking: picking a flight leads to its seat step." No other failures in vA or vB.
+- Every step-2 data line made exactly 1 web search (20/20). Step 2 composer lines: vB skipped 1 prose line in 5/10 and
+  repaired 1 line in 2/10 (vA: skipped 3/10, repaired 1/10), none affecting the screen. The search dropped 1 item in 2 vB
+  runs (carrier rule or source check).
+- vB timings (median, min-max): step 1 first UI 1.58 s (1.43-2.45), screen 4.22 s; step 2 first UI 1.84 s (0.86-2.58),
+  screen 4.60 s; tap → seat map first UI 1.66 s, screen 4.01 s; confirm 1.54 / 2.57 s.
+- Typical cards (vF a94ccbf run 1, shipped as F4-F6 since fix round 2; search 2700 ms): Lufthansa · BRE → NYC · 1 stop
+  · from 605 € [round trip, economy]; Air France · BRE → JFK · 1 stop · 460 € [round trip, 1 stop]; KLM · BRE → JFK ·
+  1 stop · from EUR590 [round trip, economy]. Sources: lufthansa.com, skyscanner.de, klm.de. Fares are as listed, not
+  bookable quotes; the round-trip readings are Haiku's and unverified (lufthansa.com and klm.de could not be fetched).
+  (Until fix round 2, F4-F6 were vC 9af6f6d run 7, whose Lufthansa card had no round-trip tag.)
+- Widgets: smoke's widgets line ("I need to book a flight tomorrow.", no destination) → vA a text answer, vB
+  FlightSearchWidget in 754 ms (form only, no search). Manual 2-turn chains (that line, then "To New York, give me
+  options."), 3 each: at e774dbe the widgets model left "from" empty in 2/3 second turns (no search, no rows). Since
+  ec22ba1 the origin defaults to the venue's city: second turn 3/3 FlightSearchWidget with 2/4/4 web rows, search
+  2342/2902/3265 ms, widget at 3.37/4.09/4.03 s; first turn 2/3 the form (From Bremen, Day 26 Nov), 1/3 a text question.
+- HTML flight line: 1/1 in both versions (unchanged path).
+
+### Fix round 1 (2026-11-24 ~03:15-03:27): no talk values in prompts, re-evaluated (flight, dinner, held-out)
+Same setup (in-process Bun Worker, DEV_NOW=2026-11-25T18:45, Sonnet composer, Haiku search). Flight judged with `--strict`;
+dinner and held-out with the default judge (expected bricks informational; the options and patch checks always on).
+- f35faaa: search prompt without talk values (route example "OPO → OSL · 1 stop via AMS", tag example "June fares");
+  tests guard the search and composer prompts against Bremen/New York/JFK/BRE/FRA/Lufthansa/Air France/KLM/Nov/November.
+- d7a9e70: runSearch asks once more after an answer in prose ("not a JSON array") or an empty list when `carrier` is
+  requested (trips); thrown errors, refusals and a client that left are not retried; searches and tokens are summed.
+
+| version | runs passing the bar (strict) | smoke scenario runs (all 4 steps) | step 2 options ≥1 | step 3 SeatMap | step 4 confirm | records per run (mean) | step-2 search ms median (min-max) | data arrived median (min-max) |
+|---|---|---|---|---|---|---|---|---|
+| vD f35faaa | **8/10** | 8/10 (36/42 lines) | 8/10 | 8/10 (2 not reachable) | 8/10 | 0,3,4,2,1,3,2,1,0,2 (1.8) | 2365 (1665-2954) | 4.86 s (3.85-6.10) |
+| vE d7a9e70 | **10/10** | 10/10 (42/42 lines) | 10/10 | 10/10 | 10/10 | 3,3,4,3,2,3,3,2,2,2 (2.7) | 2606 (2144-3069) | 5.19 s (4.37-6.08) |
+- vD misses, both at the search (same query as every run): run 1 "answer was not a JSON array" (Haiku answered in
+  prose), run 9 an empty list (0 records, nothing dropped). No list → no pick target → steps 3-4 not run.
+- 32 direct probes of the same search prompt at f35faaa (probe2, Haiku): 32/32 returned 1-4 carriers (mean 2.75),
+  2.36-3.80 s. Misses are occasional (2 of 42 searches at f35faaa), hence the retry rather than a prompt change.
+- vE: every step-2 data line succeeded on its first call (10/10 fetches with 1 web search and ≥1 record; the retry
+  never fired). Step 1 sent no data line in 10/10. Step 2 skipped 1 prose line in 7/10, repaired 0; steps 1, 3, 4 0/0.
+  vE medians: step 1 first UI 1.68 s, screen 4.20 s; step 2 first UI 2.28 s, screen 4.74 s; tap → seat map 1.77 /
+  4.01 s; confirm 1.63 / 2.96 s. Widgets flight line: FlightSearchWidget 903 ms (no destination, no search). HTML 1/1.
+- Records-per-run mean by version (measured above): vA 3.4, vB 2.4, vC 2.6, vD 1.8, vE 2.7.
+- Card quality seen in vE (shown as returned): run 6 route values carried comments ("BRE → NYC · round trip, not
+  Thursday-specific"); run 5 prices kept parentheses ("460 € (round trip, Nov. 26 outbound)"); run 8 returned
+  "BRE → NYC · 1 stop via FRA" with no such example in the prompt any more.
+- **Dinner ×3 (vE, default judge): 3/3 scenario runs, 14/14 lines.** Places 2, 1, 2 (search 2945/2117/2445 ms, 1 web
+  search each; e.g. The Grill Upper River, RIVA, Bellissima Überseestadt, Restaurant Feuerwache); first UI 1.90 s,
+  data 4.92 s (median). "We're six, and later." patched 3/3, judged by result: guests 2 → 6, time 20:00 → 21:00 (+60 min,
+  same date), nothing else changed, 158/176/409 ms, no LLM. Step 2 expect 2/3 (run 2 used a time DateTimeInput, no
+  ChoicePicker; informational). Widgets: RestaurantWidget with 5 places in 3.95 s. HTML 1/1.
+- **Held-out ×1 (vE, default judge): 4/5.** Lisbon PASS (a planning form: Destination, Start date, Days, Pace; no
+  From/To trip-search form, no search), phones PASS, gift PASS (search 4119 ms, 5 records), haircut PASS; dog FAIL:
+  9 visible blocks (rule ≤ 7), the known cosmetic miss.
+- F4-F6 stayed vC run 7 in this round (route values "BRE → NYC · 1 stop", "BRE → JFK · 1 stop" ×2; no "via FRA");
+  replaced in fix round 2.
+
+### Fix round 2 (2026-11-24 ~03:30-03:36): review I4/I5 rulings, measured once on the final code a94ccbf
+- 278be44 tidies live records without adding facts (review I4): tags lose the generic "flight", duplicates (any case),
+  and a one-way label next to a round-trip label (both dropped); prices lose bracketed notes and trailing per-person
+  words (amount, currency and a leading "from" stay as written; a round-trip/one-way label stated only in the note
+  moves to the tags); trip results keep the first card per carrier, before the item cap.
+- a94ccbf: composer rule 11 adds "A SeatMap shows a generic cabin: no "taken" seats (seat availability is unknown) and
+  no preselected seat (initial value ""); its confirm Button keeps a required check on the seat." (review I5); widget
+  empty text "No flights to show." (M3); flights.ts header (M2).
+
+| version | runs passing the bar (strict) | smoke scenario runs (all 4 steps) | step 2 options ≥1 | step 3 SeatMap | step 4 confirm | records per run (mean) | step-2 search ms median (min-max) | data arrived median (min-max) |
+|---|---|---|---|---|---|---|---|---|
+| vF a94ccbf | **10/10** | 10/10 (42/42 lines) | 10/10 | 10/10 | 10/10 | 3,2,3,2,3,3,2,1,2,2 (2.3) | 2886 (2104-3706) | 5.04 s (4.36-6.88) |
+- vF seat steps: 10/10 SeatMaps with no `taken` list and an empty initial seat; 10/10 confirm Buttons named confirm_flight
+  with a required check. Step 4 taps that Button while it is disabled (smoke notes "tapped a disabled Button (check:
+  Pick a seat)") and still gets its summary 10/10.
+- vF step 2: every data line succeeded on its first call (10/10 with 1 web search; the retry never fired); 1 prose line
+  skipped in 2/10, 1 line repaired in 2/10; step 1 sent no data line in 10/10. Medians: step 1 first UI 1.46 s, screen
+  4.19 s; step 2 first UI 1.67 s, screen 4.20 s; tap → seat map 1.60 / 3.51 s; confirm 1.82 / 2.98 s.
+- vF fare labels: 21 of 23 cards carry a round-trip tag; no card shows one-way next to round trip; the Lufthansa card
+  is round trip in 8 of 9 runs (run 9: [economy, Lufthansa]); date wording still appears in tags ("Depart Thu 26 Nov",
+  "Nov. 26 fare") next to "round trip" in 5 runs; one price kept "round trip" unbracketed ("€460 round trip", run 7).
+  Widgets flight line: a text answer this time (781 ms). HTML 1/1.
+- **Dinner ×5 (a94ccbf, default judge): 5/5 scenario runs, 22/22 lines.** Places 1, 1, 3, 1, 2 (search 2350/2625/4539/
+  2523/2627 ms, 1 web search each: Restaurant Feuerwache, RIVA, Restaurant Übersee, Bellissima Überseestadt, HAFENDÖNER
+  Überseestadt); first UI 1.84 s, data 4.98 s (median). "We're six, and later." patched 5/5, judged by result: guests 2 → 6,
+  time 20:00 → 21:00 (+60 min, same date), nothing else changed, 177 ms median (155-262), no LLM. Step 2 expect 4/5 (one
+  run used a time DateTimeInput; informational). Widgets: RestaurantWidget with 5 places in 3.92 s. HTML 1/1.
+- **Held-out ×1 (a94ccbf, default judge): 4/5.** Lisbon PASS (Arrival day, Days, Pace and "Plan my days"; no From/To
+  trip-search form, no search), phones PASS, gift PASS (search 4016 ms, 5 records), haircut PASS; dog FAIL: 9 visible
+  blocks (rule ≤ 7), the known cosmetic miss (same as d7a9e70).
+- F4-F6 recaptured from vF run 1 (all 4 steps pass; step 2 3 cards all tagged round trip, no date claims; seat step
+  with no taken or preselected seat; F6 summary "Lufthansa · BRE → NYC · 1 stop · from 605 €", no date).
 
 ## Rulings (decisions made without asking)
 - Fonts: Geist + Geist Mono, bundled via fontsource (no network at the venue). PLAN says "system sans": same intent, consistent rendering on the stage machine.

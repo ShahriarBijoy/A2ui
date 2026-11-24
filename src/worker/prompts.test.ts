@@ -53,16 +53,48 @@ describe("composer prompt", () => {
 
   test("DATA asks for live search, never fixed places; its example lines are valid JSON", () => {
     const data = COMPOSER_SYSTEM_PROMPT.slice(COMPOSER_SYSTEM_PROMPT.indexOf("\nDATA\n"), COMPOSER_SYSTEM_PROMPT.indexOf("DESIGN RULES"));
-    expect(COMPOSER_SYSTEM_PROMPT).toContain('{"data": {"source":"search"|"flights"');
+    expect(COMPOSER_SYSTEM_PROMPT).toContain('{"data": {"source":"search","args":{...},"into":"/pointer"}}');
     expect(data).toContain("search  args {query, fields, max?}");
-    expect(data).toContain("Never search for flights");
     expect(COMPOSER_SYSTEM_PROMPT).not.toContain("places  args");
     expect(COMPOSER_SYSTEM_PROMPT).not.toContain("walk_min");
     const lines = data.split("\n").map((l) => l.trim()).filter((l) => l.startsWith("{"));
-    expect(lines.length).toBe(4);
+    expect(lines.length).toBe(5);
     for (const l of lines) expect(() => JSON.parse(l)).not.toThrow();
     const search = JSON.parse(lines[0]);
     expect(search.data).toMatchObject({ source: "search", into: "/results", args: { fields: ["name", "subtitle", "tags"] } });
+  });
+
+  test("flights come from live search: no demo source, a trip gate, a search example with carrier/route/price/tags", () => {
+    const data = COMPOSER_SYSTEM_PROMPT.slice(COMPOSER_SYSTEM_PROMPT.indexOf("\nDATA\n"), COMPOSER_SYSTEM_PROMPT.indexOf("DESIGN RULES"));
+    const flat = COMPOSER_SYSTEM_PROMPT.replace(/\s+/g, " ");
+    expect(flat).not.toContain('"flights"|');
+    expect(flat).not.toContain("flights args");
+    expect(flat).not.toContain("Never search for flights");
+    expect(flat).not.toContain("price_eur");
+    expect(flat).not.toContain("depart");
+    expect(flat.toLowerCase()).not.toContain("demo data");
+    // The gate that turns "I need to book a flight tomorrow." into a form: no destination, no data line.
+    expect(flat).toContain("A trip search (flight, train, bus) needs the origin, the destination and the date; ask for a missing one first.");
+    expect(flat).toContain("for a trip, the origin, the destination, the weekday and the date");
+    expect(flat).toContain("carrier and route (trips)");
+    const lines = data.split("\n").map((l) => l.trim()).filter((l) => l.startsWith("{"));
+    const flights = JSON.parse(lines[3]);
+    expect(flights.data).toEqual({
+      source: "search",
+      args: { query: "flights from Porto to Oslo on Saturday 15 June 2030", fields: ["carrier", "route", "price", "tags"], max: 4 },
+      into: "/flights",
+    });
+    const card = JSON.parse(lines[4]);
+    expect(card).toMatchObject({
+      component: "OptionCard",
+      title: { "@path": "carrier" },
+      subtitle: { "@path": "route" },
+      tags: { "@path": "tags" },
+      price: { "@path": "price" },
+      action: { event: { name: "pick_flight", context: { id: { "@path": "id" }, carrier: { "@path": "carrier" }, route: { "@path": "route" }, price: { "@path": "price" } } } },
+    });
+    // The example is another trip: the talk's route and date never sit in the cached prompt (owner rule).
+    expect(flat).not.toMatch(/Bremen|New York|JFK|\bBRE\b|\bFRA\b|Lufthansa|Air France|KLM|\bNov\b|November/);
   });
 
   test("a request that implies a time names the day and time from STATE in its search query", () => {
@@ -100,6 +132,10 @@ describe("composer prompt", () => {
     expect(flat).toContain("Only a final summary or receipt step may end without one");
     expect(flat).toContain(
       "When the person books something with assigned places (seats), let them pick the place with the most specific component before the confirm step; then end that step with one primary Button whose action context carries the chosen place.",
+    );
+    // Seat availability is a fact no source states: the seat map is a generic cabin.
+    expect(flat).toContain(
+      'A SeatMap shows a generic cabin: no "taken" seats (seat availability is unknown) and no preselected seat (initial value ""); its confirm Button keeps a required check on the seat.',
     );
   });
 

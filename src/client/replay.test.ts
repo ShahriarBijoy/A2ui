@@ -457,6 +457,25 @@ describe("slots and recordings", () => {
   test("the shipped set loads from replays.json", () => {
     expect(Array.isArray(BUILTIN_REPLAYS)).toBe(true);
   });
+
+  test("the shipped replays play in order with no validation errors and carry no demo data", () => {
+    // Whole-ms times, as a Shift+R save stores them: the fake clock adds float delays, and with captured
+    // fractional times a tiny remainder can stop adding to a large clock value (real timers always advance).
+    const shipped = BUILTIN_REPLAYS.map((r) => ({ ...r, events: r.events.map((e) => ({ ...e, t: Math.round(e.t) })) }));
+    const env = setup({ shipped });
+    for (let slot = 1; slot <= Math.min(6, shipped.length); slot++) {
+      expect(env.replayer.play(slot)).toBe(true);
+      env.clock.advance(60_000);
+      expect(env.store.getState().replaying).toBe(false);
+    }
+    const st = env.store.getState();
+    expect(st.wire.filter((w) => w.kind === "error")).toEqual([]);
+    expect(Object.values(st.surfaces).some((s) => s.hasDemoData)).toBe(false);
+    // Owner rule: no fixed data. Every data line in a shipped recording is a live search.
+    const fetches = BUILTIN_REPLAYS.flatMap((r) => r.events.flatMap((e) => (e.ev.type === "fetch" ? [e.ev] : [])));
+    expect(fetches.every((f) => f.source === "search")).toBe(true);
+    expect(JSON.stringify(BUILTIN_REPLAYS)).not.toMatch(/"demo":\s*true/);
+  });
 });
 
 // ── A saved sequence after Esc (the stage case) ──────────────────────────────

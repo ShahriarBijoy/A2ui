@@ -16,10 +16,9 @@ import {
   SSE_HEADERS,
   sseResponse,
   unreachableIds,
-  widgetEvent,
+  widgetSearch,
   type TurnDeps,
 } from "./turn";
-import { generateFlights } from "./data/flights";
 
 /** Smallest real answer: one A2UI line and a caption. */
 const MINIMAL = '{"a2ui":{"version":"1.0","updateDataModel":{"surfaceId":"s2","path":"/booking/guests","value":5}}}\n{"caption":"x"}\n';
@@ -253,21 +252,21 @@ describe("runTurn: compose path (a2ui)", () => {
   // Split mid-line on purpose.
   const chunks = [text.slice(0, 37), text.slice(37, 150), text.slice(150, 151), text.slice(151)];
 
-  test("emits a2ui/data/fetch/caption/usage/done in order; counts skipped lines; measures timings", async () => {
+  test("emits a2ui/caption/usage/done in order; skips prose and data lines of unknown sources; measures timings", async () => {
     const llm = fakeLlm(chunks);
-    const events = await collect(request({ decision: false, surface: null }), deps({ llm }));
-    expect(events.map((e) => e.type)).toEqual(["a2ui", "a2ui", "fetch", "a2ui", "caption", "usage", "done"]);
-    const [create, data, comps] = events.filter((e) => e.type === "a2ui") as Extract<TurnEvent, { type: "a2ui" }>[];
+    const warnings: string[] = [];
+    const events = await collect(request({ decision: false, surface: null }), deps({ llm, warn: (m) => void warnings.push(m) }));
+    expect(events.map((e) => e.type)).toEqual(["a2ui", "a2ui", "caption", "usage", "done"]);
+    const [create, comps] = events.filter((e) => e.type === "a2ui") as Extract<TurnEvent, { type: "a2ui" }>[];
     expect(create.origin).toBe("llm");
     // A mangled catalog id is replaced with the real one.
     expect(create.msg).toEqual({ version: "1.0", createSurface: { surfaceId: "s3", catalogId: ctx.catalogId } });
-    expect(data.origin).toBe("data");
-    expect(data.msg).toEqual({ version: "1.0", updateDataModel: { surfaceId: "s3", path: "/flights", value: generateFlights("Bremen", "Oslo", "2026-11-24") } });
-    // Demo sources get a fetch event too, right after their data.
-    expect(events[2]).toMatchObject({ type: "fetch", source: "flights", query: "Bremen → Oslo 2026-11-24", ok: true, records: 4 });
     expect(comps.origin).toBe("llm");
-    const u = events[5] as Extract<TurnEvent, { type: "usage" }>;
-    expect(u).toMatchObject({ model: "fake-model", input_tokens: 10, output_tokens: 20, cache_read_tokens: 5, skipped_lines: 2 });
+    // The removed demo source ("flights") is skipped like any unknown source: no data, no fetch event.
+    expect(warnings).toContainEqual(expect.stringContaining('composer line skipped (unknown data source "flights")'));
+    expect(warnings).toContainEqual(expect.stringContaining('composer line skipped (unknown data source "hotels")'));
+    const u = events[3] as Extract<TurnEvent, { type: "usage" }>;
+    expect(u).toMatchObject({ model: "fake-model", input_tokens: 10, output_tokens: 20, cache_read_tokens: 5, skipped_lines: 3 });
     expect(u.first_ui_ms).toBeGreaterThan(0);
     expect(u.compose_ms).toBeGreaterThanOrEqual(u.first_ui_ms!);
     // STATE goes to the user message, the cached system prompt is static.
@@ -275,44 +274,54 @@ describe("runTurn: compose path (a2ui)", () => {
     expect(llm.prompts[0].user).toContain('"next_surface_id":"s3"');
   });
 
-  test("data lines target the request surface when no createSurface came first, else nextSurfaceId", async () => {
-    const line = '{"data":{"source":"flights","args":{"to":"New York","from":{"@path":"/trip/from"}},"into":"/flights"}}\n';
-    const withSurface = request({ decision: false, surface: { id: "s2", components: [], data: { trip: { from: "Hamburg" } }, knobs: [] } });
-    const a = await collect(withSurface, deps({ llm: fakeLlm([line]) }));
-    expect(a[0]).toMatchObject({ origin: "data", msg: { updateDataModel: { surfaceId: "s2", path: "/flights" } } });
-    // The @path arg was read from the surface data; date defaulted to tomorrow.
-    expect((a[0] as { msg: { updateDataModel: { value: unknown } } }).msg.updateDataModel.value).toEqual(generateFlights("Hamburg", "New York", "2026-11-24"));
-    const b = await collect(request({ decision: false, surface: null }), deps({ llm: fakeLlm([line]) }));
-    expect(b[0]).toMatchObject({ msg: { updateDataModel: { surfaceId: "s3" } } });
+  const flightRecords = [{ id: "r1", carrier: "Lufthansa", route: "BRE → JFK · 1 stop via FRA", price: "from €476", tags: ["round trip"], source: "https://example.org/lh" }];
+  const flightSearch = (asked: SearchRequest[] = []) => async (r: SearchRequest): Promise<SearchOutcome> => {
+    asked.push(r);
+    return { ok: true, records: flightRecords, dropped: 0, searches: 1, inputTokens: 100, outputTokens: 50 };
+  };
+  const isData = (e: TurnEvent) => e.type === "a2ui" && e.origin === "data";
+  /** Yields `first`, waits long enough for a fake search to answer, then yields `rest`. */
+  const delayed = (first: string, rest: string): Llm => ({
+    streamText() {
+      return {
+        async *[Symbol.asyncIterator]() {
+          yield first;
+          await new Promise((r) => setTimeout(r, 20));
+          yield rest;
+        },
+        async result() {
+          return { usage, stopReason: "end_turn" };
+        },
+        abort() {},
+      };
+    },
+    async callTools() {
+      throw new Error("unused");
+    },
   });
 
-  test("a data line before createSurface waits and goes to the new surface", async () => {
-    const text = [
-      '{"data":{"source":"flights","args":{"from":"Bremen","to":"New York","date":"2026-11-24"},"into":"/flights"}}',
-      '{"a2ui":{"version":"1.0","createSurface":{"surfaceId":"s3","catalogId":"http://test/catalog/brick-box/v1"}}}',
-      '{"a2ui":{"version":"1.0","updateComponents":{"surfaceId":"s3","components":[{"id":"root","component":"Card","child":"x"}]}}}',
-      '{"caption":"Flights"}',
-    ].join("\n");
-    const events = await collect(request({ decision: false }), deps({ llm: fakeLlm([text]) }));
-    expect(events.map((e) => (e.type === "a2ui" ? `${e.origin}:${Object.keys(e.msg)[1]}:${(Object.values(e.msg)[1] as { surfaceId: string }).surfaceId}` : e.type))).toEqual([
-      "llm:createSurface:s3",
-      "data:updateDataModel:s3",
-      "fetch",
-      "llm:updateComponents:s3",
-      "caption",
-      "usage",
-      "done",
-    ]);
+  test("data lines target the request surface when no createSurface came first, else nextSurfaceId; @path args read the surface", async () => {
+    const line = '{"data":{"source":"search","args":{"query":{"@path":"/trip/query"},"fields":["carrier"]},"into":"/flights"}}\n';
+    const asked: SearchRequest[] = [];
+    const withSurface = request({ decision: false, surface: { id: "s2", components: [], data: { trip: { query: "flights from Hamburg to Oslo" } }, knobs: [] } });
+    const a = await collect(withSurface, deps({ llm: fakeLlm([line]), search: flightSearch(asked) }));
+    expect(a.find(isData)).toMatchObject({ msg: { updateDataModel: { surfaceId: "s2", path: "/flights", value: flightRecords } } });
+    // The @path arg was read from the surface data.
+    expect(asked[0]).toMatchObject({ query: "flights from Hamburg to Oslo", fields: ["carrier"] });
+    const literal = '{"data":{"source":"search","args":{"query":"flights from Hamburg to Oslo","fields":["carrier"]},"into":"/flights"}}\n';
+    const b = await collect(request({ decision: false, surface: null }), deps({ llm: fakeLlm([literal]), search: flightSearch() }));
+    expect(b.find(isData)).toMatchObject({ msg: { updateDataModel: { surfaceId: "s3" } } });
   });
 
-  test("a held data line follows the surface of the next message, or the fallback at the end", async () => {
-    const data = '{"data":{"source":"flights","args":{"to":"Oslo"},"into":"/flights"}}';
-    const comps = '{"a2ui":{"version":"1.0","updateComponents":{"surfaceId":"s9","components":[]}}}';
-    const a = await collect(request({ decision: false }), deps({ llm: fakeLlm([`${data}\n${comps}\n`]) }));
-    expect(a[0]).toMatchObject({ origin: "data", msg: { updateDataModel: { surfaceId: "s9" } } });
-    const b = await collect(request({ decision: false }), deps({ llm: fakeLlm([`${data}\n{"caption":"x"}\n`]) }));
-    expect(b.map((e) => e.type)).toEqual(["a2ui", "fetch", "caption", "usage", "done"]);
-    expect(b[0]).toMatchObject({ msg: { updateDataModel: { surfaceId: "s2" } } });
+  test("a held search result follows the surface of the next message, or the fallback", async () => {
+    const data = '{"data":{"source":"search","args":{"query":"flights from Porto to Oslo"},"into":"/flights"}}';
+    const comps9 = '{"a2ui":{"version":"1.0","updateComponents":{"surfaceId":"s9","components":[]}}}';
+    const a = await collect(request({ decision: false }), deps({ llm: delayed(`${data}\n`, `${comps9}\n{"caption":"x"}\n`), search: flightSearch() }));
+    expect(a.find(isData)).toMatchObject({ msg: { updateDataModel: { surfaceId: "s9" } } });
+    const comps2 = '{"a2ui":{"version":"1.0","updateComponents":{"surfaceId":"s2","components":[]}}}';
+    const b = await collect(request({ decision: false }), deps({ llm: delayed(`${comps2}\n${data}\n`, '{"caption":"x"}\n'), search: flightSearch() }));
+    expect(b.map((e) => (isData(e) ? "data" : e.type))).toEqual(["a2ui", "data", "fetch", "caption", "usage", "done"]);
+    expect(b.find(isData)).toMatchObject({ msg: { updateDataModel: { surfaceId: "s2" } } });
   });
 
   test("a trailing line without newline is still handled", async () => {
@@ -822,22 +831,6 @@ describe("runTurn: reachability and value shapes", () => {
     expect(labels.lastIndexOf("data:updateDataModel")).toBeGreaterThan(labels.lastIndexOf("llm:createSurface"));
   });
 
-  test("a flights line repeated by the retry adds no second copy or fetch event", async () => {
-    const FLIGHTS = '{"data":{"source":"flights","args":{"from":"Porto","to":"Oslo","date":"2030-06-14"},"into":"/flights"}}';
-    const fl = { id: "fl", component: "List", children: { path: "/flights", componentId: "f" } };
-    const f = { id: "f", component: "OptionCard", title: { "@path": "carrier" } };
-    const top = comps("s3", [{ id: "root", component: "Card", child: "main" }, { id: "main", component: "Column", children: ["title"] }, { id: "title", component: "Text", text: "## Flights" }]);
-    const fixed = comps("s3", [{ id: "root", component: "Card", child: "main" }, { id: "main", component: "Column", children: ["title", "fl"] }, { id: "title", component: "Text", text: "## Flights" }, fl]);
-    const llm = scripted([[CREATE, top, FLIGHTS, comps("s3", [fl, f]), '{"caption":"x"}'].join("\n") + "\n", [CREATE, fixed, FLIGHTS, comps("s3", [f]), '{"caption":"y"}'].join("\n") + "\n"]);
-    const events = await collect(request({ decision: false }), deps({ llm }));
-    expect(llm.prompts).toHaveLength(2);
-    expect(events.filter((e) => e.type === "fetch")).toHaveLength(1);
-    const labels = events.map(kindOf);
-    const last = labels.lastIndexOf("data:updateDataModel");
-    expect(last).toBeGreaterThan(labels.lastIndexOf("llm:createSurface"));
-    expect((events[last] as { msg: { updateDataModel: { path: string; value: unknown[] } } }).msg.updateDataModel).toMatchObject({ path: "/flights", value: generateFlights("Porto", "Oslo", "2030-06-14") });
-  });
-
   test("an unreachable component without requested data is logged, not retried", async () => {
     const answer = [CREATE, comps("s3", [{ id: "root", component: "Card", child: "t" }, { id: "t", component: "Text", text: "hi" }, { id: "stray", component: "Text", text: "lost" }]), '{"caption":"x"}'];
     const llm = scripted([answer.join("\n") + "\n"]);
@@ -1084,15 +1077,66 @@ describe("runTurn: widgets and html modes", () => {
     expect(cancelled).toBe(true);
   });
 
-  test("widgets: the flight search shows at once, with no search", async () => {
+  const flightReply = (input: Record<string, string>): WidgetsReply => ({ tool: { name: "show_flight_search", input }, text: "", usage, stopReason: "tool_use" });
+
+  test("widgets: show_flight_search runs the live search, then the widget with carrier/route/price/tags rows and the fetch event", async () => {
+    const asked: SearchRequest[] = [];
+    const records = [
+      { id: "r1", carrier: "Lufthansa", route: "BRE → JFK · 1 stop via FRA", price: "from €476", tags: ["round trip"], source: "https://lufthansa.example/" },
+      { id: "r2", carrier: "KLM", route: null, price: null, tags: null, source: "https://klm.example/" },
+      { id: "r3", carrier: null, route: "BRE → JFK", price: "€99", tags: null, source: "https://nocarrier.example/" },
+    ];
+    const search = async (r: SearchRequest): Promise<SearchOutcome> => {
+      asked.push(r);
+      return { ok: true, records, dropped: 0, searches: 1, inputTokens: 14000, outputTokens: 300 };
+    };
+    const events = await collect(
+      request({ mode: "widgets", decision: false }),
+      deps({ llm: fakeLlm([], {}, flightReply({ from: "Bremen", to: "New York", date: "2026-11-26" })), search }),
+    );
+    expect(asked).toEqual([{ query: "flights from Bremen to New York on Thursday 26 November 2026", fields: ["carrier", "route", "price", "tags"], max: 4 }]);
+    expect(events.map((e) => e.type)).toEqual(["widget", "fetch", "usage", "done"]);
+    // No carrier → dropped; unknown route and price stay null, never a default.
+    expect(events[0]).toEqual({
+      type: "widget",
+      name: "FlightSearchWidget",
+      props: {
+        flights: [
+          { id: "r1", carrier: "Lufthansa", route: "BRE → JFK · 1 stop via FRA", price: "from €476", tags: ["round trip"], source: "https://lufthansa.example/" },
+          { id: "r2", carrier: "KLM", route: null, price: null, tags: [], source: "https://klm.example/" },
+        ],
+        from: "Bremen",
+        to: "New York",
+        date: "2026-11-26",
+      },
+    });
+    expect(events[1]).toMatchObject({ type: "fetch", source: "search", query: asked[0].query, ok: true, records: 2, searches: 1 });
+    const u = events[2] as Extract<TurnEvent, { type: "usage" }>;
+    expect(u.first_ui_ms).toBeGreaterThan(u.compose_ms);
+  });
+
+  test("widgets: a failed flight search shows the form with no rows and a failed fetch event", async () => {
+    const warnings: string[] = [];
+    const search = async (): Promise<SearchOutcome> => ({ ok: false, error: "web search returned no results", searches: 1 });
+    const events = await collect(
+      request({ mode: "widgets", decision: false }),
+      deps({ llm: fakeLlm([], {}, flightReply({ from: "Bremen", to: "Oslo" })), search, warn: (m) => void warnings.push(m) }),
+    );
+    expect(events.map((e) => e.type)).toEqual(["widget", "fetch", "usage", "done"]);
+    expect(events[0]).toEqual({ type: "widget", name: "FlightSearchWidget", props: { flights: [], from: "Bremen", to: "Oslo" } });
+    expect(events[1]).toMatchObject({ type: "fetch", query: "flights from Bremen to Oslo", ok: false, records: 0, error: "web search returned no results" });
+    expect(warnings).toEqual([expect.stringContaining("flight search failed (web search returned no results)")]);
+  });
+
+  test("widgets: a flight search without a destination shows the form at once, with no search", async () => {
     let searched = 0;
     const search = async (): Promise<SearchOutcome> => {
       searched++;
       return { ok: false, error: "unused" };
     };
-    const reply: WidgetsReply = { tool: { name: "show_flight_search", input: { from: "Bremen", to: "New York" } }, text: "", usage, stopReason: "tool_use" };
-    const events = await collect(request({ mode: "widgets", decision: false }), deps({ llm: fakeLlm([], {}, reply), search }));
+    const events = await collect(request({ mode: "widgets", decision: false }), deps({ llm: fakeLlm([], {}, flightReply({ from: "Bremen", date: "2026-11-26" })), search }));
     expect(events.map((e) => e.type)).toEqual(["widget", "usage", "done"]);
+    expect(events[0]).toEqual({ type: "widget", name: "FlightSearchWidget", props: { flights: [], from: "Bremen", date: "2026-11-26" } });
     const u = events[1] as Extract<TurnEvent, { type: "usage" }>;
     // Measured when the widget is sent: one tick of the fake clock after the tool call, no search between.
     expect(u.first_ui_ms).toBe(u.compose_ms + 10);
@@ -1105,18 +1149,23 @@ describe("runTurn: widgets and html modes", () => {
     expect(events.slice(0, 1)).toEqual([{ type: "text", delta: "Each pays 30 euro." }]);
   });
 
-  test("widgetEvent: flights only when from and to are known", () => {
-    const d = { from: "Bremen", date: "2026-11-24" };
-    expect(widgetEvent({ name: "show_flight_search", input: { date: "2026-11-24" } }, d)).toEqual({
-      type: "widget",
-      name: "FlightSearchWidget",
-      props: { flights: [], date: "2026-11-24" },
+  test("widgetSearch: both widgets search live; flights only when from and to are known; unknown tools get none", () => {
+    expect(widgetSearch({ name: "show_flight_search", input: { date: "2026-11-24" } }, ctx)?.sreq).toBeNull();
+    // The origin defaults to the venue's city (ctx.city), as in the composer; the form shows it.
+    expect(widgetSearch({ name: "show_flight_search", input: { to: "Oslo" } }, ctx)?.sreq?.query).toBe("flights from Bremen to Oslo");
+    expect(widgetSearch({ name: "show_flight_search", input: { to: "Oslo" } }, ctx)?.widget([]).ev.props).toEqual({ flights: [], from: "Bremen", to: "Oslo" });
+    expect(widgetSearch({ name: "show_flight_search", input: { from: "Bremen", to: "New York" } }, ctx)?.sreq).toEqual({
+      query: "flights from Bremen to New York",
+      fields: ["carrier", "route", "price", "tags"],
+      max: 4,
     });
-    const full = widgetEvent({ name: "show_flight_search", input: { from: "Bremen", to: "New York" } }, d);
-    expect(full?.props.flights).toEqual(generateFlights("Bremen", "New York", "2026-11-24"));
-    expect(widgetEvent({ name: "unknown_tool", input: {} }, d)).toBeNull();
-    // Restaurants are searched first (composeWidgets), never answered from fixed data here.
-    expect(widgetEvent({ name: "show_restaurants", input: {} }, d)).toBeNull();
+    expect(widgetSearch({ name: "show_restaurants", input: {} }, ctx)?.sreq?.query).toBe("restaurants near Venue, Bremen");
+    expect(widgetSearch({ name: "unknown_tool", input: {} }, ctx)).toBeNull();
+    // A failed search still shows the widget, with no rows and nothing invented.
+    expect(widgetSearch({ name: "show_flight_search", input: { from: "Bremen", to: "Oslo" } }, ctx)?.widget([])).toEqual({
+      ev: { type: "widget", name: "FlightSearchWidget", props: { flights: [], from: "Bremen", to: "Oslo" } },
+      rows: 0,
+    });
   });
 
   test("html: deltas forwarded with fences stripped, then usage + done", async () => {

@@ -72,6 +72,14 @@ the keys the request lists, plus "source".
   Leave out every item whose stated opening hours or dates contradict the requested day or time
   (it closes at 17:00 for a dinner after 20:00, or it is closed on that weekday).
   Fewer items, or [], is a correct answer.
+- Trips (flights, trains, buses) are the one exception to that date rule, since results list carriers, routes and
+  fares, rarely the departures of one day. An item is one carrier or route that serves the requested trip, named
+  by a result for this origin and destination; keep it even when no result shows the requested date, and leave it
+  out when no result names its carrier. A price is only the amount with its currency, and "from" if the result
+  says so ("from €39", "€25"): nothing else, in English. A fare a
+  result lists for other dates or for a round trip may be kept only with a tag that says what it is ("round trip",
+  "June fares"); never present it as the fare for the requested date. No comments in values, no parentheses
+  ("No fare shown for that day", "€25 (round trip)" are wrong): say it with a tag, or leave the value null.
 - One item per real thing (a place, an event, a route, a product), never a list page or an article.
 - English, at most 80 characters per string.`;
 
@@ -91,6 +99,9 @@ const FIELD_HINTS: Record<string, string> = {
   venue: "where it takes place",
   rating: 'the rating as written in the result (e.g. "4.5/5")',
   distance: "the distance as written in the result",
+  // Trips (flights, trains, buses): route-level listings, never departures or a computed fare.
+  carrier: "the airline, rail or bus company name only, as a result states it",
+  route: 'airports or cities and stops as a result states them, e.g. "OPO → OSL · 1 stop via AMS"; "nonstop" only if a result says so',
   // Widgets mode's restaurant rows (restaurants.ts). Each is null unless a result states it.
   kind: "the cuisine or kind of place (e.g. italian, vegan, pub)",
   walk_min: "walking minutes from the person's location as a number, only if a result states it",
@@ -112,8 +123,30 @@ export function searchPrompt(req: SearchRequest, ctx: PromptContext): Prompt {
 
 // ── Reply ─────────────────────────────────────────────────────────────────────
 
-/** Runs one search. Never throws: every failure becomes { ok: false, error }. */
+const NOT_JSON = "answer was not a JSON array";
+
+/**
+ * Runs the search, and once more when the answer is malformed (prose instead of the array) or a trip list
+ * comes back empty: the two misses measured in flight chains (2 of 10 at f35faaa). A real route always has
+ * carriers, while an empty list of places can be right, so only trips retry on []. A thrown error, a refusal
+ * or the client leaving is not retried. Never throws: every failure becomes { ok: false, error }.
+ */
 export async function runSearch(req: SearchRequest, webSearch: WebSearch, ctx: PromptContext, signal: AbortSignal): Promise<SearchOutcome> {
+  const first = await searchOnce(req, webSearch, ctx, signal);
+  if (signal.aborted || !worthRetry(first, req)) return first;
+  const second = await searchOnce(req, webSearch, ctx, signal);
+  // Both calls ran and were billed: the measured counts are their sums.
+  const sum = (a: number | undefined, b: number | undefined) => (a ?? 0) + (b ?? 0);
+  const metrics = { searches: sum(first.searches, second.searches), inputTokens: sum(first.inputTokens, second.inputTokens), outputTokens: sum(first.outputTokens, second.outputTokens) };
+  return { ...second, ...metrics };
+}
+
+function worthRetry(o: SearchOutcome, req: SearchRequest): boolean {
+  if (!o.ok) return o.error === NOT_JSON;
+  return o.records.length === 0 && IDENTITY_FIELDS.some((f) => req.fields.includes(f));
+}
+
+async function searchOnce(req: SearchRequest, webSearch: WebSearch, ctx: PromptContext, signal: AbortSignal): Promise<SearchOutcome> {
   try {
     return parseSearchReply(await webSearch(searchPrompt(req, ctx), signal), req);
   } catch (err) {
@@ -144,10 +177,74 @@ export function parseSearchReply(reply: SearchReply, req: SearchRequest): Search
     .map((b) => (b.type === "text" ? b.text : ""))
     .join("");
   const items = extractJsonArray(answer);
-  if (!items) return fail("answer was not a JSON array");
+  if (!items) return fail(NOT_JSON);
   const hosts = new Set(urls.map(hostOf).filter((h): h is string => h !== null));
-  const { records, dropped } = normalizeRecords(items, req.fields, req.max, hosts);
+  // Tidied before the cap, so a second card for the same carrier does not take a slot.
+  const { records: valid, dropped } = normalizeRecords(items, req.fields, items.length, hosts);
+  const records = tidyRecords(valid).slice(0, req.max).map((r, i) => ({ ...r, id: `r${i + 1}` }));
   return { ok: true, records, dropped, ...metrics };
+}
+
+// ── Tidy-up (removes words, never adds or computes a fact) ────────────────────
+
+const GENERIC_TAGS = new Set(["flight", "flights"]);
+const ONE_WAY = /\bone[- ]way\b/i;
+const ROUND_TRIP = /\bround[- ]trip\b|\breturn\b/i;
+const BRACKETED = /\s*[([][^)\]]*[)\]]/g;
+const PER_PERSON = /\s*(?:pro Person|per person|p\.\s?P\.|pp\.?)\s*$/i;
+
+/**
+ * Measured on live flight cards (2 of 20 runs showed "one-way" next to "round trip"; "460 € pro Person"; the same
+ * airline twice in two currencies). Tags: no generic "flight", no duplicates, and a one-way label next to a round-trip
+ * label drops both (which one is right is unknown). Price: a bracketed note and trailing per-person words go; the
+ * amount, currency and a leading "from" stay as written. A round-trip or one-way label stated only in that note
+ * moves to the tags, so trimming never hides what the fare is. Trips: the first card per carrier wins.
+ */
+export function tidyRecords(records: readonly JsonObject[]): JsonObject[] {
+  const carriers = new Set<string>();
+  const out: JsonObject[] = [];
+  for (const r of records) {
+    const carrier = typeof r.carrier === "string" ? r.carrier.trim().toLowerCase() : null;
+    if (carrier) {
+      if (carriers.has(carrier)) continue;
+      carriers.add(carrier);
+    }
+    const rec: JsonObject = { ...r };
+    const moved = typeof r.price === "string" ? fareLabels(r.price) : [];
+    if (typeof r.price === "string") rec.price = tidyPrice(r.price);
+    if (Array.isArray(r.tags) || moved.length > 0) {
+      const tags = Array.isArray(r.tags) ? r.tags.filter((t): t is string => typeof t === "string") : [];
+      rec.tags = tidyTags([...moved, ...tags])?.slice(0, MAX_TAGS) ?? null;
+    }
+    out.push(rec);
+  }
+  return out;
+}
+
+export function tidyTags(tags: readonly string[]): string[] | null {
+  const seen = new Set<string>();
+  let kept = tags.filter((t) => {
+    const key = t.trim().toLowerCase();
+    if (!key || GENERIC_TAGS.has(key) || seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+  if (kept.some((t) => ONE_WAY.test(t)) && kept.some((t) => ROUND_TRIP.test(t))) kept = kept.filter((t) => !ONE_WAY.test(t) && !ROUND_TRIP.test(t));
+  return kept.length > 0 ? kept : null;
+}
+
+/** "round trip" / "one-way" when a bracketed note in the price states it. */
+function fareLabels(price: string): string[] {
+  const notes = price.match(BRACKETED) ?? [];
+  const labels: string[] = [];
+  if (notes.some((n) => ROUND_TRIP.test(n))) labels.push("round trip");
+  if (notes.some((n) => ONE_WAY.test(n))) labels.push("one-way");
+  return labels;
+}
+
+export function tidyPrice(price: string): string | null {
+  const s = price.replace(BRACKETED, "").replace(PER_PERSON, "").replace(/\s+/g, " ").trim();
+  return s ? s : null;
 }
 
 /**
@@ -203,9 +300,13 @@ function matchingBracket(text: string, start: number): number {
   return -1;
 }
 
+/** A trip item is named by its carrier (the card's title): one without it shows nothing to choose. */
+const IDENTITY_FIELDS: readonly string[] = ["carrier"];
+
 /**
  * Keeps only the requested fields, coerced to string | number | string[] | null, plus a source the
- * search returned (by host) and an id r1..rN. Items with no requested fact are dropped.
+ * search returned (by host) and an id r1..rN. Items with no requested fact, or without a requested
+ * carrier, are dropped.
  */
 export function normalizeRecords(
   items: JsonValue[],
@@ -234,7 +335,7 @@ export function normalizeRecords(
       rec[f] = v;
       if (v !== null) facts++;
     }
-    if (facts === 0) {
+    if (facts === 0 || IDENTITY_FIELDS.some((f) => fields.includes(f) && rec[f] === null)) {
       dropped++;
       continue;
     }

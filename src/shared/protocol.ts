@@ -79,7 +79,7 @@ export type RouteResult = {
 
 export type A2uiOrigin = "llm" | "data" | "knob";
 
-// ── Demo data records (resolved server-side from "data" lines; the model never invents them) ──
+// ── Live data records (resolved server-side from live web search; the model never invents them) ──
 export type Place = {
   id: string;
   name: string;
@@ -94,20 +94,25 @@ export type Place = {
   /** Source URL (live search records). */
   source?: string;
 };
+/**
+ * One carrier or route a live web search found for a trip. Results list route-level fares, not departures,
+ * so there are no times and no computed price: the fare is shown as a result lists it.
+ */
 export type Flight = {
   id: string;
+  /** Airline, rail or bus company, as a result names it. */
   carrier: string;
-  from: string;
-  to: string;
-  /** ISO local date-time "YYYY-MM-DDTHH:mm" */
-  depart: string;
-  arrive: string;
-  stops: number;
-  price_eur: number;
-  demo: true;
+  /** Airports or cities and stops as a result states them (e.g. "BRE → JFK · 1 stop via FRA"); null when none does. */
+  route: string | null;
+  /** The fare as written in the result (e.g. "from €476"); null when none is stated. */
+  price: string | null;
+  /** Short labels, including what a listed fare is ("round trip", "Nov fares"). */
+  tags: string[];
+  /** Source URL. */
+  source?: string;
 };
-/** "search" = live web search (real data). "flights" = deterministic demo generator, records carry demo: true. No fixed place data (owner direction). */
-export type DataSource = "flights" | "search";
+/** "search" = live web search, the only data source (owner direction: no fixed data, no demo generator). */
+export type DataSource = "search";
 
 /** Props of the two hand-built widgets in "widgets" mode. */
 export type RestaurantWidgetProps = { places: Place[]; kind?: string; max_walk_min?: number };
@@ -138,7 +143,7 @@ export type TurnEvent =
       repaired_lines?: number;
     }
   | {
-      /** One resolved data line (live search or demo source), emitted after its updateDataModel. Measured values only. */
+      /** One resolved data line (live search), emitted after its updateDataModel. Measured values only. */
       type: "fetch";
       source: DataSource;
       query: string;
