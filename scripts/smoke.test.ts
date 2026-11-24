@@ -5,7 +5,7 @@ import { setAt } from "@shared/pointer";
 import type { SurfaceState } from "../src/client/state";
 import { FIXTURE_CATALOG_ID } from "../src/client/a2ui/fixtures";
 import { applyMessage } from "../src/client/a2ui/processor";
-import { PATCH_EXPECT, changedLeaves, checkPatchOutcome, countControl, listedOptions, parseTime, planPatch, timeControls } from "./smoke";
+import { PATCH_EXPECT, changedLeaves, checkPatchOutcome, countControl, dataLeaves, dataOnlyViolations, listedOptions, parseTime, planPatch, timeControls } from "./smoke";
 
 // The talk clock (DEV_NOW); date knobs list today..today+14 from it.
 const NOW = new Date(2026, 10, 25, 18, 45);
@@ -198,5 +198,82 @@ describe("listedOptions", () => {
   test("a literal OptionCard the composer wrote itself is not a listed option", () => {
     const literal = { id: "lit", component: "OptionCard", title: "Invented Air", action: { event: { name: "pick_flight" } } };
     expect(listedOptions(surface([], [literal]))).toBe(0);
+  });
+});
+
+describe("dataOnlyViolations", () => {
+  /** A surface built by the real processor from components and data. */
+  function build(components: Record<string, unknown>[], data: JsonValue): SurfaceState {
+    let surfaces: Record<string, SurfaceState> = {};
+    const msgs = [
+      { version: "1.0", createSurface: { surfaceId: "s4", catalogId: FIXTURE_CATALOG_ID } },
+      { version: "1.0", updateComponents: { surfaceId: "s4", components } },
+      { version: "1.0", updateDataModel: { surfaceId: "s4", path: "/", value: data } },
+    ];
+    for (const m of msgs) surfaces = applyMessage(surfaces, m, { now: 1, turnId: null }).surfaces;
+    return surfaces.s4;
+  }
+  const cafes = [
+    { id: "r1", name: "A", rating: "4.5/5", image: "https://cdn.example/a.jpg" },
+    { id: "r2", name: "B", rating: null, image: null },
+  ];
+  const listed = [
+    { id: "root", component: "Column", children: ["list"] },
+    { id: "list", component: "List", children: { path: "/cafes", componentId: "card" } },
+    { id: "card", component: "Column", children: ["photo", "stars"] },
+    { id: "photo", component: "Image", url: { "@path": "image" }, alt: { "@path": "name" } },
+    { id: "stars", component: "Rating", value: { "@path": "rating" } },
+  ];
+
+  test("an Image url not delivered by data is a violation", () => {
+    const s = build(
+      [
+        { id: "root", component: "Column", children: ["hero", "ok"] },
+        { id: "hero", component: "Image", url: "https://invented.example/photo.jpg", alt: "Photo" },
+        { id: "ok", component: "Image", url: { "@path": "/hero" }, alt: "Photo" },
+      ],
+      { hero: "https://cdn.example/a.jpg" },
+    );
+    expect(dataOnlyViolations(s, dataLeaves({ cafes }))).toEqual(["hero"]);
+    // The composer wrote /hero itself with updateDataModel (origin llm): nothing delivered it, so it is invented too.
+    expect(dataOnlyViolations(s, new Set())).toEqual(["hero", "ok"]);
+  });
+
+  test("a Rating value copied from delivered data is fine", () => {
+    const delivered = dataLeaves({ cafes });
+    const s = build(
+      [
+        { id: "root", component: "Column", children: ["copied", "number", "made_up"] },
+        { id: "copied", component: "Rating", value: "4.5/5" },
+        { id: "number", component: "Rating", value: 4.2 },
+        { id: "made_up", component: "Rating", value: "4.8/5" },
+      ],
+      {},
+    );
+    expect(dataOnlyViolations(s, new Set([...delivered, "4.2"]))).toEqual(["made_up"]);
+    // Template items read their own record; null fields show nothing and are fine.
+    expect(dataOnlyViolations(build(listed, { cafes }), delivered)).toEqual([]);
+  });
+
+  test("no Image or Rating: no violations", () => {
+    const s = build([{ id: "root", component: "Column", children: ["t"] }, { id: "t", component: "Text", text: "4.9/5" }], {});
+    expect(dataOnlyViolations(s, new Set())).toEqual([]);
+  });
+
+  test("closed tabs and Accordion sections are judged too", () => {
+    const s = build(
+      [
+        { id: "root", component: "Accordion", items: [{ title: "A", child: "t" }, { title: "B", child: "tabs" }] },
+        { id: "t", component: "Text", text: "x" },
+        { id: "tabs", component: "Tabs", tabs: [{ title: "1", child: "t" }, { title: "2", child: "deep" }] },
+        { id: "deep", component: "Rating", value: "3/5" },
+      ],
+      {},
+    );
+    expect(dataOnlyViolations(s, new Set())).toEqual(["deep"]);
+  });
+
+  test("dataLeaves: strings trimmed, numbers as text, nested", () => {
+    expect([...dataLeaves({ a: [" x ", 4.5, null, { b: "y", c: true }], d: "" })]).toEqual(["x", "4.5", "y"]);
   });
 });
