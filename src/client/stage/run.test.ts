@@ -141,7 +141,7 @@ describe("bigNumbers", () => {
   test("first screen, first content (first data when there is some) and done, all on the client clock", () => {
     const n = bigNumbers(agent("t1", { clientFirstUiMs: 900 }), msgs, 4300);
     expect(n.map((x) => [x.label, x.value, x.caption])).toEqual([
-      ["First screen", "0.9 s", "frame on screen"],
+      ["First screen", "0.9 s", "frame shown"],
       ["First content", "3.1 s", "first data"],
       ["Done", "4.3 s", "turn finished"],
     ]);

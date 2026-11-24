@@ -185,11 +185,11 @@ function Components({ view }: { view: TurnView }) {
         <table className="w-full table-fixed font-mono text-[0.6875rem]" onMouseLeave={() => point(null)}>
           <thead>
             <tr className="text-left text-muted-foreground">
-              <th className="w-[25%] pb-1 font-normal">id</th>
-              <th className="w-[23%] pb-1 font-normal">type</th>
+              <th className="w-[22%] pb-1 font-normal">id</th>
+              <th className="w-[20%] pb-1 font-normal">type</th>
               <th className="pb-1 text-right font-normal">x,y</th>
               <th className="pb-1 text-right font-normal">w×h</th>
-              <th className="w-[4rem] pb-1 text-right font-normal">
+              <th className="w-[3.5rem] pb-1 text-right font-normal">
                 <span className="sr-only">status</span>
               </th>
             </tr>
@@ -215,7 +215,7 @@ function ComponentRowView({ row, active, onPoint }: { row: ComponentRow; active:
       <td className="truncate py-[3px] pr-1 text-info">{row.type}</td>
       <td className="truncate py-[3px] pl-1 text-right text-muted-foreground tabular-nums">{row.box ? row.box.x + "," + row.box.y : "–"}</td>
       <td className="truncate py-[3px] pl-1.5 text-right tabular-nums">{row.box ? row.box.w + "×" + row.box.h : "–"}</td>
-      <td className={cn("py-[3px] text-right", row.status === "ok" ? "text-success" : "text-destructive")}>[{row.status}]</td>
+      <td className={cn("py-[3px] text-right whitespace-nowrap", row.status === "ok" ? "text-success" : "text-destructive")}>[{row.status}]</td>
     </tr>
   );
 }
@@ -234,7 +234,16 @@ function Footer({ view, doneMs }: { view: TurnView; doneMs: number | null }) {
   const chips = [route?.engine, usage?.model, "A2UI " + A2UI_VERSION].filter((x): x is string => Boolean(x));
   return (
     <div className="flex flex-col gap-2.5 border-t px-[18px] py-4">
-      {facts.length > 0 && <p className="font-mono text-[0.75rem] text-muted-foreground tabular-nums">{facts.join(" · ")}</p>}
+      {facts.length > 0 && (
+        <p className="font-mono text-[0.75rem] text-muted-foreground tabular-nums">
+          {facts.map((f, i) => (
+            <span key={f}>
+              {i > 0 && " · "}
+              <span className="whitespace-nowrap">{f}</span>
+            </span>
+          ))}
+        </p>
+      )}
       <div className="flex flex-wrap gap-1.5">
         {chips.map((c) => (
           <span key={c} className="rounded-md border bg-card px-2 py-0.5 font-mono text-[0.6875rem]">
@@ -295,7 +304,8 @@ export function RunTab({ turnId }: { turnId: string | null }) {
   const item = view.item;
   const doneMs = doneTime(rec);
   return (
-    <div className="min-h-0 flex-1 overflow-y-auto [scrollbar-gutter:stable]">
+    // relative: the containing block for anything absolutely placed inside (sr-only text), so it never stretches the page.
+    <div className="relative min-h-0 flex-1 overflow-y-auto [scrollbar-gutter:stable]">
       {item ? (
         <>
           <div className="flex flex-col gap-1 border-t px-[18px] pt-4 pb-3.5">
@@ -310,10 +320,10 @@ export function RunTab({ turnId }: { turnId: string | null }) {
           </Section>
           <dl className="grid grid-cols-3 border-t">
             {bigNumbers(item, view.messages, doneMs).map((n) => (
-              <div key={n.key} className="flex min-w-0 flex-col gap-1 px-[18px] py-3.5 not-first:border-l">
+              <div key={n.key} className="flex min-w-0 flex-col gap-1 px-3.5 py-3.5 first:pl-[18px] not-first:border-l">
                 <dt className="font-mono text-[0.625rem] leading-tight tracking-[0.1em] text-muted-foreground uppercase">{n.label}</dt>
                 <dd className="text-[1.5rem] leading-none font-semibold tracking-tight tabular-nums">{n.value}</dd>
-                <dd className="truncate text-[0.6875rem] text-muted-foreground">{n.caption}</dd>
+                <dd className="text-[0.6875rem] leading-tight text-muted-foreground">{n.caption}</dd>
               </div>
             ))}
           </dl>

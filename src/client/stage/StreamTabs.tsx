@@ -50,9 +50,7 @@ export function OriginBadge({ origin }: { origin: keyof typeof ORIGIN_BADGE }) {
 function StreamHeader({ view, note }: { view: TurnView; note: string }) {
   return (
     <div className="flex shrink-0 flex-col gap-0.5 border-y px-[18px] py-2.5">
-      <p className="truncate font-mono text-[0.75rem] text-foreground" title={streamHeader(view.item, view.messages)}>
-        {streamHeader(view.item, view.messages)}
-      </p>
+      <p className="font-mono text-[0.75rem] leading-snug text-foreground">{streamHeader(view.item, view.messages)}</p>
       <p className="text-[0.75rem] leading-snug text-muted-foreground">{note}</p>
     </div>
   );

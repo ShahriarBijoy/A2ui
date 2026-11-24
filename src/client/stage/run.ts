@@ -114,7 +114,7 @@ export function bigNumbers(item: AgentItem, messages: readonly TimedMessage[], d
   const firstUi = item.metrics.clientFirstUiMs;
   const content = firstContent(messages);
   return [
-    { key: "screen", label: "First screen", value: firstUi !== undefined ? formatSeconds(firstUi) : missing(item), caption: "frame on screen" },
+    { key: "screen", label: "First screen", value: firstUi !== undefined ? formatSeconds(firstUi) : missing(item), caption: "frame shown" },
     {
       key: "content",
       label: "First content",
