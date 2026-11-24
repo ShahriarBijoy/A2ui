@@ -12,6 +12,7 @@ import {
   fitBoxes,
   runHistory,
   runStatus,
+  wireCharsByTurn,
   runSteps,
   runSubtitle,
   tokensPerSecond,
@@ -259,7 +260,9 @@ function History({ selected }: { selected: string | null }) {
   const thread = useStore((s) => s.thread);
   const wire = useStore((s) => s.wire);
   const recordings = useStore((s) => s.recordings);
-  const rows = useMemo(() => runHistory(thread, wire, recordings), [thread, wire, recordings]);
+  // Characters per turn change only with the wire; a streamed HTML delta changes the thread, not this.
+  const chars = useMemo(() => wireCharsByTurn(wire), [wire]);
+  const rows = useMemo(() => runHistory(thread, chars, recordings), [thread, chars, recordings]);
   return (
     <Section label="Run history" aside={<span className="font-mono text-[0.75rem] text-muted-foreground">this session</span>}>
       {rows.length === 0 ? (

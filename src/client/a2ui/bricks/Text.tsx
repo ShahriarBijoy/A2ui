@@ -53,7 +53,16 @@ export function Text({ def, scope }: BrickProps<TextComponent>) {
   const env = useSurfaceEnv();
   const ctx = evalCtx(env, scope);
   const variant = def.variant === "caption" || def.variant === "subtitle" ? def.variant : "body";
-  if (env.streaming && isPending(def.text, ctx)) return <InlineSkeleton className={variant === "body" ? "h-6 w-48" : "h-4 w-32"} />;
+  if (env.streaming && isPending(def.text, ctx)) {
+    // Same wrapper, class and line box as the arrived text: a caption or subtitle under a heading keeps its place.
+    return (
+      <div className={cn("flex flex-col gap-1 leading-snug", VARIANT[variant])}>
+        <p>
+          <InlineSkeleton className={variant === "body" ? "w-48" : "w-32"} />
+        </p>
+      </div>
+    );
+  }
   const text = resolveString(def.text, ctx);
   return (
     <div className={cn("flex flex-col gap-1 leading-snug", VARIANT[variant])}>

@@ -14,6 +14,7 @@ import {
   streamHeader,
   tokensPerSecond,
   turnMessages,
+  wireCharsByTurn,
   withActionInput,
   writtenIds,
   type TimedMessage,
@@ -203,7 +204,9 @@ describe("runHistory", () => {
     const m1 = comps({ id: "root", component: "Card", child: "m" });
     const m2 = data("/booking/guests", 6);
     const log = [wire("t1", 1500, m1), wire("t2", 1500, m2, "knob")];
-    const rows = runHistory(thread, log, { t1: rec(4300), t2: rec(240) });
+    const chars = wireCharsByTurn(log);
+    expect([...chars.keys()]).toEqual(["t1", "t2"]);
+    const rows = runHistory(thread, chars, { t1: rec(4300), t2: rec(240) });
     expect(rows.map((r) => [r.prompt, r.mode, r.model, r.written, r.tookMs])).toEqual([
       ["Dinner nearby", "A2UI", "claude-sonnet-5-5", JSON.stringify(m1).length + 1, 4300],
       ["We're six", "A2UI · patch", "jev-1.14.0", JSON.stringify(m2).length + 1, 240],

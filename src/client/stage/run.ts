@@ -176,18 +176,27 @@ export type HistoryRow = {
 
 const MODE_LABEL: Readonly<Record<AgentItem["mode"], string>> = { a2ui: "A2UI", widgets: "Widgets", html: "HTML" };
 
-function writtenChars(item: AgentItem, wire: readonly WireEntry[]): number | null {
+/** Compact-JSON characters of each turn's agent-to-renderer messages, in one pass over the wire log. */
+export function wireCharsByTurn(wire: readonly WireEntry[]): Map<string, number> {
+  const out = new Map<string, number>();
+  for (const w of wire) {
+    if (w.dir !== "down" || !w.turnId) continue;
+    out.set(w.turnId, (out.get(w.turnId) ?? 0) + jsonChars([{ msg: w.json, origin: w.origin as A2uiOrigin }]));
+  }
+  return out;
+}
+
+function writtenChars(item: AgentItem, wireChars: ReadonlyMap<string, number>): number | null {
   if (item.widget) return JSON.stringify(item.widget.props).length;
   if (item.html !== undefined) return item.html.length;
   if (item.text !== undefined) return item.text.length;
-  const n = jsonChars(turnMessages(wire, item.turnId, null));
-  return n > 0 ? n : null;
+  return wireChars.get(item.turnId) ?? null;
 }
 
 /** Every turn of the open session, oldest first: what was asked, how it was answered and what it took. */
 export function runHistory(
   thread: readonly ThreadItem[],
-  wire: readonly WireEntry[],
+  wireChars: ReadonlyMap<string, number>,
   recordings: Readonly<Record<string, TurnRecording>>,
 ): HistoryRow[] {
   const users = new Map<string, UserItem>();
@@ -203,7 +212,7 @@ export function runHistory(
       via: user?.via ?? item.retry.via,
       mode: MODE_LABEL[item.mode] + (patch ? " · patch" : ""),
       model: item.metrics.usage?.model ?? (patch ? item.metrics.route?.engine ?? "decision model" : "–"),
-      written: writtenChars(item, wire),
+      written: writtenChars(item, wireChars),
       tookMs: doneTime(recordings[item.turnId]),
       status: runStatus(item),
     });
