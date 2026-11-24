@@ -295,17 +295,45 @@ delivered in that session. Code evaluated: **6943acb** (smoke "Script tree"). No
   Medians: step 1 first UI 1.32 s / screen 4.01 s; step 2 1.71 / 4.48 s; tap → seat map 1.56 / 3.72 s; confirm 1.62 / 2.91 s.
   Every step-2 flight card carried `icon: "plane"` (10/10). New bricks elsewhere: 3 Alerts on confirm summaries.
 - Dinner: places per run 2,2,2,3,3,1,1,2,4,2; search 3455 ms median (2650-4399); data 5.84 s (5.09-6.77).
-  "We're six, and later." patched 9/10 by result, 156 ms median (132-166), no LLM. **Miss (run 8): the router patched
-  Guests only** (reason "edit 0.95: Guests → 6"): the step-2 Time chips were 19:00/19:30/20:00/20:30 with 20:00
-  selected, so "one hour later" (21:00) was not an option; the judge failed it as "later dropped". Decision model, not
-  the catalog change. Step 2 expect 2/10 (time as a DateTimeInput, not chips; informational, as before).
-  Dinner cards carried `icon: "utensils"` (10/10). Alerts in 14 of 42 dinner turns (mostly confirm summaries; step-2
-  hours notes paraphrase the tapped item's search fields, traced e.g. "Open Wednesday until 23:00"), Badges in 2.
+  **"We're six, and later." (the talk's headline patch) passed 9/10 by result**, 156 ms median (132-166), no LLM.
+  **Miss (run 8), cause not established:** the router patched Guests only (reason "edit 0.95: Guests → 6") and the
+  judge failed it as "later dropped". That step-2 screen had Time chips 19:00-20:30 with 20:00 selected, so "one hour
+  later" (21:00) was not an option, and it carried a new Alert, "Closes at 9PM: Kitchen may stop earlier. Pick a time
+  before closing." (the tapped place's data said Wed 12PM-9PM). The partial-edit rule says such a turn should compose.
+  No "later dropped" miss appears in the earlier evals in this file.
+  Step-2 screens per run (time control · Alert):
+
+  | run | time control (initial) | Alert on step 2 | tapped item's hours (search fields) |
+  |---|---|---|---|
+  | 1 | DateTimeInput (20:00) | "Open Monday to Friday 11:30–22:30 · Reservations advised, places limited" | Mon-Fri 11:30–22:30 |
+  | 2 | DateTimeInput (19:30) | – | Wed until 23:00 |
+  | 3 | DateTimeInput (20:00) | – | Wed 12:00-22:00 |
+  | 4 | DateTimeInput (20:00) | – | Sun-Fri from 12:00 |
+  | 5 | DateTimeInput (20:00) | "Hours unconfirmed: Wednesday dinner hours are not confirmed…" | dinner hours not confirmed |
+  | 6 | ChoicePicker 19:30-21:00, 4 chips (["20:00"]) | – | Wed 09:00-23:00 |
+  | 7 | DateTimeInput (20:00) | – | Mon-Fri 11:30-22:30 |
+  | 8 | ChoicePicker 19:00-20:30, 4 chips (["20:00"]) | "Closes at 9PM: … Pick a time before closing." | Wed 12PM-9PM |
+  | 9 | DateTimeInput (19:30) | – | Mon-Fri until 22:30 |
+  | 10 | DateTimeInput (19:30) | "Kitchen open until 21:00 tonight." | Wed 12PM-9PM |
+
+  Step 2 expect (ChoicePicker present) 2/10; earlier rates 2/3 (d7a9e70) and 4/5 (a94ccbf). Informational (not part of
+  the bar), but lower; the 8 DateTimeInput time knobs all patched correctly.
+  Dinner cards carried `icon: "utensils"` (10/10).
+- **Alerts and Badges on the talk path** (not judged by smoke): 17 Alerts and 2 Badges in the 80 a2ui dinner + flight turns, although
+  the prompt says new bricks only when the request is about them. Hours notes on dinner step 2 paraphrase the tapped
+  item's search fields (traced). Some confirm-summary Alerts state things no data line said: "No seat was picked. You can
+  choose one at check-in." / "Seat not chosen. You can pick one later." (flight), "Thursday dinner is not needed. Your
+  table is set for tonight." (dinner run 9), and "Confirmed"/"booked" wording for a booking the app does not make.
+  Left as measured: the bars were met, so no prompt revision was made (a change would orphan these numbers). Proposed
+  for the controller: one prompt line, e.g. "Alert and Badge only for a notice the person asked for or a fact from a data
+  line; never on a summary.", then a re-run of flight and dinner ×10.
 - Held-out: plans3 drew a Table bound to the search path (3 live records) and an info Alert; hamburg chose OptionCards
   (icon map-pin) over a Timeline; cafe drew Image + Rating bound to data fields, but its single record (yelp.com) had
   rating null and the page answered 403 to the og:image lookup, so neither showed (correct: nothing invented).
   dog passed this time (6 blocks). 0 refused, 0 validation errors, 0 "invented", 0 icons dropped in all 92 turns.
 - Widgets and HTML lines unchanged: FlightSearchWidget 730 ms; RestaurantWidget 5 places in 3.81 s; HTML 2/2.
+- Not measured: brick prediction (Jev) now asks 27 questions instead of 17; the ten new predictHints were never run, so
+  which pool tiles light while speaking (and the latency) is unknown.
 - og:image probe from the dev machine (Bun, same code): hamburg-travel.com found (warm 112 ms; the first, cold attempt
   hit the 1.5 s cap), germanycompass.com found, hamburg.com has no og tag, yelp.com and tripadvisor.com 403,
   lufthansa.com 200 once then 403 (bot protection). A photo filled end to end in a live turn was not observed.
