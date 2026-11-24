@@ -135,6 +135,8 @@ describe("sanitizeSnapshot", () => {
     const raw = JSON.parse(JSON.stringify(snap("a", undefined, { surfaces: { s1: { ...s, changed: { "/x": 99_999 } } }, newestSurfaceId: "s1" })));
     const out = sanitizeSnapshot(raw)!;
     expect(out.surfaces.s1.changed).toEqual({});
+    // The old page's clock: a later change on this page must count as newer, so the patch flash still shows.
+    expect(out.surfaces.s1.components.root.firstSeen).toBe(0);
     expect(out.newestSurfaceId).toBe("s1");
     expect(out.meta.title).toBe("dinner");
     expect(out.meta.turns).toBe(1);

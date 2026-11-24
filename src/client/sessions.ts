@@ -147,15 +147,18 @@ function sanitizeAgent(raw: { [key: string]: unknown }): AgentItem | null {
 
 function sanitizeEntry(id: string, raw: unknown): ComponentEntry | null {
   if (!isPlainObject(raw) || !num(raw.firstSeen)) return null;
+  // firstSeen is a performance.now() of the page that wrote it. A flash needs "changed after firstSeen" on one clock,
+  // so a restored component counts as seen at this page's start: the "We're six" patch still flashes after a reload.
+  const firstSeen = 0;
   if (raw.status === "ok" && isPlainObject(raw.def) && str(raw.def.component) && raw.def.id === id) {
     // A brick this build cannot draw (saved by a newer build) shows as a calm refusal instead of breaking the render.
     if (!isBrickName(raw.def.component)) {
-      return { status: "refused", id, component: raw.def.component, reason: "Not in this build", firstSeen: raw.firstSeen };
+      return { status: "refused", id, component: raw.def.component, reason: "Not in this build", firstSeen };
     }
-    return { status: "ok", def: raw.def as unknown as Extract<ComponentEntry, { status: "ok" }>["def"], firstSeen: raw.firstSeen };
+    return { status: "ok", def: raw.def as unknown as Extract<ComponentEntry, { status: "ok" }>["def"], firstSeen };
   }
   if (raw.status === "refused" && str(raw.component) && str(raw.reason)) {
-    return { status: "refused", id, component: raw.component, reason: raw.reason, firstSeen: raw.firstSeen };
+    return { status: "refused", id, component: raw.component, reason: raw.reason, firstSeen };
   }
   return null;
 }
