@@ -93,9 +93,8 @@ describe("composer prompt", () => {
       price: { "@path": "price" },
       action: { event: { name: "pick_flight", context: { id: { "@path": "id" }, carrier: { "@path": "carrier" }, route: { "@path": "route" }, price: { "@path": "price" } } } },
     });
-    // The example is another trip: the talk's route and date never sit in the cached prompt.
-    expect(flat).not.toContain("New York");
-    expect(flat).not.toContain("November");
+    // The example is another trip: the talk's route and date never sit in the cached prompt (owner rule).
+    expect(flat).not.toMatch(/Bremen|New York|JFK|\bBRE\b|\bFRA\b|Lufthansa|Air France|KLM|\bNov\b|November/);
   });
 
   test("a request that implies a time names the day and time from STATE in its search query", () => {

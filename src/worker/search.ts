@@ -78,7 +78,7 @@ the keys the request lists, plus "source".
   out when no result names its carrier. A price is only the amount with its currency, and "from" if the result
   says so ("from €39", "€25"): nothing else, in English. A fare a
   result lists for other dates or for a round trip may be kept only with a tag that says what it is ("round trip",
-  "Nov fares"); never present it as the fare for the requested date. No comments in values, no parentheses
+  "June fares"); never present it as the fare for the requested date. No comments in values, no parentheses
   ("No fare shown for that day", "€25 (round trip)" are wrong): say it with a tag, or leave the value null.
 - One item per real thing (a place, an event, a route, a product), never a list page or an article.
 - English, at most 80 characters per string.`;
@@ -101,7 +101,7 @@ const FIELD_HINTS: Record<string, string> = {
   distance: "the distance as written in the result",
   // Trips (flights, trains, buses): route-level listings, never departures or a computed fare.
   carrier: "the airline, rail or bus company name only, as a result states it",
-  route: 'airports or cities and stops as a result states them, e.g. "BRE → JFK · 1 stop via FRA"; "nonstop" only if a result says so',
+  route: 'airports or cities and stops as a result states them, e.g. "OPO → OSL · 1 stop via AMS"; "nonstop" only if a result says so',
   // Widgets mode's restaurant rows (restaurants.ts). Each is null unless a result states it.
   kind: "the cuisine or kind of place (e.g. italian, vegan, pub)",
   walk_min: "walking minutes from the person's location as a number, only if a result states it",

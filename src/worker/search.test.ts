@@ -211,16 +211,21 @@ describe("searchPrompt and runSearch", () => {
   test("trips: carrier and route hints; a narrow exception to the date rule, fares labelled by tags, never estimated", () => {
     const user = searchPrompt({ ...req, fields: ["carrier", "route", "price", "tags"] }, ctx).user;
     expect(user).toContain("- carrier: the airline, rail or bus company name only, as a result states it");
-    expect(user).toContain('- route: airports or cities and stops as a result states them, e.g. "BRE → JFK · 1 stop via FRA"; "nonstop" only if a result says so');
+    expect(user).toContain('- route: airports or cities and stops as a result states them, e.g. "OPO → OSL · 1 stop via AMS"; "nonstop" only if a result says so');
     const flat = SEARCH_SYSTEM_PROMPT.replace(/\s+/g, " ");
     expect(flat).toContain("Trips (flights, trains, buses) are the one exception to that date rule");
     expect(flat).toContain("An item is one carrier or route that serves the requested trip, named by a result for this origin and destination");
-    expect(flat).toContain('may be kept only with a tag that says what it is ("round trip", "Nov fares"); never present it as the fare for the requested date');
+    expect(flat).toContain('may be kept only with a tag that says what it is ("round trip", "June fares"); never present it as the fare for the requested date');
     expect(flat).toContain("No comments in values");
     // The general rules stay: the date rule for everything else, and no estimates.
     expect(flat).toContain("leave out items the results do not show meeting it");
     expect(flat).toContain("Never estimate, round or guess a number, price");
     expect(SEARCH_SYSTEM_PROMPT).not.toMatch(/\b20\d\d\b/);
+    // No prompt text steers toward the stage scenario (owner rule): no talk place, carrier or date.
+    const talk = /Bremen|New York|JFK|\bBRE\b|\bFRA\b|Lufthansa|Air France|KLM|\bNov\b|November/;
+    expect(SEARCH_SYSTEM_PROMPT).not.toMatch(talk);
+    // The user message names the venue by design; its field hints must not.
+    for (const hint of user.split("\n").filter((l) => l.startsWith("- "))) expect(hint).not.toMatch(talk);
   });
 
   test("items whose stated hours contradict the requested day or time are left out", () => {
