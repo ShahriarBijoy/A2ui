@@ -75,7 +75,8 @@ the keys the request lists, plus "source".
 - Trips (flights, trains, buses) are the one exception to that date rule, since results list carriers, routes and
   fares, rarely the departures of one day. An item is one carrier or route that serves the requested trip, named
   by a result for this origin and destination; keep it even when no result shows the requested date, and leave it
-  out when no result names its carrier. A price is only the amount as the result writes it ("from €605"). A fare a
+  out when no result names its carrier. A price is only the amount with its currency, and "from" if the result
+  says so ("from €605", "€460"): nothing else, in English. A fare a
   result lists for other dates or for a round trip may be kept only with a tag that says what it is ("round trip",
   "Nov fares"); never present it as the fare for the requested date. No comments in values, no parentheses
   ("No fare shown for that day", "€460 (round trip)" are wrong): say it with a tag, or leave the value null.
