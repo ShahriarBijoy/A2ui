@@ -87,6 +87,18 @@ export function slotList(shipped: readonly Recording[], saved: readonly Recordin
   return free > 0 ? [...fixed, ...saved.slice(-free)] : fixed;
 }
 
+/**
+ * True when the recording starts a sequence (F1 dinner, F4 flight): it creates the first surface, "s1". Such a replay
+ * opens a fresh session when the open one already has turns, so the two scenarios never share a thread.
+ */
+export function startsSequence(rec: Pick<Recording, "events">): boolean {
+  return rec.events.some((e) => {
+    if (e.ev.type !== "a2ui") return false;
+    const msg: unknown = e.ev.msg;
+    return isPlainObject(msg) && isPlainObject(msg.createSurface) && msg.createSurface.surfaceId === "s1";
+  });
+}
+
 /** Recorded events up to the first done, ending in a done even when the stream never sent one (failTurn is not recorded). */
 export function playableEvents(events: readonly Recording["events"][number][]): Recording["events"] {
   const end = events.findIndex((e) => e.ev.type === "done");
@@ -138,6 +150,8 @@ export type ReplayDeps = {
   store: Pick<StoreApi, "getState" | "subscribe" | "beginTurn" | "applyTurnEvent" | "setMode">;
   /** Stops the live turn in flight (turns.abortTurn). */
   abortLiveTurn: () => void;
+  /** Opens a fresh session when the open one has turns (store.newSession). Called before a sequence start plays. */
+  newSessionIfBusy: () => void;
   shipped: readonly Recording[];
   storage: ReplayStorage | null;
   now?: () => number;
@@ -276,6 +290,8 @@ export function createReplayer(deps: ReplayDeps): Replayer {
       }
       if (run) fastForward(run);
       deps.abortLiveTurn();
+      // After the running replay and live turn are finished, so the session being left keeps them whole.
+      if (startsSequence(rec)) deps.newSessionIfBusy();
       // beginTurn stamps the current mode on the item; a widgets or html recording must render as one.
       if (st.getState().mode !== rec.mode) st.setMode(rec.mode);
       const turnId = st.beginTurn({ input: rec.input, display: rec.display, via: rec.via, replay: true });
@@ -372,6 +388,9 @@ function browserStorage(): ReplayStorage | null {
 export const replayer: Replayer = createReplayer({
   store,
   abortLiveTurn: abortTurn,
+  newSessionIfBusy: () => {
+    if (store.getState().thread.length > 0) store.newSession();
+  },
   shipped: BUILTIN_REPLAYS,
   storage: browserStorage(),
 });

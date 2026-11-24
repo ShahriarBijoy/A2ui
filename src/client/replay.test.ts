@@ -10,6 +10,7 @@ import {
   playableEvents,
   SAVED_LIMIT,
   slotList,
+  startsSequence,
   STORAGE_KEY,
   type Recording,
   type ReplayStorage,
@@ -71,6 +72,8 @@ type Env = {
   storage: ReturnType<typeof memoryStorage>;
   deferred: (() => void)[];
   aborts: number;
+  /** Calls of newSessionIfBusy, with the number of events the store had seen for the newest turn at that moment. */
+  newSessions: number;
   replayer: ReturnType<typeof createReplayer>;
   flushDeferred(): void;
 };
@@ -82,11 +85,16 @@ function setup(opts: { shipped?: Recording[]; storage?: ReturnType<typeof memory
     storage: opts.storage ?? memoryStorage(),
     deferred: [] as (() => void)[],
     aborts: 0,
+    newSessions: 0,
   } as Env;
   env.replayer = createReplayer({
     store: env.store,
     abortLiveTurn: () => {
       env.aborts++;
+    },
+    newSessionIfBusy: () => {
+      env.newSessions++;
+      if (env.store.getState().thread.length > 0) env.store.newSession();
     },
     shipped: opts.shipped ?? [],
     storage: env.storage,
@@ -322,7 +330,9 @@ describe("save", () => {
   });
 
   test("skips a turn still streaming and replay items", () => {
-    const env = setup({ shipped: [DINNER] });
+    // Not a sequence start (that would open a fresh session and leave "finished" in the old one).
+    const tap = rec("tap", [[100, a2ui(create("s2"))], [200, a2ui(root("s2"))], [300, { type: "done" }]]);
+    const env = setup({ shipped: [tap] });
     liveTurn(env.store, utter("finished"), "finished", "text", () => [{ type: "caption", text: "ok" }, { type: "done" }]);
     env.replayer.play(1);
     env.clock.advance(5000);
@@ -554,5 +564,63 @@ describe("a saved three-turn sequence", () => {
     expect(st.wire.filter((w) => w.kind === "error")).toEqual([]);
     // A live turn after the replays must not reuse a replayed id.
     expect(stage.store.buildTurnRequest(utter("next")).nextSurfaceId).not.toBe(sid);
+  });
+});
+
+// ── Sessions ─────────────────────────────────────────────────────────────────
+
+describe("sequence starts open a fresh session", () => {
+  const TAP: Recording = rec("pick_restaurant · r1", [
+    [100, a2ui(create("s2"))],
+    [200, a2ui(root("s2"))],
+    [300, { type: "done" }],
+  ]);
+
+  test("startsSequence is true for the shipped F1 and F4 and false for F2, F3, F5, F6", () => {
+    expect(BUILTIN_REPLAYS).toHaveLength(6);
+    expect(BUILTIN_REPLAYS.map((r) => startsSequence(r))).toEqual([true, false, false, true, false, false]);
+  });
+
+  test("playing a sequence start calls newSessionIfBusy once before the first event", () => {
+    const env = setup({ shipped: [DINNER, TAP] });
+    env.replayer.play(1);
+    env.clock.advance(1300);
+    const firstSession = env.store.getState().activeSessionId;
+    expect(env.newSessions).toBe(1);
+    expect(env.store.getState().sessions).toHaveLength(1);
+
+    env.replayer.play(1);
+    expect(env.newSessions).toBe(2);
+    const st = env.store.getState();
+    // The dinner thread stays in its own session; the new one holds only the new replay turn.
+    expect(st.activeSessionId).not.toBe(firstSession);
+    expect(st.sessions).toHaveLength(2);
+    expect(st.thread.map((i) => i.kind)).toEqual(["user", "agent"]);
+    expect(arrived(env.store, lastAgent(env.store)!.turnId)).toEqual([]);
+    env.clock.advance(1300);
+    expect(st.surfaces).toEqual({});
+    expect(env.store.getState().surfaces.s1).toBeDefined();
+  });
+
+  test("a sequence start pressed mid-replay finishes the running replay in the old session first", () => {
+    const env = setup({ shipped: [DINNER] });
+    env.replayer.play(1);
+    env.clock.advance(700);
+    const firstSession = env.store.getState().activeSessionId;
+    env.replayer.play(1);
+    env.store.switchSession(firstSession);
+    const item = lastAgent(env.store)!;
+    expect(item.status).toBe("done");
+    expect(item.caption).toBe("A table nearby.");
+  });
+
+  test("playing F2 does not call it", () => {
+    const env = setup({ shipped: [DINNER, TAP] });
+    env.replayer.play(1);
+    env.clock.advance(1300);
+    env.replayer.play(2);
+    expect(env.newSessions).toBe(1);
+    expect(env.store.getState().sessions).toHaveLength(1);
+    expect(env.store.getState().thread).toHaveLength(4);
   });
 });
