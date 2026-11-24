@@ -4,8 +4,9 @@
  * as a "refused" entry so the rest of the surface still renders (U10).
  */
 import type { A2uiError, A2uiMessageKind, CatalogComponent, JsonValue } from "@shared/a2ui";
-import { A2UI_MESSAGE_KINDS, A2UI_VERSION, isChildTemplate, isFunctionCall, isPlainObject } from "@shared/a2ui";
+import { A2UI_MESSAGE_KINDS, A2UI_VERSION, isChildTemplate, isFunctionCall, isPathBinding, isPlainObject } from "@shared/a2ui";
 import { CATALOG_PATH, isBrickName, isFunctionName, type BrickName } from "@shared/catalog";
+import { isIconName } from "@shared/icons";
 import { formatPointer, getAt, parsePointer, setAt } from "@shared/pointer";
 import type { ComponentEntry, SurfaceState } from "@/state";
 
@@ -380,8 +381,24 @@ function sanitizeChecks(c: Raw, surfaceId: string, base: string, errors: A2uiErr
   return { ...c, "@checks": kept };
 }
 
+/** No icon (absent or null: older screens and replays) or a name from the icon set. */
+function isOptionalIcon(v: unknown): boolean {
+  return v === undefined || v === null || isIconName(v);
+}
+
 function isChildList(v: unknown): boolean {
   return (Array.isArray(v) && v.every((x) => typeof x === "string")) || isChildTemplate(v);
+}
+
+/** A path binding, or a literal array whose every item passes `item`. */
+function isItems(v: unknown, item: (x: { [key: string]: unknown }) => boolean): boolean {
+  if (isPathBinding(v)) return true;
+  return Array.isArray(v) && v.every((x) => isPlainObject(x) && item(x));
+}
+
+/** undefined (the default) or one of the listed strings. */
+function oneOf(v: unknown, allowed: readonly string[]): boolean {
+  return v === undefined || (typeof v === "string" && allowed.includes(v));
 }
 
 function isAction(v: unknown): boolean {
@@ -397,6 +414,7 @@ function isAction(v: unknown): boolean {
  */
 function validateProps(type: BrickName, c: Raw): { prop: string; message: string } | null {
   const missing = (prop: string) => ({ prop, message: type + " needs " + prop });
+  const bad = (prop: string, message: string) => ({ prop, message });
   const has = (prop: string) => c[prop] !== undefined && c[prop] !== null;
 
   switch (type) {
@@ -416,9 +434,61 @@ function validateProps(type: BrickName, c: Raw): { prop: string; message: string
         return missing("tabs");
       }
       break;
+    case "Accordion":
+      if (!Array.isArray(c.items) || c.items.length === 0 || !c.items.every((t) => isPlainObject(t) && typeof t.child === "string")) {
+        return missing("items");
+      }
+      break;
+    case "Icon":
+      if (!isIconName(c.name)) return bad("name", "Icon name is not in the icon set");
+      if (!oneOf(c.size, ["sm", "md", "lg"])) return bad("size", "Icon size must be sm, md or lg");
+      break;
+    case "Table":
+      if (
+        !Array.isArray(c.columns) ||
+        c.columns.length === 0 ||
+        !c.columns.every((col) => isPlainObject(col) && typeof col.field === "string" && col.field !== "")
+      ) {
+        return missing("columns");
+      }
+      if (!isItems(c.rows, () => true)) return missing("rows");
+      break;
+    case "Chart":
+      if (!oneOf(c.type, ["bar"])) return bad("type", 'Chart type must be "bar"');
+      if (!isItems(c.items, (x) => typeof x.label === "string" && typeof x.value === "number" && Number.isFinite(x.value))) {
+        return missing("items");
+      }
+      break;
+    case "Timeline":
+      if (!isItems(c.items, (x) => typeof x.title === "string")) return missing("items");
+      break;
+    case "Image":
+      if (!has("url")) return missing("url");
+      if (!has("alt")) return missing("alt");
+      if (!oneOf(c.aspect, ["wide", "square"])) return bad("aspect", "Image aspect must be wide or square");
+      break;
+    case "Badge":
+      if (!has("text")) return missing("text");
+      if (!oneOf(c.variant, ["neutral", "success", "warning", "danger"])) return bad("variant", "Badge variant is not one of neutral, success, warning, danger");
+      break;
+    case "Alert":
+      if (!has("text")) return missing("text");
+      if (!oneOf(c.variant, ["info", "warning", "success"])) return bad("variant", "Alert variant is not one of info, warning, success");
+      break;
+    case "Progress":
+      if (!has("value")) return missing("value");
+      if (c.max !== undefined && (typeof c.max !== "number" || !Number.isFinite(c.max) || c.max <= 0)) return missing("max");
+      break;
+    case "Rating":
+      if (!has("value")) return missing("value");
+      if (c.max !== undefined && (typeof c.max !== "number" || !Number.isInteger(c.max) || c.max < 1 || c.max > 10)) {
+        return bad("max", "Rating max must be a whole number from 1 to 10");
+      }
+      break;
     case "Button":
       if (typeof c.child !== "string") return missing("child");
       if (!isAction(c.action)) return missing("action");
+      if (!isOptionalIcon(c.icon)) return bad("icon", "Button icon is not in the icon set");
       break;
     case "ChoicePicker":
       if (
@@ -444,6 +514,7 @@ function validateProps(type: BrickName, c: Raw): { prop: string; message: string
     case "OptionCard":
       if (!has("title")) return missing("title");
       if (c.action !== undefined && !isAction(c.action)) return missing("action");
+      if (!isOptionalIcon(c.icon)) return bad("icon", "OptionCard icon is not in the icon set");
       break;
     case "SeatMap":
       if (typeof c.rows !== "number" || !Number.isInteger(c.rows) || c.rows < 1 || c.rows > 99) return missing("rows");

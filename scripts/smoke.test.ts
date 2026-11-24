@@ -169,6 +169,32 @@ describe("listedOptions", () => {
     expect(listedOptions(surface([{ id: "r1", carrier: null }, { id: "r2", carrier: " " }, { id: "r3", carrier: "KLM" }]))).toBe(1);
   });
 
+  test("a List inside an Accordion's first (open) section is drawn; one in a closed section is not", () => {
+    const build = (first: string) => {
+      let surfaces: Record<string, SurfaceState> = {};
+      const msgs = [
+        { version: "1.0", createSurface: { surfaceId: "s3", catalogId: FIXTURE_CATALOG_ID } },
+        {
+          version: "1.0",
+          updateComponents: {
+            surfaceId: "s3",
+            components: [
+              { id: "root", component: "Accordion", items: [{ title: "First", child: first }, { title: "Second", child: first === "list" ? "note" : "list" }] },
+              { id: "note", component: "Text", text: "Fine print" },
+              { id: "list", component: "List", children: { path: "/flights", componentId: "card" } },
+              { id: "card", component: "OptionCard", title: { "@path": "carrier" }, action: { event: { name: "pick_flight" } } },
+            ],
+          },
+        },
+        { version: "1.0", updateDataModel: { surfaceId: "s3", path: "/flights", value: [{ id: "r1", carrier: "SAS" }] } },
+      ];
+      for (const m of msgs) surfaces = applyMessage(surfaces, m, { now: 1, turnId: null }).surfaces;
+      return surfaces.s3;
+    };
+    expect(listedOptions(build("list"))).toBe(1);
+    expect(listedOptions(build("note"))).toBe(0);
+  });
+
   test("a literal OptionCard the composer wrote itself is not a listed option", () => {
     const literal = { id: "lit", component: "OptionCard", title: "Invented Air", action: { event: { name: "pick_flight" } } };
     expect(listedOptions(surface([], [literal]))).toBe(0);

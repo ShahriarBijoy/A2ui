@@ -158,6 +158,12 @@ function renderOrder(surface: SurfaceState): Node[] {
         if (isPlainObject(first) && typeof first.child === "string") visit(first.child, scope, inList, depth + 1);
         break;
       }
+      case "Accordion": {
+        // The renderer opens the first section; the others are closed until tapped.
+        const first = Array.isArray(p.items) ? p.items[0] : undefined;
+        if (isPlainObject(first) && typeof first.child === "string") visit(first.child, scope, inList, depth + 1);
+        break;
+      }
       // A Button's child is its label; every other brick is a leaf.
     }
   };
@@ -165,7 +171,7 @@ function renderOrder(surface: SurfaceState): Node[] {
   return out;
 }
 
-/** Accepted components that no reference chain from root reaches (any tab, any template, Button labels): never drawn. */
+/** Accepted components that no reference chain from root reaches (any tab, any Accordion section, any template, Button labels): never drawn. */
 function orphans(surface: SurfaceState): string[] {
   const reached = new Set<string>();
   const stack = ["root"];
@@ -180,6 +186,9 @@ function orphans(surface: SurfaceState): string[] {
     if (Array.isArray(p.children)) for (const c of p.children) if (typeof c === "string") stack.push(c);
     if (isChildTemplate(p.children)) stack.push(p.children.componentId);
     if (Array.isArray(p.tabs)) for (const t of p.tabs) if (isPlainObject(t) && typeof t.child === "string") stack.push(t.child);
+    if (typeOf(entry) === "Accordion" && Array.isArray(p.items)) {
+      for (const t of p.items) if (isPlainObject(t) && typeof t.child === "string") stack.push(t.child);
+    }
   }
   return Object.keys(surface.components).filter((id) => surface.components[id].status === "ok" && !reached.has(id));
 }

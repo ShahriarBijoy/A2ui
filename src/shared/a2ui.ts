@@ -3,6 +3,7 @@
  * Verified against github.com/google/A2UI specification/v1_0 (2026-11-23).
  * Contract file: change only with the controller's agreement.
  */
+import type { IconName } from "./icons";
 
 export const A2UI_VERSION = "1.0" as const;
 
@@ -54,6 +55,8 @@ export type ButtonComponent = Base<"Button"> & {
   child: string;
   variant?: "default" | "primary" | "borderless";
   action: Action;
+  /** Shown before the label; a name from src/shared/icons.ts. */
+  icon?: IconName;
 };
 export type TextFieldComponent = Base<"TextField"> & {
   label: DynamicString;
@@ -90,6 +93,8 @@ export type OptionCardComponent = Base<"OptionCard"> & {
   price?: DynamicString;
   selected?: DynamicBoolean;
   action?: Action;
+  /** Shown before the title; a name from src/shared/icons.ts. */
+  icon?: IconName;
 };
 export type SeatMapComponent = Base<"SeatMap"> & {
   rows: number;
@@ -100,6 +105,32 @@ export type SeatMapComponent = Base<"SeatMap"> & {
   value: DynamicString;
 };
 export type StatComponent = Base<"Stat"> & { label: DynamicString; value: DynamicString | DynamicNumber; unit?: DynamicString };
+export type IconComponent = Base<"Icon"> & { name: IconName; size?: "sm" | "md" | "lg" };
+/** Read-only comparison. Each cell reads `field` of its row; a null or missing cell is blank. */
+export type TableComponent = Base<"Table"> & {
+  columns: { label: DynamicString; field: string }[];
+  rows: PathBinding | JsonObject[];
+};
+export type ChartComponent = Base<"Chart"> & {
+  type?: "bar";
+  items: PathBinding | { label: string; value: number }[];
+  unit?: DynamicString;
+};
+export type TimelineComponent = Base<"Timeline"> & {
+  items: PathBinding | { title: string; time?: string; detail?: string }[];
+};
+/** url comes from a data line (live search), never from the composer. */
+export type ImageComponent = Base<"Image"> & { url: DynamicString; alt: DynamicString; aspect?: "wide" | "square" };
+export type BadgeComponent = Base<"Badge"> & { text: DynamicString; variant?: "neutral" | "success" | "warning" | "danger" };
+export type AlertComponent = Base<"Alert"> & {
+  title?: DynamicString;
+  text: DynamicString;
+  variant?: "info" | "warning" | "success";
+};
+export type AccordionComponent = Base<"Accordion"> & { items: { title: DynamicString; child: string }[] };
+export type ProgressComponent = Base<"Progress"> & { value: DynamicNumber; max?: number; label?: DynamicString };
+/** value comes from a data line ("4.5/5", 4.2); shown only when it parses. */
+export type RatingComponent = Base<"Rating"> & { value: DynamicString | DynamicNumber; max?: number };
 
 export type CatalogComponent =
   | TextComponent
@@ -118,7 +149,17 @@ export type CatalogComponent =
   | StepperComponent
   | OptionCardComponent
   | SeatMapComponent
-  | StatComponent;
+  | StatComponent
+  | IconComponent
+  | TableComponent
+  | ChartComponent
+  | TimelineComponent
+  | ImageComponent
+  | BadgeComponent
+  | AlertComponent
+  | AccordionComponent
+  | ProgressComponent
+  | RatingComponent;
 
 export type ComponentType = CatalogComponent["component"];
 

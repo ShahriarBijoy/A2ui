@@ -851,9 +851,12 @@ describe("runTurn: reachability and value shapes", () => {
     expect(warnings).toEqual([expect.stringContaining("(orphans 1): s2: extra")]);
   });
 
-  test("childIds, unreachableIds and bindsPath follow child, children, templates and tabs", () => {
+  test("childIds, unreachableIds and bindsPath follow child, children, templates, tabs and Accordion items", () => {
     const c = (o: object) => o as { id: string; component: string };
     expect(childIds(c({ id: "t", component: "Tabs", tabs: [{ title: "A", child: "a" }, { title: "B", child: "b" }] }))).toEqual(["a", "b"]);
+    expect(childIds(c({ id: "acc", component: "Accordion", items: [{ title: "A", child: "a" }, { title: "B", child: "b" }] }))).toEqual(["a", "b"]);
+    // Chart and Timeline items are data rows, never component ids.
+    expect(childIds(c({ id: "tl", component: "Timeline", items: [{ title: "A", child: "a" }] }))).toEqual([]);
     expect(childIds(c(LIST))).toEqual(["item"]);
     const map = new Map([LIST, ITEM, { id: "root", component: "Card", child: "list" }, { id: "x", component: "Text" }].map((o) => [o.id, c(o)]));
     expect(unreachableIds(map, ["root"])).toEqual(["x"]);

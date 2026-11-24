@@ -776,7 +776,7 @@ function hasRecords(v: JsonValue): boolean {
   return Array.isArray(v) ? v.length > 0 : v !== null;
 }
 
-/** Ids a component names as its children: child, children (ids, or a template's componentId), tabs[].child. */
+/** Ids a component names as its children: child, children (ids, or a template's componentId), tabs[].child, Accordion items[].child. */
 export function childIds(c: WireComponent): string[] {
   const out: string[] = [];
   if (typeof c.child === "string") out.push(c.child);
@@ -787,10 +787,14 @@ export function childIds(c: WireComponent): string[] {
     out.push(kids.componentId);
   }
   if (Array.isArray(c.tabs)) for (const t of c.tabs) if (isPlainObject(t) && typeof t.child === "string") out.push(t.child);
+  // Chart and Timeline items are data, not children: only an Accordion's items name ids.
+  if (c.component === "Accordion" && Array.isArray(c.items)) {
+    for (const t of c.items) if (isPlainObject(t) && typeof t.child === "string") out.push(t.child);
+  }
   return out;
 }
 
-/** Ids in `comps` that no child/children/tabs chain reaches from the seeds: the client never draws them. */
+/** Ids in `comps` that no child/children/tabs/items chain reaches from the seeds: the client never draws them. */
 export function unreachableIds(comps: ReadonlyMap<string, WireComponent>, seeds: Iterable<string>): string[] {
   const reached = new Set<string>();
   const stack = [...seeds];
