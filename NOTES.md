@@ -391,7 +391,7 @@ calls from the dev machine. Code: src/worker/weather.ts; saved answers in src/wo
   apparent_temperature,relative_humidity_2m,wind_speed_10m,weather_code, hourly=temperature_2m,precipitation_probability,
   weather_code, daily=weather_code,temperature_2m_max,temperature_2m_min,precipitation_probability_max, timezone=auto,
   forecast_days=7; no key. `current.time` is place-local "YYYY-MM-DDTHH:mm" on a 15-minute grid (`interval` 900);
-  hourly starts at 00:00 of the local day (168 entries); units °C, %, km/h (the defaults); `utc_offset_seconds` is
+  hourly starts at 00:00 of the local day (168 entries, counted); units °C, %, km/h (the defaults); `utc_offset_seconds` is
   fixed per answer. Errors: HTTP 400 `{"error":true,"reason":"..."}` (checked with latitude 953). ~0.13 s.
 - WMO code table: the docs page (read through a summariser); the live answer contained 2, 3, 45, 48 and 61. The
   mapping goes by code ranges (`wmoCondition`), so an undocumented code inside a group still reads sensibly.
@@ -433,9 +433,12 @@ claude-sonnet-5-5, search claude-haiku-5-5; 2026-11-24 15:19-15:23 Berlin):
 - Flight: options per run 2,2,2,1,3; search 2289 ms (1808-2922); data 4.63 s (4.26-5.40); seat map 5/5, confirm 5/5.
   Widgets FlightSearchWidget 902 ms; HTML 1/1.
 - Dinner: places 1,2,2,3,1; search 3318 ms (2195-4470); data 5.59 s (4.49-6.75). "We're six, and later." patched
-  5/5 by result, 180 ms median (159-186), no LLM (run 5: chips without 21:00, +30 min by the I3 rule). Step 2 expect
+  5/5 by result, 180 ms median (159-186), no LLM (run 5: chips 19:00/19:30/20:00/20:30, no 21:00, so +30 min by the I3 rule). Step 2 expect
   4/5 (one DateTimeInput, informational). Widgets RestaurantWidget 5 places 4.29 s; HTML 1/1.
 - Held-out 8/8 (searches: gift 5, plans3 3, hamburg 5, cafe 4 records). No flight, dinner or held-out turn sent a
   weather line.
+- Probe without a place ("What's the weather today?", --runs 3, same setup and code; the line was added to smoke.ts
+  for the run only, not committed): **3/3**, weather query "Bremen" (STATE.city) 3/3, 0 searches, no input or Button
+  added, 5 blocks, all four weather bricks 3/3; data arrived 2.11 s (1.56-2.58), weather fetch 49/377/929 ms.
 - Screenshots: the stage layout from a static build, with a saved session rebuilt from captured weather turns through
   the real store (session scratchpad weather-shots/). Raw captures and reports: session scratchpad weather-eval/.
