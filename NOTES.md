@@ -108,7 +108,7 @@ their expected bricks (`--strict`) and step 2 shows at least 1 OptionCard drawn 
 | vA f01bcef | **3/10** | 10/10 (0 fetches in 10/10) | 10/10 | **3/10** | 10/10 | 4,4,4,3,2,4,4,3,3,3 | 2755 (2466-3139) | 4.80 s (4.41-6.06) |
 | vB e774dbe | **10/10** | 10/10 (0 fetches in 10/10) | 10/10 | 10/10 | 10/10 | 3,3,3,3,1,3,1,2,3,2 | 2514 (1918-2959) | 5.00 s (3.97-5.71) |
 | vC 9af6f6d | **10/10** | 10/10 (0 fetches in 10/10) | 10/10 | 10/10 | 9/10 | 2,4,1,2,4,3,3,2,2,3 | 2551 (1884-3169) | 5.02 s (4.12-6.15) |
-- vC (shipped prompt) only replaces the travel rule's price examples ("from €605", "€460", which were the route's real
+- vC (9af6f6d) only replaces the travel rule's price examples ("from €605", "€460", which were the route's real
   fares) with the price hint's neutral "from €39", "€25". Its 4 probe runs still returned 460 € and from 605 €
   (10 records, 2 prices with parentheses), as the very first probe did before any price example: web values, not echoes.
   vC step 4 miss (run 8): the seat step's Button was named pick_seat, so the smoke found no confirm_ action (not in the bar).
@@ -123,10 +123,11 @@ their expected bricks (`--strict`) and step 2 shows at least 1 OptionCard drawn 
   runs (carrier rule or source check).
 - vB timings (median, min-max): step 1 first UI 1.58 s (1.43-2.45), screen 4.22 s; step 2 first UI 1.84 s (0.86-2.58),
   screen 4.60 s; tap → seat map first UI 1.66 s, screen 4.01 s; confirm 1.54 / 2.57 s.
-- Typical cards (vC run 7, shipped as F4-F6; search 2637 ms): Lufthansa · BRE → NYC · 1 stop · from 605 € [flight,
-  economy, Nov 26 fare]; Air France · BRE → JFK · 1 stop · 460 € [flight, round trip, Nov 26 outbound]; KLM · BRE → JFK ·
-  1 stop · from EUR590 [flight, round trip, Nov fares]. Sources: lufthansa.com, skyscanner.de, klm.de. Fares are as
-  listed, not bookable quotes.
+- Typical cards (vF a94ccbf run 1, shipped as F4-F6 since fix round 2; search 2700 ms): Lufthansa · BRE → NYC · 1 stop
+  · from 605 € [round trip, economy]; Air France · BRE → JFK · 1 stop · 460 € [round trip, 1 stop]; KLM · BRE → JFK ·
+  1 stop · from EUR590 [round trip, economy]. Sources: lufthansa.com, skyscanner.de, klm.de. Fares are as listed, not
+  bookable quotes; the round-trip readings are Haiku's and unverified (lufthansa.com and klm.de could not be fetched).
+  (Until fix round 2, F4-F6 were vC 9af6f6d run 7, whose Lufthansa card had no round-trip tag.)
 - Widgets: smoke's widgets line ("I need to book a flight tomorrow.", no destination) → vA a text answer, vB
   FlightSearchWidget in 754 ms (form only, no search). Manual 2-turn chains (that line, then "To New York, give me
   options."), 3 each: at e774dbe the widgets model left "from" empty in 2/3 second turns (no search, no rows). Since
@@ -166,7 +167,41 @@ dinner and held-out with the default judge (expected bricks informational; the o
 - **Held-out ×1 (vE, default judge): 4/5.** Lisbon PASS (a planning form: Destination, Start date, Days, Pace; no
   From/To trip-search form, no search), phones PASS, gift PASS (search 4119 ms, 5 records), haircut PASS; dog FAIL:
   9 visible blocks (rule ≤ 7), the known cosmetic miss.
-- F4-F6 stay vC run 7 (route values "BRE → NYC · 1 stop", "BRE → JFK · 1 stop" ×2; no "via FRA").
+- F4-F6 stayed vC run 7 in this round (route values "BRE → NYC · 1 stop", "BRE → JFK · 1 stop" ×2; no "via FRA");
+  replaced in fix round 2.
+
+### Fix round 2 (2026-11-24 ~03:30-03:36): review I4/I5 rulings, measured once on the final code a94ccbf
+- 278be44 tidies live records without adding facts (review I4): tags lose the generic "flight", duplicates (any case),
+  and a one-way label next to a round-trip label (both dropped); prices lose bracketed notes and trailing per-person
+  words (amount, currency and a leading "from" stay as written; a round-trip/one-way label stated only in the note
+  moves to the tags); trip results keep the first card per carrier, before the item cap.
+- a94ccbf: composer rule 11 adds "A SeatMap shows a generic cabin: no "taken" seats (seat availability is unknown) and
+  no preselected seat (initial value ""); its confirm Button keeps a required check on the seat." (review I5); widget
+  empty text "No flights to show." (M3); flights.ts header (M2).
+
+| version | runs passing the bar (strict) | smoke scenario runs (all 4 steps) | step 2 options ≥1 | step 3 SeatMap | step 4 confirm | records per run (mean) | step-2 search ms median (min-max) | data arrived median (min-max) |
+|---|---|---|---|---|---|---|---|---|
+| vF a94ccbf | **10/10** | 10/10 (42/42 lines) | 10/10 | 10/10 | 10/10 | 3,2,3,2,3,3,2,1,2,2 (2.3) | 2886 (2104-3706) | 5.04 s (4.36-6.88) |
+- vF seat steps: 10/10 SeatMaps with no `taken` list and an empty initial seat; 10/10 confirm Buttons named confirm_flight
+  with a required check. Step 4 taps that Button while it is disabled (smoke notes "tapped a disabled Button (check:
+  Pick a seat)") and still gets its summary 10/10.
+- vF step 2: every data line succeeded on its first call (10/10 with 1 web search; the retry never fired); 1 prose line
+  skipped in 2/10, 1 line repaired in 2/10; step 1 sent no data line in 10/10. Medians: step 1 first UI 1.46 s, screen
+  4.19 s; step 2 first UI 1.67 s, screen 4.20 s; tap → seat map 1.60 / 3.51 s; confirm 1.82 / 2.98 s.
+- vF fare labels: 21 of 23 cards carry a round-trip tag; no card shows one-way next to round trip; the Lufthansa card
+  is round trip in 8 of 9 runs (run 9: [economy, Lufthansa]); date wording still appears in tags ("Depart Thu 26 Nov",
+  "Nov. 26 fare") next to "round trip" in 5 runs; one price kept "round trip" unbracketed ("€460 round trip", run 7).
+  Widgets flight line: a text answer this time (781 ms). HTML 1/1.
+- **Dinner ×5 (a94ccbf, default judge): 5/5 scenario runs, 22/22 lines.** Places 1, 1, 3, 1, 2 (search 2350/2625/4539/
+  2523/2627 ms, 1 web search each: Restaurant Feuerwache, RIVA, Restaurant Übersee, Bellissima Überseestadt, HAFENDÖNER
+  Überseestadt); first UI 1.84 s, data 4.98 s (median). "We're six, and later." patched 5/5, judged by result: guests 2 → 6,
+  time 20:00 → 21:00 (+60 min, same date), nothing else changed, 177 ms median (155-262), no LLM. Step 2 expect 4/5 (one
+  run used a time DateTimeInput; informational). Widgets: RestaurantWidget with 5 places in 3.92 s. HTML 1/1.
+- **Held-out ×1 (a94ccbf, default judge): 4/5.** Lisbon PASS (Arrival day, Days, Pace and "Plan my days"; no From/To
+  trip-search form, no search), phones PASS, gift PASS (search 4016 ms, 5 records), haircut PASS; dog FAIL: 9 visible
+  blocks (rule ≤ 7), the known cosmetic miss (same as d7a9e70).
+- F4-F6 recaptured from vF run 1 (all 4 steps pass; step 2 3 cards all tagged round trip, no date claims; seat step
+  with no taken or preselected seat; F6 summary "Lufthansa · BRE → NYC · 1 stop · from 605 €", no date).
 
 ## Rulings (decisions made without asking)
 - Fonts: Geist + Geist Mono, bundled via fontsource (no network at the venue). PLAN says "system sans": same intent, consistent rendering on the stage machine.

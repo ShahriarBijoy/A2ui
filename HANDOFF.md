@@ -24,7 +24,7 @@ The owner raised the Anthropic spend limit. The key answers again (Haiku 1.3 s, 
 - **Remaining (owner-dependent):** (the API key works again)
   1. The owner's live mic rehearsal in Chrome (checklist below). Save good turns with Shift+R, export with Shift+E, and paste them into `src/client/replays.json` (shipped F-key replays), then redeploy.
   2. Confirm the venue and date (JAAI, Konsul-Smidt-Straße 8p, Wed 25 Nov 18:00). They drive `VENUE_*` vars and the "nearby" search.
-  3. Flights: decided 2026-11-24, web results (branch `flights-web`, 10/10 talk-clock chains; see NOTES "Flights from live web search"). Merge and redeploy.
+  3. Flights: decided 2026-11-24, web results (branch `flights-web`). Talk-clock flight chains: 10/10 at a94ccbf (final), 10/10 at d7a9e70, 8/10 at f35faaa; dinner 5/5 at a94ccbf. See NOTES "Flights from live web search". Merge and redeploy.
   4. Re-run `bun run smoke` against production during the evening before the talk (18:30–19:30) and commit `scripts/smoke-results.md`. Those are the numbers for the talk.
 - **Parked minors** are in the ledger. The notable ones: block count can reach 8; the patch caption shows a raw ISO value for merged date+time patches; PLAN §9.3 should say "A2UI v1.0" (upstream marks it stable).
 - **Talk content notes:** the §9.1 beats now depend on what the composer builds, since there are no scripted flows; replay is the safety net. The closing line's N/M comes from the session totals, which replays don't change. Don't quote vendor numbers (§9.3).
@@ -53,9 +53,9 @@ The owner raised the Anthropic spend limit. The key answers again (Haiku 1.3 s, 
 | F2 | tap a place → time + guests + Reserve |
 | F3 | "We're six, and later." → decision-model patch, compose – |
 | **Esc** | **required between F3 and F4** (both sequences start at surface s1) |
-| F4 | "I need to book a flight tomorrow." (From Bremen, To empty, Day Thu 26 Nov, "Search flights") |
-| F5 | "To New York, give me options." (3 web results: Lufthansa from 605 €, Air France 460 €, KLM from EUR590; fares as listed, with tags) |
-| F6 | tap Lufthansa → seat map + Confirm flight |
+| F4 | "I need to book a flight tomorrow." ("Flight tomorrow": From Bremen, To empty, Date Thu 26 Nov, "Search flights") |
+| F5 | "To New York, give me options." (3 web results, fares as listed and each tagged round trip: Lufthansa from 605 €, Air France 460 €, KLM from EUR590) |
+| F6 | tap Lufthansa → generic seat map (no taken seats, none preselected) + Confirm flight |
 - Tapping the live buttons after F3 ("Reserve table") or F6 ("Confirm flight") sends a real turn (spends API budget; fails if offline).
 - The recordings' dates are fixed for Wed 25 Nov ("tonight", flight on Thu 26 Nov).
 - All six F-keys are taken by the shipped set, so Shift+R saves get no key. Swap `src/client/replays.json` if rehearsal produces better turns (Shift+E exports).
