@@ -8,6 +8,7 @@ import type { SessionTotals } from "@/state";
 import { useStore } from "@/store";
 import { CpuIcon } from "lucide-react";
 import { BrickTiles } from "./BrickTiles";
+import { outlineComponent } from "./outline";
 import { RunTab } from "./RunTab";
 import { followNewestTurn, newestAgentTurnId, usePinnedTurnId, useSelectedTurnId } from "./selection";
 import { JsonStreamTab, JsonTab } from "./StreamTabs";
@@ -33,7 +34,15 @@ export function HoodPanel() {
         </h2>
         <TurnMark turnId={turnId} />
       </header>
-      <Tabs value={tab} onValueChange={(v: Tab) => setTab(v)} className="min-h-0 flex-1 gap-0">
+      <Tabs
+        value={tab}
+        onValueChange={(v: Tab) => {
+          // A hovered line or row unmounts with its tab; its outline on the screen goes with it.
+          outlineComponent(null, null);
+          setTab(v);
+        }}
+        className="min-h-0 flex-1 gap-0"
+      >
         <div className="px-[14px] pt-3 pb-3">
           <TabsList className="h-auto! w-full gap-0.5 rounded-[10px] bg-background/70 p-[3px]">
             <TabsTrigger value="bricks" className={TRIGGER}>
