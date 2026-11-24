@@ -225,11 +225,13 @@ describe("new bricks", () => {
   const status = (components: Record<string, unknown>[], id: string) => put(components).comps[id]?.status;
   const one = (c: Record<string, unknown>) => status([{ id: "x", ...c }], "x");
 
-  test("Icon with an unknown name is refused", () => {
+  test("Icon with an unknown literal name is refused; a bound name is accepted (checked when drawn)", () => {
     expect(one({ component: "Icon", name: "plane" })).toBe("ok");
     expect(one({ component: "Icon", name: "rocket-ship" })).toBe("refused");
     expect(one({ component: "Icon" })).toBe("refused");
-    expect(one({ component: "Icon", name: { "@path": "/icon" } })).toBe("refused");
+    expect(one({ component: "Icon", name: { "@path": "/weather/now/icon" } })).toBe("ok");
+    expect(one({ component: "Icon", name: { "@path": "icon" } })).toBe("ok");
+    expect(one({ component: "Icon", name: { "@call": "formatString", args: { value: "sun" } } })).toBe("refused");
   });
 
   test("Icon size outside sm|md|lg is refused", () => {
@@ -263,6 +265,20 @@ describe("new bricks", () => {
     expect(one({ component: "Chart", items: [{ value: 3 }] })).toBe("refused");
     expect(one({ component: "Chart" })).toBe("refused");
     expect(one({ component: "Chart", type: "pie", items: [{ label: "A", value: 3 }] })).toBe("refused");
+    expect(one({ component: "Chart", type: "area", items: { "@path": "/weather/hours" }, unit: "°" })).toBe("ok");
+    expect(one({ component: "Chart", type: "area", items: [{ label: "15:00", value: -1 }, { label: "16:00", value: 2 }] })).toBe("ok");
+    expect(one({ component: "Chart", type: "area", items: [{ label: "15:00", value: "cold" }] })).toBe("refused");
+  });
+
+  test("weather data that never came (null for an unknown place) deletes the path without an error", () => {
+    const { surfaces, results } = run([
+      { version: v, createSurface: { surfaceId: "s1", catalogId: CAT } },
+      { version: v, updateDataModel: { surfaceId: "s1", path: "/weather", value: null } },
+      { version: v, updateDataModel: { surfaceId: "s1", path: "/weather", value: { place: "Porto, Portugal", days: [] } } },
+      { version: v, updateDataModel: { surfaceId: "s1", path: "/weather", value: null } },
+    ]);
+    expect(results.every((r) => r.ok && r.errors.length === 0)).toBe(true);
+    expect(surfaces.s1.data).toEqual({});
   });
 
   test("Timeline items must be a path or an array of {title, time?, detail?}", () => {

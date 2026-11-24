@@ -445,7 +445,8 @@ function validateProps(type: BrickName, c: Raw): { prop: string; message: string
       }
       break;
     case "Icon":
-      if (!isIconName(c.name)) return bad("name", "Icon name is not in the icon set");
+      // A bound name is checked when drawn (a value outside the set draws nothing); a literal must be in the set.
+      if (!isPathBinding(c.name) && !isIconName(c.name)) return bad("name", "Icon name is not in the icon set");
       if (!oneOf(c.size, ["sm", "md", "lg"])) return bad("size", "Icon size must be sm, md or lg");
       break;
     case "Table":
@@ -459,7 +460,7 @@ function validateProps(type: BrickName, c: Raw): { prop: string; message: string
       if (!isItems(c.rows, () => true)) return missing("rows");
       break;
     case "Chart":
-      if (!oneOf(c.type, ["bar"])) return bad("type", 'Chart type must be "bar"');
+      if (!oneOf(c.type, ["bar", "area"])) return bad("type", 'Chart type must be "bar" or "area"');
       // A numeric string counts, as it does for items bound to a path (toNumber); "€12" does not.
       if (!isItems(c.items, (x) => typeof x.label === "string" && isNumeric(x.value))) {
         return missing("items");

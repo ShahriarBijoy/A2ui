@@ -2,9 +2,11 @@ import type { IconComponent } from "@shared/a2ui";
 import { isIconName, type IconName } from "@shared/icons";
 import { ICONS } from "@/iconMap";
 import { cn } from "@/lib/utils";
-import type { BrickProps } from "./shared";
+import { iconView } from "./items";
+import { InlineSkeleton, useSurfaceEnv, type BrickProps } from "./shared";
 
 const SIZE = { sm: 16, md: 20, lg: 28 } as const;
+const PENDING_SIZE = { sm: "size-4", md: "size-5", lg: "size-7" } as const;
 
 /** One stroke weight for every icon a brick draws, so mixed bricks never look mixed. */
 export const BRICK_ICON_STROKE = 1.75;
@@ -16,11 +18,15 @@ export function BrickIcon(props: { name: IconName | null | undefined; size: numb
   return <Glyph aria-hidden focusable="false" size={props.size} strokeWidth={BRICK_ICON_STROKE} className={cn("shrink-0", props.className)} />;
 }
 
-export function Icon({ def }: BrickProps<IconComponent>) {
-  const size = SIZE[def.size ?? "md"] ?? SIZE.md;
+export function Icon({ def, scope }: BrickProps<IconComponent>) {
+  const env = useSurfaceEnv();
+  const key = def.size && def.size in SIZE ? def.size : "md";
+  const view = iconView(def.name, env.surface.data, scope, env.streaming);
+  if (view === "pending") return <InlineSkeleton className={cn("rounded-full", PENDING_SIZE[key])} />;
+  if (view === null) return null;
   return (
     <span className="inline-flex text-foreground">
-      <BrickIcon name={def.name} size={size} />
+      <BrickIcon name={view} size={SIZE[key]} />
     </span>
   );
 }
