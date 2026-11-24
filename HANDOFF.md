@@ -17,10 +17,12 @@ Contract files: `src/shared/{a2ui,catalog,protocol,pointer}.ts` and `src/client/
 ## Blocker resolved (2026-11-24 ~01:20)
 The owner raised the Anthropic spend limit. The key answers again (Haiku 1.3 s, Sonnet 1.9 s). On production 787b35e both main scenarios pass 6/6 with the result-judging smoke; see NOTES → "Production main scenarios after the spend-limit raise". **Watch spend:** avoid large smoke runs; one full smoke is roughly 60–80 turns.
 
-## Status at hand-off (updated 2026-11-24 ~00:00)
-- **Production:** https://brick-box.shahriarbijoy.workers.dev runs **787b35e** (deployed 2026-11-24 ~00:35): composer `claude-sonnet-5-5` (search, widgets and html on Haiku), live web search, the decision model with time/date/Day fixes and the silent-drop guard, replay with **shipped F1–F6**, voice-glow, the Esc wave, live widgets, the voice fragment guard, and readable API errors. Open it with `?k=<DEMO_KEY from .dev.vars>`. Live turns work again since the spend-limit raise (2026-11-24 ~01:20).
-- **Everything built is reviewed.** 422 tests pass, and `bunx tsc -b` is clean. Ledger: `.superpowers/sdd/progress.md` (every task, review, ruling and parked minor).
-- **Talk-clock main scenarios: 19/20 (95%)**; see NOTES → "Main scenarios at the talk's clock". Flight is 10/10 including the seat map. "We're six, and later" patches in about 200 ms with no LLM.
+## Status at hand-off (updated 2026-11-24 ~05:00)
+- **Production:** https://brick-box.shahriarbijoy.workers.dev runs **e65bae2** (deployed 2026-11-24 ~03:56): composer `claude-sonnet-5-5` (search, widgets and html on Haiku), live web search for places, events **and flights** (no demo data left), the decision model, replay with shipped F1–F6 (F4–F6 recaptured with live flights at a94ccbf), voice-glow, the Esc wave, live widgets, readable API errors, **per-IP rate limits** (7e120ba) and the **demo key box** (48c647a: enter the key once per browser; no `?k=` needed).
+- **GitHub:** https://github.com/ShahriarBijoy/A2ui (private), master pushed.
+- **Everything merged is reviewed** (the key box was verified in a browser instead). 473 tests pass, and `bunx tsc -b` is clean. Ledger: `.superpowers/sdd/progress.md`.
+- **Talk clock (in-process, a94ccbf):** flight 10/10 including seat map and confirm, dinner 5/5, "We're six, and later" patch 5/5. **Production (real clock, e65bae2):** flight 3/3; dinner 1/2 at ~05:00 (the miss: the tap-place step drew 8 blocks against the smoke's limit of 7; places 2 and 3, patch correct both runs).
+- **Browser checks on production:** F4–F6 replays play (form → 3 live flight cards → empty seat map, Confirm disabled until a seat is picked, no /api calls); a wrong stored key is cleared on the first 401 and the key box returns.
 - **Remaining (owner-dependent):** (the API key works again)
   1. The owner's live mic rehearsal in Chrome (checklist below). Save good turns with Shift+R, export with Shift+E, and paste them into `src/client/replays.json` (shipped F-key replays), then redeploy.
   2. ~~Confirm the venue and date~~ **Confirmed by the owner 2026-11-24:** JAAI, Konsul-Smidt-Straße 8p, Wed 25 Nov 18:00.
