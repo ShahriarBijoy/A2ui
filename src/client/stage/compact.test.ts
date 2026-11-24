@@ -164,6 +164,17 @@ describe("compactLines: components", () => {
     expect(truncate("short", MAX_STRING)).toBe("short");
   });
 
+  test("a bound Icon name and an area chart (weather) read like the rest", () => {
+    expect(
+      texts([
+        comps([
+          { id: "ico", component: "Icon", name: { "@path": "icon" }, size: "sm" },
+          { id: "temp", component: "Chart", type: "area", items: { "@path": "/weather/hours" }, unit: "°" },
+        ]),
+      ]),
+    ).toEqual(["ico = Icon(name=@icon, size=sm)", 'temp = Chart(type=area, items=@/weather/hours, unit="°")']);
+  });
+
   test("one-argument calls read positionally; literal arrays show at most four items", () => {
     const [a, b] = texts([
       comps([
