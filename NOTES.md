@@ -134,6 +134,40 @@ their expected bricks (`--strict`) and step 2 shows at least 1 OptionCard drawn 
   2342/2902/3265 ms, widget at 3.37/4.09/4.03 s; first turn 2/3 the form (From Bremen, Day 26 Nov), 1/3 a text question.
 - HTML flight line: 1/1 in both versions (unchanged path).
 
+### Fix round 1 (2026-11-24 ~03:15-03:27): no talk values in prompts, re-evaluated (flight, dinner, held-out)
+Same setup (in-process Bun Worker, DEV_NOW=2026-11-25T18:45, Sonnet composer, Haiku search). Flight judged with `--strict`;
+dinner and held-out with the default judge (expected bricks informational; the options and patch checks always on).
+- f35faaa: search prompt without talk values (route example "OPO → OSL · 1 stop via AMS", tag example "June fares");
+  tests guard the search and composer prompts against Bremen/New York/JFK/BRE/FRA/Lufthansa/Air France/KLM/Nov/November.
+- d7a9e70: runSearch asks once more after an answer in prose ("not a JSON array") or an empty list when `carrier` is
+  requested (trips); thrown errors, refusals and a client that left are not retried; searches and tokens are summed.
+
+| version | runs passing the bar (strict) | smoke scenario runs (all 4 steps) | step 2 options ≥1 | step 3 SeatMap | step 4 confirm | records per run (mean) | step-2 search ms median (min-max) | data arrived median (min-max) |
+|---|---|---|---|---|---|---|---|---|
+| vD f35faaa | **8/10** | 8/10 (36/42 lines) | 8/10 | 8/10 (2 not reachable) | 8/10 | 0,3,4,2,1,3,2,1,0,2 (1.8) | 2365 (1665-2954) | 4.86 s (3.85-6.10) |
+| vE d7a9e70 | **10/10** | 10/10 (42/42 lines) | 10/10 | 10/10 | 10/10 | 3,3,4,3,2,3,3,2,2,2 (2.7) | 2606 (2144-3069) | 5.19 s (4.37-6.08) |
+- vD misses, both at the search (same query as every run): run 1 "answer was not a JSON array" (Haiku answered in
+  prose), run 9 an empty list (0 records, nothing dropped). No list → no pick target → steps 3-4 not run.
+- 32 direct probes of the same search prompt at f35faaa (probe2, Haiku): 32/32 returned 1-4 carriers (mean 2.75),
+  2.36-3.80 s. Misses are occasional (2 of 42 searches at f35faaa), hence the retry rather than a prompt change.
+- vE: every step-2 data line succeeded on its first call (10/10 fetches with 1 web search and ≥1 record; the retry
+  never fired). Step 1 sent no data line in 10/10. Step 2 skipped 1 prose line in 7/10, repaired 0; steps 1, 3, 4 0/0.
+  vE medians: step 1 first UI 1.68 s, screen 4.20 s; step 2 first UI 2.28 s, screen 4.74 s; tap → seat map 1.77 /
+  4.01 s; confirm 1.63 / 2.96 s. Widgets flight line: FlightSearchWidget 903 ms (no destination, no search). HTML 1/1.
+- Records-per-run mean by version (measured above): vA 3.4, vB 2.4, vC 2.6, vD 1.8, vE 2.7.
+- Card quality seen in vE (shown as returned): run 6 route values carried comments ("BRE → NYC · round trip, not
+  Thursday-specific"); run 5 prices kept parentheses ("460 € (round trip, Nov. 26 outbound)"); run 8 returned
+  "BRE → NYC · 1 stop via FRA" with no such example in the prompt any more.
+- **Dinner ×3 (vE, default judge): 3/3 scenario runs, 14/14 lines.** Places 2, 1, 2 (search 2945/2117/2445 ms, 1 web
+  search each; e.g. The Grill Upper River, RIVA, Bellissima Überseestadt, Restaurant Feuerwache); first UI 1.90 s,
+  data 4.92 s (median). "We're six, and later." patched 3/3, judged by result: guests 2 → 6, time 20:00 → 21:00 (+60 min,
+  same date), nothing else changed, 158/176/409 ms, no LLM. Step 2 expect 2/3 (run 2 used a time DateTimeInput, no
+  ChoicePicker; informational). Widgets: RestaurantWidget with 5 places in 3.95 s. HTML 1/1.
+- **Held-out ×1 (vE, default judge): 4/5.** Lisbon PASS (a planning form: Destination, Start date, Days, Pace; no
+  From/To trip-search form, no search), phones PASS, gift PASS (search 4119 ms, 5 records), haircut PASS; dog FAIL:
+  9 visible blocks (rule ≤ 7), the known cosmetic miss.
+- F4-F6 stay vC run 7 (route values "BRE → NYC · 1 stop", "BRE → JFK · 1 stop" ×2; no "via FRA").
+
 ## Rulings (decisions made without asking)
 - Fonts: Geist + Geist Mono, bundled via fontsource (no network at the venue). PLAN says "system sans": same intent, consistent rendering on the stage machine.
 - Catalog id: `<origin>/catalog/brick-box/v1`, served publicly as JSON by the Worker. The processor accepts any catalogId ending in `/catalog/brick-box/v1`.
