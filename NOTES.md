@@ -53,7 +53,7 @@ Read this before calling any external API. Items here override PLAN.md where the
 - Vite 8.3, Tailwind 4.3, Hono 4.13, React 19.3, Bun 1.3.8.
 
 ## Owner direction (2026-11-23)
-- **No fixed data, no scripted flows.** `places.json` and the `places` data source were removed (7ca485c, 0b4dcff). Real-world facts come from live web search (`search` data lines; Haiku 5.5 + `web_search_20250305`, max_uses 1, ≤3 searches per turn, 12 s timeout, null for unknown fields, source URL per record). Flights remain a demo generator (badged) pending the owner's choice.
+- **No fixed data, no scripted flows.** `places.json` and the `places` data source were removed (7ca485c, 0b4dcff). Real-world facts come from live web search (`search` data lines; Haiku 5.5 + `web_search_20250305`, max_uses 1, ≤3 searches per turn, 12 s timeout, null for unknown fields, source URL per record). Flights remained a demo generator (badged) pending the owner's choice; superseded 2026-11-24, see "Flights from live web search".
 - Live a2ui (phase 2, dev machine): first UI 0.6–0.9 s; data 4–6 s; 19 searches, 0 failures. `web_search_20260209` is unusable with Haiku 5.5 (invalid_tool_input 5/6, one 99 s run).
 - Query time context (32b33da): queries now name the day and time; whether that improves "open at that hour" is **unproven/partial** (Wed-clock probe 3/6 → 4/7 open per own sources, within noise; 3/7 still contradicted). Don't claim it as a fix.
 - Smoke held-out lines (first version) were reconstructed from summaries; exact intended wording: "Plan a 3-day trip to Lisbon in March", "Compare two phone plans for me", "I want to adopt a dog, what do I need?", "Help me pick a gift for my mum, budget 50 euros", "Book a haircut for Saturday morning".
@@ -86,6 +86,44 @@ Read this before calling any external API. Items here override PLAN.md where the
 - **6/6 scenario runs pass (100%).** Every step 3/3: dinner (places 2/4/1), tap place, **"We're six, and later." patch 173 ms (146–175)**, confirm; flight form, "To New York" (4 demo flights), tap flight → seat map, confirm.
 - Medians: dinner first UI 1.73 s / screen 3.32 s / live data 5.63 s; flight first UI 1.59–2.34 s / screen 4.0–5.1 s. Widgets: RestaurantWidget with 5 live places in 4.03 s; FlightSearchWidget 0.84 s. HTML: first byte ~0.55 s.
 - Direct turns: dinner first UI 0.96 s, data 5.6 s (Bellissima Überseestadt, Restaurant Übersee); concerts in Hamburg data 6.3 s (5 real acts); dog 4.7 s, no search.
+
+## Flights from live web search (owner decision 2026-11-24; branch flights-web)
+Setup: the Hono app served in-process by Bun (dev server off for memory), wrangler.jsonc vars + .dev.vars keys,
+DEV_NOW=2026-11-25T18:45, composer claude-sonnet-5-5, search/widgets/html claude-haiku-5-5;
+`bun run smoke http://localhost:5199 --only flight --runs 10 --strict`. Bar (brief): a run passes when steps 1-3 meet
+their expected bricks (`--strict`) and step 2 shows at least 1 OptionCard drawn from data with a title (smoke "options N").
+- The demo generator (data/flights.ts, source "flights") is gone. A "flights" data line is skipped like any unknown source.
+  Cards are carrier · route · fare as a result lists it (+ tags saying what the fare is); no times, no computed price.
+- Search probes (Haiku + web_search, query "flights from Bremen to New York on Thursday 26 November 2026", fields
+  carrier/route/price/tags, max 4; ~2.5-3.6 s each, 1 search each):
+  - first travel rule, 3 runs: 11 records; 10/11 prices carried notes in parentheses ("460 € pro Person (round trip, Nov. 26
+    outbound)"); 2/11 had carrier null (blank card title).
+  - "price is only the amount" + carrier rule, 4 runs: 15 records; 1 price with parentheses; 2 carrier null.
+  → a requested `carrier` is now required server-side (normalizeRecords drops the item).
+  - final wording (e774dbe), 4 runs, carrier-less items already dropped: 11 records; 2 prices still with parentheses
+    (Haiku noise; values are shown as returned).
+
+| prompt version | runs passing the bar | step 1 form (no data line) | step 2 options ≥1 | step 3 SeatMap | step 4 confirm | records per run | search ms median (min-max) | data arrived median (min-max) |
+|---|---|---|---|---|---|---|---|---|
+| vA f01bcef | **3/10** | 10/10 (0 fetches in 10/10) | 10/10 | **3/10** | 10/10 | 4,4,4,3,2,4,4,3,3,3 | 2755 (2466-3139) | 4.80 s (4.41-6.06) |
+| vB e774dbe | **10/10** | 10/10 (0 fetches in 10/10) | 10/10 | 10/10 | 10/10 | 3,3,3,3,1,3,1,2,3,2 | 2514 (1918-2959) | 5.00 s (3.97-5.71) |
+- vA failure cause (7/10): after pick_flight the composer built a confirm or passengers step (Stepper, Stat) instead of a
+  seat pick; a fare listing has no times, so it no longer read as a booking with assigned seats. vB adds to rule 11:
+  "A flight is such a booking: picking a flight leads to its seat step." No other failures in vA or vB.
+- Every step-2 data line made exactly 1 web search (20/20). Step 2 composer lines: vB skipped 1 prose line in 5/10 and
+  repaired 1 line in 2/10 (vA: skipped 3/10, repaired 1/10), none affecting the screen. The search dropped 1 item in 2 vB
+  runs (carrier rule or source check).
+- vB timings (median, min-max): step 1 first UI 1.58 s (1.43-2.45), screen 4.22 s; step 2 first UI 1.84 s (0.86-2.58),
+  screen 4.60 s; tap → seat map first UI 1.66 s, screen 4.01 s; confirm 1.54 / 2.57 s.
+- Typical cards (vB run 4, shipped as F5): Air France · BRE → JFK · 1 stop · €460 [round trip, Nov 26 outbound];
+  Lufthansa · BRE → NYC · connecting · from €605 [Nov 26 fare, one stop]; KLM · BRE → JFK · connecting · from EUR590
+  [round trip, Nov 2026 fares]. Sources: skyscanner.de, lufthansa.com, klm.de. Fares are as listed, not bookable quotes.
+- Widgets: smoke's widgets line ("I need to book a flight tomorrow.", no destination) → vA a text answer, vB
+  FlightSearchWidget in 754 ms (form only, no search). Manual 2-turn chains (that line, then "To New York, give me
+  options."), 3 each: at e774dbe the widgets model left "from" empty in 2/3 second turns (no search, no rows). Since
+  ec22ba1 the origin defaults to the venue's city: second turn 3/3 FlightSearchWidget with 2/4/4 web rows, search
+  2342/2902/3265 ms, widget at 3.37/4.09/4.03 s; first turn 2/3 the form (From Bremen, Day 26 Nov), 1/3 a text question.
+- HTML flight line: 1/1 in both versions (unchanged path).
 
 ## Rulings (decisions made without asking)
 - Fonts: Geist + Geist Mono, bundled via fontsource (no network at the venue). PLAN says "system sans": same intent, consistent rendering on the stage machine.
