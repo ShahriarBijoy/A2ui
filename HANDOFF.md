@@ -53,10 +53,11 @@ The owner raised the Anthropic spend limit. The key answers again (Haiku 1.3 s, 
 
 ## Stage layout A (branch stage-shell; production keeps the old layout until it merges)
 - The page opens **layout A**: sessions rail (left), top bar + thread + floating voice dock (middle), "Under the hood" (right: Bricks / Wire / Data tabs over the Turns / LLM calls avoided / Tokens totals).
-- **`?classic`** opens the previous layout on the same store and the same sessions. If the new layout misbehaves on stage, add `?classic` to the URL; nothing else changes.
+- **`?classic`** opens the previous layout on the same store and the same sessions (so it opens on the most recent saved session; Esc clears it). If the new layout misbehaves on stage, add `?classic` to the URL; nothing else changes.
 - **Stage flow:** dinner (F1–F3) → **New session** → flight (F4–F6). Dinner stays in the rail; one click on it brings its screens back. F1 and F4 open a fresh session themselves when the open one has turns, so forgetting New session is harmless.
-- **Before the talk:** rail "…" menu → **Delete all sessions** (in-page confirm), so no rehearsal titles reach the projector. Sessions live in this browser only (localStorage, newest 20); the page opens on the most recent one, or an empty one after Delete all.
-- **Esc** and the top bar's **Clear conversation** clear the open session (the wave). Earlier turns fold to one line (click to open); the newest turn and the patched screen stay open.
+- **Before the talk:** close every other Brick Box tab (each tab saves its own list; the last one to save wins), then rail "…" menu → **Delete all sessions** (in-page confirm), so no rehearsal titles reach the projector. Sessions live in this browser only (localStorage, newest 20); the page opens on the most recent one, or an empty one after Delete all.
+- **Esc** and the top bar's **Clear conversation** clear the open session (the wave). Turns older than the last two fold to one line (click to open); the patched screen and every Widgets, HTML or text answer stay open. Once turns fold, the thread sits on the bottom edge, so a fold never moves the screens below it.
+- A session left mid-turn (New session, a row click, F1/F4) keeps what arrived; nothing pulses afterwards ("Stopped before this screen was built." when no screen came). F1/F4 on a session with no answer in it (a request that hung or failed) reuse it instead of adding a row.
 - The totals count the page visit, not a session: replays excluded, reset by a reload (as before).
 
 ## Stage replay map (shipped, works offline; real Sonnet captures at the talk clock)

@@ -8,7 +8,6 @@ import { DataPanel, WireLog } from "@/panels/Inspector";
 import type { SessionTotals } from "@/state";
 import { useStore } from "@/store";
 import { BrickTiles } from "./BrickTiles";
-import { STAGE_LABEL } from "./styles";
 
 type Tab = "bricks" | "wire" | "data";
 
@@ -22,7 +21,6 @@ export function HoodPanel() {
   const pool = useStore((s) => s.pool);
   const totals = useStore((s) => s.totals);
   const surface = useStore((s) => (s.newestSurfaceId ? (s.surfaces[s.newestSurfaceId] ?? null) : null));
-  const turn = useStore((s) => s.thread.reduce((n, i) => (i.kind === "agent" ? n + 1 : n), 0));
   const counts = useMemo(() => wireCounts(wire), [wire]);
   return (
     <section className="bb-chrome flex h-full min-h-0 flex-col">
@@ -31,7 +29,6 @@ export function HoodPanel() {
           <CpuIcon aria-hidden className="size-[18px]" />
           Under the hood
         </h2>
-        {turn > 0 && <span className={STAGE_LABEL}>turn {turn}</span>}
       </header>
       <Tabs value={tab} onValueChange={(v: Tab) => setTab(v)} className="min-h-0 flex-1 gap-0">
         <TabsList className="h-auto! w-full justify-start gap-1 rounded-none bg-transparent px-[18px] pt-3 pb-3">

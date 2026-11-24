@@ -16,7 +16,13 @@ export function initDemoKey(): void {
     url.searchParams.delete("k");
     window.history.replaceState(null, "", url.toString());
   } else {
-    demoKey = localStorage.getItem(STORAGE_KEY) ?? sessionStorage.getItem(STORAGE_KEY);
+    try {
+      demoKey = localStorage.getItem(STORAGE_KEY) ?? sessionStorage.getItem(STORAGE_KEY);
+    } catch (err) {
+      // Blocked storage (some privacy modes) must not blank the page: the key box asks, and the key lives in memory.
+      console.warn("[key] browser storage is blocked; the demo key lasts until the page reloads", err);
+      demoKey = null;
+    }
   }
 }
 
@@ -26,14 +32,22 @@ export function hasDemoKey(): boolean {
 
 export function setDemoKey(key: string): void {
   demoKey = key;
-  localStorage.setItem(STORAGE_KEY, key);
+  try {
+    localStorage.setItem(STORAGE_KEY, key);
+  } catch (err) {
+    console.warn("[key] could not store the demo key; it lasts until the page reloads", err);
+  }
   notify();
 }
 
 export function clearDemoKey(): void {
   demoKey = null;
-  localStorage.removeItem(STORAGE_KEY);
-  sessionStorage.removeItem(STORAGE_KEY);
+  try {
+    localStorage.removeItem(STORAGE_KEY);
+    sessionStorage.removeItem(STORAGE_KEY);
+  } catch (err) {
+    console.warn("[key] could not clear the stored demo key", err);
+  }
   notify();
 }
 

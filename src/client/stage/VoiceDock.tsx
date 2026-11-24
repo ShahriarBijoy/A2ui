@@ -25,11 +25,12 @@ export function VoiceDock({ voice }: { voice: VoiceStatus }) {
   const glow = useStore(glowPhase);
   const note = useReplayNote();
   const listening = transcript.listening || voice.listening;
+  const blocked = Boolean(transcript.error ?? voice.error) && !listening;
   return (
     <div className="pointer-events-none absolute inset-x-0 bottom-[22px] z-10 flex justify-center px-6">
       <VoiceGlow phase={glow} theme="dark" className="bb-chrome pointer-events-auto w-full max-w-[720px] rounded-[20px]">
         <div className="flex h-[70px] items-center gap-3.5 rounded-[20px] bg-primary pr-3.5 pl-3 text-primary-foreground">
-          <MicButton listening={listening} available={voice.supported} handsFree={handsFree} />
+          <MicButton listening={listening} available={voice.supported} blocked={blocked} handsFree={handsFree} />
           <DockStatus transcript={transcript} voice={voice} handsFree={handsFree} note={note} />
           <TypeField />
         </div>
@@ -42,7 +43,18 @@ export function VoiceDock({ voice }: { voice: VoiceStatus }) {
  * Hold to talk with the mouse: the same push-to-talk as Space. It hands untargeted Space key events to the voice
  * lane's window listeners, exactly as the Space shield in keyboard.ts does for a focused control.
  */
-function MicButton({ listening, available, handsFree }: { listening: boolean; available: boolean; handsFree: boolean }) {
+function MicButton({
+  listening,
+  available,
+  blocked,
+  handsFree,
+}: {
+  listening: boolean;
+  available: boolean;
+  /** Voice reported an error (mic blocked, no key…): look unarmed. Holding still retries, like Space. */
+  blocked: boolean;
+  handsFree: boolean;
+}) {
   const held = useRef(false);
   const press = (type: "keydown" | "keyup") =>
     window.dispatchEvent(new KeyboardEvent(type, { key: " ", code: "Space", bubbles: true, cancelable: true }));
@@ -57,7 +69,7 @@ function MicButton({ listening, available, handsFree }: { listening: boolean; av
     held.current = false;
     press("keyup");
   };
-  const Icon = available ? MicIcon : MicOffIcon;
+  const Icon = available && !blocked ? MicIcon : MicOffIcon;
   return (
     <button
       type="button"
@@ -73,7 +85,7 @@ function MicButton({ listening, available, handsFree }: { listening: boolean; av
         "grid size-[46px] shrink-0 touch-none place-items-center rounded-full text-white outline-none select-none",
         "shadow-[0_0_0_6px_color-mix(in_srgb,var(--highlight)_22%,transparent)] transition-[background-color,box-shadow] duration-150",
         "focus-visible:ring-3 focus-visible:ring-primary-foreground/70 motion-reduce:transition-none",
-        available ? "bg-highlight" : "bg-primary-foreground/15 shadow-none",
+        available && !blocked ? "bg-highlight" : "bg-primary-foreground/15 text-primary-foreground/80 shadow-none",
         listening && "bb-mic-live",
       )}
     >
@@ -100,12 +112,15 @@ function DockStatus({
   let main;
   let sub: string;
   if (error && !listening) {
-    main = (
-      <span className="truncate text-[#f4a68b]" title={error}>
-        {error}
-      </span>
+    // Two lines for the whole instruction ("… Allow it in the address bar."), no small line under it.
+    return (
+      <div className="flex min-w-0 flex-1 flex-col justify-center" aria-live="polite">
+        <span className="sr-only">Microphone off</span>
+        <p className="line-clamp-2 text-[0.8125rem] leading-snug font-semibold text-[#f4a68b]" title={error}>
+          {error}
+        </p>
+      </div>
     );
-    sub = "Type a request instead";
   } else if (heard) {
     // Keep the newest words in view: an rtl box with an ltr isolate overflows to the left.
     const finalShown = tailText(transcript.final, 300);
@@ -161,12 +176,15 @@ function DockStatus({
 
 function TypeField() {
   const [text, setText] = useState("");
-  const submit = (e: FormEvent) => {
+  const submit = (e: FormEvent<HTMLFormElement>) => {
     e.preventDefault();
     const t = text.trim();
     if (!t) return;
     sendText(t);
     setText("");
+    // Space after a typed request should talk, not type a space into the field.
+    const active = document.activeElement;
+    if (active instanceof HTMLElement && e.currentTarget.contains(active)) active.blur();
   };
   return (
     <form

@@ -43,7 +43,13 @@ export function SessionRail() {
   const sessions = useStore((s) => s.sessions);
   const activeId = useStore((s) => s.activeSessionId);
   const openEmpty = useStore((s) => s.thread.length === 0);
-  const [confirm, setConfirm] = useState<Confirm>(null);
+  // The confirm's content stays set while it animates closed, so its words never flip; `open` drives visibility.
+  const [confirm, setConfirmContent] = useState<Confirm>(null);
+  const [confirmOpen, setConfirmOpen] = useState(false);
+  const setConfirm = (next: Confirm) => {
+    if (next) setConfirmContent(next);
+    setConfirmOpen(next !== null);
+  };
   const saved = sessions.filter((m) => m.turns > 0).length;
 
   const onConfirm = () => {
@@ -108,7 +114,7 @@ export function SessionRail() {
 
       <RailSettings />
 
-      <AlertDialog open={confirm !== null} onOpenChange={(open: boolean) => !open && setConfirm(null)}>
+      <AlertDialog open={confirmOpen} onOpenChange={(open: boolean) => !open && setConfirm(null)}>
         <AlertDialogContent className="bb-chrome">
           <AlertDialogHeader>
             <AlertDialogTitle>

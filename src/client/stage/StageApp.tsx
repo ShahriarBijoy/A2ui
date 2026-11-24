@@ -25,7 +25,8 @@ export default function StageApp() {
         <div className="relative min-h-0 flex-1 [--surface-w:640px] min-[1700px]:[--surface-w:720px]">
           <StageThread />
           {/* Content scrolling under the dock fades out instead of colliding with it. */}
-          <div aria-hidden className="pointer-events-none absolute inset-x-0 bottom-0 h-24 bg-linear-to-t from-background via-background/70 to-transparent" />
+          {/* Solid up to the dock's top edge (22 px gap + 70 px dock), then a short fade. */}
+          <div aria-hidden className="pointer-events-none absolute inset-x-0 bottom-0 h-[112px] bg-linear-to-t from-background from-[82%] to-transparent" />
         </div>
         <VoiceDock voice={voice} />
       </main>
