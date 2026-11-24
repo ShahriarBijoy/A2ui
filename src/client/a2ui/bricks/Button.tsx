@@ -9,7 +9,8 @@ const VARIANT = { primary: "default", default: "outline", borderless: "ghost" } 
 
 function label(env: SurfaceEnv, childId: string, scope: string): ReactNode {
   const entry = env.surface.components[childId];
-  if (!entry) return <span aria-hidden className="bb-skeleton inline-block h-4 w-16" />;
+  // A label still on its way pulses only while the turn streams; a turn that ended without it leaves it empty.
+  if (!entry) return env.streaming ? <span aria-hidden className="bb-skeleton inline-block h-4 w-16" /> : null;
   if (entry.status === "ok" && entry.def.component === "Text") {
     return plainText(resolveString(entry.def.text, evalCtx(env, scope)));
   }

@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
 import type { AgentItem, SurfaceState, ThreadItem, UserItem } from "@/state";
 import {
+  hasAnswer,
   loadSessions,
   MAX_WIRE_SAVED,
   sanitizeSnapshot,
@@ -189,5 +190,17 @@ describe("saveSessions", () => {
     expect(saved.map((s: SessionSnapshot) => s.meta.id)).toEqual(["new"]);
     expect(saved[0].wire).toHaveLength(MAX_WIRE_SAVED);
     expect(saved[0].wire[0].seq).toBe(6);
+  });
+});
+
+describe("hasAnswer", () => {
+  test("a built screen, a widget, a page or a text reply counts; a failed or half-built turn does not", () => {
+    const half = surface("s1", { other: { component: "Text", text: "x" } });
+    const built = surface("s1", { root: { component: "Text", text: "x" } });
+    expect(hasAnswer([user("x"), agent({ status: "error" })], {})).toBe(false);
+    expect(hasAnswer([user("x"), agent({ surfaceId: "s1" })], { s1: half })).toBe(false);
+    expect(hasAnswer([user("x"), agent({ surfaceId: "s1" })], { s1: built })).toBe(true);
+    expect(hasAnswer([user("x"), agent({ mode: "widgets", text: "no widget fits" })], {})).toBe(true);
+    expect(hasAnswer([user("x"), agent({ mode: "html", html: "" })], {})).toBe(true);
   });
 });

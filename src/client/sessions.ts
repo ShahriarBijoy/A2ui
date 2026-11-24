@@ -63,6 +63,12 @@ export function sessionIcon(surfaces: Readonly<Record<string, SurfaceState>>): I
   return null;
 }
 
+/** True when the session shows an answer: a built screen (a surface with a root), a widget, a page or a text reply. */
+export function hasAnswer(thread: readonly ThreadItem[], surfaces: Readonly<Record<string, SurfaceState>>): boolean {
+  for (const s of Object.values(surfaces)) if (s.components.root !== undefined) return true;
+  return thread.some((i) => i.kind === "agent" && (i.widget !== undefined || i.html !== undefined || i.text !== undefined));
+}
+
 export function countTurns(thread: readonly ThreadItem[]): number {
   let n = 0;
   for (const i of thread) if (i.kind === "agent") n++;

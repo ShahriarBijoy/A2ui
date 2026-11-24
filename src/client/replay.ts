@@ -13,6 +13,7 @@ import { isPlainObject } from "@shared/a2ui";
 import type { Mode, TurnEvent, TurnInput } from "@shared/protocol";
 import { MODES } from "@shared/protocol";
 import type { AgentItem, StoreApi, TurnRecording, UserItem } from "@/state";
+import { hasAnswer } from "@/sessions";
 import { store } from "@/store";
 import { abortTurn } from "@/turns";
 import shippedJson from "./replays.json";
@@ -389,7 +390,12 @@ export const replayer: Replayer = createReplayer({
   store,
   abortLiveTurn: abortTurn,
   newSessionIfBusy: () => {
-    if (store.getState().thread.length > 0) store.newSession();
+    const s = store.getState();
+    if (s.thread.length === 0) return;
+    // A session with no answer in it (a live request that hung or failed, then the fallback key) is reused, so the
+    // rail never shows a near-duplicate row with nothing behind it.
+    if (hasAnswer(s.thread, s.surfaces)) store.newSession();
+    else store.clearThread();
   },
   shipped: BUILTIN_REPLAYS,
   storage: browserStorage(),
