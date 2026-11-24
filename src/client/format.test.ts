@@ -6,6 +6,7 @@ import {
   formatPriceLevel,
   formatSeconds,
   formatTokens,
+  openTurnIds,
   pickInteractiveSurface,
   tailText,
   wireCounts,
@@ -279,5 +280,36 @@ describe("wireCounts", () => {
     expect(
       wireCounts([w("down", "createSurface"), w("down", "updateComponents"), w("up", "action"), w("up", "error")]),
     ).toEqual({ messages: 2, actions: 1, refused: 1 });
+  });
+});
+
+describe("openTurnIds", () => {
+  const turn = (n: number, over: Partial<AgentItem> = {}): ThreadItem[] => [
+    user("t" + n),
+    agent({ id: "a" + n, turnId: "t" + n, ...over }, { startedAt: n * 100 }),
+  ];
+  const ids = (s: Set<string>) => [...s].sort();
+
+  test("newest turn and the interactive surface's turn stay open", () => {
+    const thread = [...turn(1, { surfaceId: "s1" }), ...turn(2, { surfaceId: "s2" }), ...turn(3, { text: "no widget" })];
+    const surfaces = { s1: surface("s1", [110]), s2: surface("s2", [210]) };
+    const tl = buildTimeline(thread, surfaces);
+    expect(ids(openTurnIds(tl, "s2"))).toEqual(["t2", "t3"]);
+  });
+  test("after a patch turn, the patched screen's turn stays open", () => {
+    const thread = [...turn(1, { surfaceId: "s1" }), ...turn(2, { surfaceId: "s2" }), ...turn(3, { updatedSurfaceId: "s2" })];
+    const tl = buildTimeline(thread, { s1: surface("s1", [110]), s2: surface("s2", [210]) });
+    expect(ids(openTurnIds(tl, "s2"))).toEqual(["t2", "t3"]);
+  });
+  test("a single turn is open; an empty timeline has none", () => {
+    expect(ids(openTurnIds(buildTimeline(turn(1, { surfaceId: "s1" }), { s1: surface("s1", [110]) }), "s1"))).toEqual(["t1"]);
+    expect(openTurnIds([], null).size).toBe(0);
+  });
+  test("while the newest turn streams, the screen it replaces stays open; it folds when the turn is done", () => {
+    const surfaces = { s1: surface("s1", [110]), s2: surface("s2", [210]) };
+    const streaming = [...turn(1, { surfaceId: "s1" }), ...turn(2, { surfaceId: "s2", status: "streaming" })];
+    expect(ids(openTurnIds(buildTimeline(streaming, surfaces), "s2"))).toEqual(["t1", "t2"]);
+    const done = [...turn(1, { surfaceId: "s1" }), ...turn(2, { surfaceId: "s2" })];
+    expect(ids(openTurnIds(buildTimeline(done, surfaces), "s2"))).toEqual(["t2"]);
   });
 });

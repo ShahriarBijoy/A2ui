@@ -1,11 +1,28 @@
-import { memo, useCallback, useMemo, useRef, useState, type ReactNode, type RefCallback } from "react";
-import { ArrowDownIcon, KeyboardIcon, MicIcon, MousePointerClickIcon, RotateCcwIcon } from "lucide-react";
+import { Fragment, memo, useCallback, useMemo, useRef, useState, type ReactNode, type RefCallback } from "react";
+import {
+  ArrowDownIcon,
+  ChevronDownIcon,
+  KeyboardIcon,
+  LayoutTemplateIcon,
+  MicIcon,
+  MousePointerClickIcon,
+  RotateCcwIcon,
+} from "lucide-react";
 import type { CatalogComponent } from "@shared/a2ui";
 import { deriveKnobs } from "@shared/knobs";
 import { Surface } from "@/a2ui/Surface";
 import { Button } from "@/components/ui/button";
 import { ThreadWave } from "@/fx/ThreadWave";
-import { buildTimeline, isTurnFinished, pickInteractiveSurface } from "@/format";
+import {
+  buildTimeline,
+  entryTurnId,
+  formatMs,
+  formatSeconds,
+  isTurnFinished,
+  openTurnIds,
+  pickInteractiveSurface,
+  type TimelineEntry,
+} from "@/format";
 import { cn } from "@/lib/utils";
 import type { AgentItem, SurfaceState, ThreadItem, UserItem } from "@/state";
 import { retryTurn, sendAction } from "@/turns";
@@ -25,6 +42,8 @@ type Props = {
    * bottom for the floating voice dock. "classic" (the default) is the previous layout, unchanged.
    */
   layout?: "classic" | "stage";
+  /** Earlier turns fold to one line (what was said, what was built); the newest and the interactive screen stay open. */
+  foldEarlier?: boolean;
 };
 
 /** Stage column: px-8 on each side, so the content is exactly --surface-w wide. The bottom padding keeps the newest
@@ -41,7 +60,15 @@ const EXAMPLES = [
   "Split a 120 euro bill between four, Jonas only had drinks.",
 ];
 
-export function Thread({ thread, surfaces, newestSurfaceId, decision, replaying, layout = "classic" }: Props) {
+export function Thread({
+  thread,
+  surfaces,
+  newestSurfaceId,
+  decision,
+  replaying,
+  layout = "classic",
+  foldEarlier = false,
+}: Props) {
   const stage = layout === "stage";
   const timeline = useMemo(() => buildTimeline(thread, surfaces), [thread, surfaces]);
   const interactiveId = pickInteractiveSurface(timeline, surfaces, newestSurfaceId);
@@ -54,6 +81,82 @@ export function Thread({ thread, surfaces, newestSurfaceId, decision, replaying,
     return m;
   }, [thread]);
   const { viewportRef, contentRef, atBottom, scrollToBottom } = useStickToBottom({ mode: "thread" });
+
+  const open = useMemo(() => (foldEarlier ? openTurnIds(timeline, interactiveId) : null), [foldEarlier, timeline, interactiveId]);
+  /** Folded turns opened by a click. Turn ids never repeat on a page, so stale entries are harmless. */
+  const [expanded, setExpanded] = useState<ReadonlySet<string>>(() => new Set());
+  const toggleTurn = useCallback((turnId: string, row: HTMLElement) => {
+    setExpanded((prev) => {
+      const next = new Set(prev);
+      if (next.has(turnId)) next.delete(turnId);
+      else next.add(turnId);
+      return next;
+    });
+    // After the stick-to-bottom observer has run (next frame), bring the row back into view: an opened turn must be
+    // seen, and scrolling up also tells the thread to stop following the bottom.
+    requestAnimationFrame(() => requestAnimationFrame(() => row.scrollIntoView({ block: "nearest" })));
+  }, []);
+  /** Per folded turn: its user line and agent item, and the first entry, where the one-line row goes. */
+  const turns = useMemo(() => {
+    const m = new Map<string, { user?: UserItem; agent?: AgentItem; first: TimelineEntry }>();
+    if (!open) return m;
+    for (const e of timeline) {
+      const id = entryTurnId(e);
+      if (id === null || open.has(id) || e.kind === "surface") continue;
+      const t = m.get(id) ?? { first: e };
+      if (e.kind === "user") t.user = e.item;
+      else t.agent = e.item;
+      m.set(id, t);
+    }
+    return m;
+  }, [open, timeline]);
+
+  const renderEntry = (e: TimelineEntry): ReactNode => {
+    if (e.kind === "user") return <UserLine key={e.item.id} item={e.item} />;
+    if (e.kind === "surface") {
+      return (
+        <div key={`surface-${e.surfaceId}`} className="flex flex-col items-start gap-2">
+          <Surface surfaceId={e.surfaceId} interactive={e.surfaceId === interactiveId} onAction={sendAction} />
+          <p className="font-mono text-[0.75rem] text-muted-foreground">applied directly · {e.surfaceId}</p>
+        </div>
+      );
+    }
+    const item = e.item;
+    const awaitingRoute =
+      item.mode === "a2ui" && decision && routable && item.retry.input.type === "utterance" && !item.metrics.route;
+    return (
+      <AgentEntry
+        key={item.id}
+        item={item}
+        surfaceExists={item.surfaceId ? item.surfaceId in surfaces : false}
+        surfaceOwned={item.surfaceId ? owners.get(item.surfaceId) === item.id : false}
+        interactive={item.surfaceId !== undefined && item.surfaceId === interactiveId}
+        awaitingRoute={awaitingRoute}
+      />
+    );
+  };
+
+  const renderTimelineEntry = (e: TimelineEntry): ReactNode => {
+    const id = entryTurnId(e);
+    const folded = id !== null ? turns.get(id) : undefined;
+    if (!id || !folded) return renderEntry(e);
+    const isOpen = expanded.has(id);
+    if (folded.first !== e) return isOpen ? renderEntry(e) : null;
+    const surfaceId = folded.agent?.surfaceId;
+    return (
+      <Fragment key={`turn-${id}`}>
+        <FoldedTurn
+          turnId={id}
+          user={folded.user}
+          agent={folded.agent}
+          bricks={surfaceId ? countBricks(surfaces[surfaceId]) : 0}
+          expanded={isOpen}
+          onToggle={toggleTurn}
+        />
+        {isOpen && renderEntry(e)}
+      </Fragment>
+    );
+  };
 
   return (
     <section aria-label="Thread" className="flex h-full min-h-0 flex-col">
@@ -77,38 +180,7 @@ export function Thread({ thread, surfaces, newestSurfaceId, decision, replaying,
                 inert={replaying}
                 className={cn("mx-auto flex w-full flex-col", stage ? STAGE_COLUMN : CLASSIC_COLUMN)}
               >
-                {timeline.map((e) => {
-                  if (e.kind === "user") return <UserLine key={e.item.id} item={e.item} />;
-                  if (e.kind === "surface") {
-                    return (
-                      <div key={`surface-${e.surfaceId}`} className="flex flex-col items-start gap-2">
-                        <Surface
-                          surfaceId={e.surfaceId}
-                          interactive={e.surfaceId === interactiveId}
-                          onAction={sendAction}
-                        />
-                        <p className="font-mono text-[0.75rem] text-muted-foreground">applied directly · {e.surfaceId}</p>
-                      </div>
-                    );
-                  }
-                  const item = e.item;
-                  const awaitingRoute =
-                    item.mode === "a2ui" &&
-                    decision &&
-                    routable &&
-                    item.retry.input.type === "utterance" &&
-                    !item.metrics.route;
-                  return (
-                    <AgentEntry
-                      key={item.id}
-                      item={item}
-                      surfaceExists={item.surfaceId ? item.surfaceId in surfaces : false}
-                      surfaceOwned={item.surfaceId ? owners.get(item.surfaceId) === item.id : false}
-                      interactive={item.surfaceId !== undefined && item.surfaceId === interactiveId}
-                      awaitingRoute={awaitingRoute}
-                    />
-                  );
-                })}
+                {timeline.map(renderTimelineEntry)}
               </div>
             )}
           </div>
@@ -198,6 +270,72 @@ const UserLine = memo(function UserLine({ item }: { item: UserItem }) {
         {item.text}
       </p>
     </div>
+  );
+});
+
+function countBricks(surface: SurfaceState | undefined): number {
+  if (!surface) return 0;
+  let n = 0;
+  for (const entry of Object.values(surface.components)) if (entry.status === "ok") n++;
+  return n;
+}
+
+/** An earlier turn as one line: how it was asked, what was said, what was built and how long composing took. */
+const FoldedTurn = memo(function FoldedTurn(props: {
+  turnId: string;
+  user?: UserItem;
+  agent?: AgentItem;
+  bricks: number;
+  expanded: boolean;
+  onToggle: (turnId: string, row: HTMLElement) => void;
+}) {
+  const { turnId, user, agent, bricks, expanded, onToggle } = props;
+  const via = VIA[user?.via ?? agent?.retry.via ?? "text"];
+  const Icon = via.icon;
+  const said = user?.text ?? agent?.retry.display ?? "";
+  const built =
+    agent?.caption ||
+    (bricks > 0
+      ? `${bricks} ${bricks === 1 ? "brick" : "bricks"}`
+      : agent?.updatedSurfaceId
+        ? "updated in place"
+        : agent?.status === "error"
+          ? "failed"
+          : "no screen");
+  // Measured only: compose time, or the decision model's time for a patch.
+  const usage = agent?.metrics.usage;
+  const route = agent?.metrics.route;
+  const time = usage ? formatSeconds(usage.compose_ms) : route?.decision === "patch" ? formatMs(route.ms) : "";
+  return (
+    <button
+      type="button"
+      aria-expanded={expanded}
+      aria-label={`${expanded ? "Fold" : "Show"} earlier turn: ${said}`}
+      onClick={(ev) => onToggle(turnId, ev.currentTarget)}
+      className={cn(
+        "bb-appear grid w-full grid-cols-[auto_minmax(0,1.1fr)_auto_minmax(0,1fr)_auto_auto] items-center gap-2.5 rounded-xl border border-dashed border-input/80 px-3.5 py-2.5",
+        "text-left text-[0.8125rem] text-muted-foreground outline-none transition-colors duration-150 motion-reduce:transition-none",
+        "hover:bg-card/70 hover:text-foreground focus-visible:ring-3 focus-visible:ring-ring/50 [&_svg.lucide]:[stroke-width:1.75]",
+        expanded && "border-solid bg-card/60",
+      )}
+    >
+      <Icon aria-hidden className="size-[15px] shrink-0" />
+      <span className={cn("truncate", user?.via === "tap" && "font-mono text-[0.75rem]")}>
+        {user?.via === "tap" ? said : `“${said}”`}
+      </span>
+      <span aria-hidden className="text-input">
+        →
+      </span>
+      <span className="flex min-w-0 items-center gap-1.5">
+        <LayoutTemplateIcon aria-hidden className="size-[15px] shrink-0" />
+        <span className="truncate">{built}</span>
+      </span>
+      <span className="font-mono text-[0.75rem] tabular-nums">{time}</span>
+      <ChevronDownIcon
+        aria-hidden
+        className={cn("size-4 shrink-0 transition-transform duration-150 motion-reduce:transition-none", expanded && "rotate-180")}
+      />
+    </button>
   );
 });
 

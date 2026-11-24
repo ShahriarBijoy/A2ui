@@ -45,6 +45,7 @@ function StageThread() {
   return (
     <Thread
       layout="stage"
+      foldEarlier
       thread={thread}
       surfaces={surfaces}
       newestSurfaceId={newestSurfaceId}

@@ -204,6 +204,40 @@ export function pickInteractiveSurface(
   return null;
 }
 
+/** The turn id of a timeline entry; fixture surfaces have none. */
+export function entryTurnId(e: TimelineEntry): string | null {
+  return e.kind === "surface" ? null : e.item.turnId;
+}
+
+/**
+ * Turns the stage shows in full; every other turn folds to one line. Open: the newest turn, and the turn that built
+ * the interactive surface (a patched screen stays open even when its turn is older). While the newest turn is still
+ * running, the screen it is replacing stays open too, so nothing above the stream collapses mid-stream; it folds
+ * once the new turn has finished.
+ */
+export function openTurnIds(timeline: readonly TimelineEntry[], interactiveSurfaceId: string | null): Set<string> {
+  const open = new Set<string>();
+  let newest: string | null = null;
+  for (let i = timeline.length - 1; i >= 0 && newest === null; i--) newest = entryTurnId(timeline[i]);
+  if (newest === null) return open;
+  open.add(newest);
+
+  let newestRunning = false;
+  let previousScreen: string | null = null;
+  for (const e of timeline) {
+    if (e.kind !== "agent") continue;
+    const { item } = e;
+    if (item.surfaceId && item.surfaceId === interactiveSurfaceId) open.add(item.turnId);
+    if (item.turnId === newest) {
+      if (!isTurnFinished(item)) newestRunning = true;
+    } else if (item.surfaceId) {
+      previousScreen = item.turnId;
+    }
+  }
+  if (newestRunning && previousScreen) open.add(previousScreen);
+  return open;
+}
+
 // ── Wire log ─────────────────────────────────────────────────────────────────
 export type WireCounts = { messages: number; actions: number; refused: number };
 
