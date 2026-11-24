@@ -338,3 +338,9 @@ delivered in that session. Code evaluated: **6943acb** (smoke "Script tree"). No
   hit the 1.5 s cap), germanycompass.com found, hamburg.com has no og tag, yelp.com and tripadvisor.com 403,
   lufthansa.com 200 once then 403 (bot protection). A photo filled end to end in a live turn was not observed.
 - Raw captures and reports: session scratchpad `bricks-eval/` (flight.md, dinner.md, heldout.md, raw-*).
+
+## Brick catalog follow-up: Alerts/Badges only from data or the person (bc6b828, talk clock, in-process Bun server, 2026-11-24 ~14:25)
+- Prompt line: Alert and Badge only for a notice the person asked for or a fact a data line delivered; never on a confirm/summary step. Smoke judge: "notice on summary" fails a confirm step that draws an Alert or Badge.
+- **Flight --runs 10 --strict: 10/10, 42/42 lines.** Step 2 options per run 4,3,2,2,3,4,3,3,2,3; data arrived 4.89 s (4.03–5.38), search 2614 ms (2135–3174).
+- **Dinner --runs 10: 9/10.** Opener places 3,4,2,2,1,1,2,2,2,2; "We're six, and later." patched 9/10 (median 160 ms); the miss routed compose ("partial edit: Time") instead of patching, so the screen was rebuilt by the composer (2.2 s) rather than patched.
+- Alerts/Badges across the 20 runs: 1 (dinner run 1, "Kitchen open Wednesday 17:30-22:00", from the search fields). None on a summary step; none stating an unstated fact. Before the line: 17 Alerts + 2 Badges in 80 turns.
