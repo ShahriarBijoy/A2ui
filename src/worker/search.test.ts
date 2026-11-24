@@ -234,6 +234,41 @@ describe("searchPrompt and runSearch", () => {
     );
   });
 
+  test("runSearch asks once more after prose instead of the array, or an empty trip list; sums the measured counts", async () => {
+    const trip: SearchRequest = { query: "flights from Porto to Oslo", fields: ["carrier", "route", "price", "tags"], max: 4 };
+    const text = (t: string) => reply({ blocks: [...reply().blocks.filter((b) => b.type !== "text"), { type: "text", text: t }], searches: 1, inputTokens: 100, outputTokens: 10 });
+    const host = (reply().blocks.find((b) => b.type === "results") as { urls: string[] }).urls[0];
+    const good = text(JSON.stringify([{ carrier: "TAP", route: "OPO → OSL · 1 stop", price: "from €39", tags: ["round trip"], source: host }]));
+    const scripted = (...replies: SearchReply[]) => {
+      let calls = 0;
+      return { fn: async () => replies[calls++], calls: () => calls };
+    };
+    const prose = scripted(text("I could not find fares for that day."), good);
+    const a = await runSearch(trip, prose.fn, ctx, new AbortController().signal);
+    expect(prose.calls()).toBe(2);
+    expect(a).toMatchObject({ ok: true, searches: 2, inputTokens: 200, outputTokens: 20 });
+    expect(a.ok && a.records.map((r) => r.carrier)).toEqual(["TAP"]);
+
+    const empty = scripted(text("[]"), good);
+    expect(await runSearch(trip, empty.fn, ctx, new AbortController().signal)).toMatchObject({ ok: true, searches: 2 });
+    expect(empty.calls()).toBe(2);
+
+    // An empty list of places can be right (kitchens closed): asked once.
+    const places = scripted(text("[]"), good);
+    const p = await runSearch(req, places.fn, ctx, new AbortController().signal);
+    expect(places.calls()).toBe(1);
+    expect(p.ok && p.records).toEqual([]);
+
+    // A second miss stays a miss, with both calls counted; the client leaving stops the retry.
+    const twice = scripted(text("no"), text("still no"));
+    expect(await runSearch(trip, twice.fn, ctx, new AbortController().signal)).toEqual({ ok: false, error: "answer was not a JSON array", searches: 2, inputTokens: 200, outputTokens: 20 });
+    const ctl = new AbortController();
+    const gone = scripted(text("no"), good);
+    ctl.abort();
+    await runSearch(trip, gone.fn, ctx, ctl.signal);
+    expect(gone.calls()).toBe(1);
+  });
+
   test("runSearch never throws: a failing call becomes ok:false with a short message", async () => {
     const out = await runSearch(req, async () => {
       throw new Error("boom");
