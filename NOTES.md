@@ -82,6 +82,11 @@ Read this before calling any external API. Items here override PLAN.md where the
 - Wildcards 7/9, held-out 13/15. **Every miss is a 8–9-block screen** (rule ≤ 7); Sonnet builds richer screens. Cosmetic; the prompt is frozen for the talk.
 - First UI on production with Sonnet: ~1.4–2.3 s (Haiku ~0.7–0.9 s); screen done ~3.7–6.7 s.
 
+## Production main scenarios after the spend-limit raise (787b35e, real clock ~01:25 Tue 24 Nov, 3 runs each, patch judged by result)
+- **6/6 scenario runs pass (100%).** Every step 3/3: dinner (places 2/4/1), tap place, **"We're six, and later." patch 173 ms (146–175)**, confirm; flight form, "To New York" (4 demo flights), tap flight → seat map, confirm.
+- Medians: dinner first UI 1.73 s / screen 3.32 s / live data 5.63 s; flight first UI 1.59–2.34 s / screen 4.0–5.1 s. Widgets: RestaurantWidget with 5 live places in 4.03 s; FlightSearchWidget 0.84 s. HTML: first byte ~0.55 s.
+- Direct turns: dinner first UI 0.96 s, data 5.6 s (Bellissima Überseestadt, Restaurant Übersee); concerts in Hamburg data 6.3 s (5 real acts); dog 4.7 s, no search.
+
 ## Rulings (decisions made without asking)
 - Fonts: Geist + Geist Mono, bundled via fontsource (no network at the venue). PLAN says "system sans": same intent, consistent rendering on the stage machine.
 - Catalog id: `<origin>/catalog/brick-box/v1`, served publicly as JSON by the Worker. The processor accepts any catalogId ending in `/catalog/brick-box/v1`.

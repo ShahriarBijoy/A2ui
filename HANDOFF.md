@@ -14,14 +14,14 @@ Vite + React 19 + Tailwind 4 + shadcn (**Base UI**, all components installed) cl
 Every event enters the client through `store.applyTurnEvent`, the single ingress that replay also uses.
 Contract files: `src/shared/{a2ui,catalog,protocol,pointer}.ts` and `src/client/state.ts`.
 
-## 🚨 BLOCKER (2026-11-24 ~00:20)
-The Anthropic API key has reached its **account spend limit**: "You will regain access on 2026-12-01 at 00:00 UTC", which is after the talk. Every composer, widgets, html and search call fails, both locally and in production. **The owner must raise the limit** (console.anthropic.com → Settings → Limits → monthly spend limit, for the organization or workspace that owns the key) **or provide another key.** Then update the Worker secret: `printf '%s' <key> | bunx wrangler secret put ANTHROPIC_API_KEY` and `.dev.vars`. Jev (decision model) and Soniox (voice) are unaffected.
+## Blocker resolved (2026-11-24 ~01:20)
+The owner raised the Anthropic spend limit. The key answers again (Haiku 1.3 s, Sonnet 1.9 s). On production 787b35e both main scenarios pass 6/6 with the result-judging smoke; see NOTES → "Production main scenarios after the spend-limit raise". **Watch spend:** avoid large smoke runs; one full smoke is roughly 60–80 turns.
 
 ## Status at hand-off (updated 2026-11-24 ~00:00)
 - **Production:** https://brick-box.shahriarbijoy.workers.dev runs **787b35e** (deployed 2026-11-24 ~00:35): composer `claude-sonnet-5-5` (search, widgets and html on Haiku), live web search, the decision model with time/date/Day fixes and the silent-drop guard, replay with **shipped F1–F6**, voice-glow, the Esc wave, live widgets, the voice fragment guard, and readable API errors. Open it with `?k=<DEMO_KEY from .dev.vars>`. While the spend limit holds, live turns show "Claude API: usage limit reached — access returns 2026-12-01 00:00 UTC".
 - **Everything built is reviewed.** 422 tests pass, and `bunx tsc -b` is clean. Ledger: `.superpowers/sdd/progress.md` (every task, review, ruling and parked minor).
 - **Talk-clock main scenarios: 19/20 (95%)**; see NOTES → "Main scenarios at the talk's clock". Flight is 10/10 including the seat map. "We're six, and later" patches in about 200 ms with no LLM.
-- **Remaining (owner-dependent):**
+- **Remaining (owner-dependent):** (the API key works again)
   1. The owner's live mic rehearsal in Chrome (checklist below). Save good turns with Shift+R, export with Shift+E, and paste them into `src/client/replays.json` (shipped F-key replays), then redeploy.
   2. Confirm the venue and date (JAAI, Konsul-Smidt-Straße 8p, Wed 25 Nov 18:00). They drive `VENUE_*` vars and the "nearby" search.
   3. Flights: demo-badged (current) vs indicative web results.
