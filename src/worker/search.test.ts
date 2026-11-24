@@ -140,6 +140,19 @@ describe("normalizeRecords (field filter)", () => {
     expect(dropped).toBe(7);
   });
 
+  test("a requested carrier is required: a trip item without one is dropped; other requests are unaffected", () => {
+    const hosts = new Set(["a.example"]);
+    const items = [
+      { carrier: null, route: "BRE → JFK · 1 stop", price: "€590", source: "https://a.example/1" },
+      { carrier: "KLM", route: null, price: null, source: "https://a.example/2" },
+    ];
+    const out = normalizeRecords(items, ["carrier", "route", "price"], 4, hosts);
+    expect(out.dropped).toBe(1);
+    expect(out.records).toEqual([{ id: "r1", carrier: "KLM", route: null, price: null, source: "https://a.example/2" }]);
+    // Without a requested carrier the same item is kept (the KLM item then holds no requested fact).
+    expect(normalizeRecords(items, ["route", "price"], 4, hosts).records.map((r) => r.route)).toEqual(["BRE → JFK · 1 stop"]);
+  });
+
   test("caps at max; long text is clipped", () => {
     const items: JsonValue[] = Array.from({ length: 9 }, (_, i) => ({ name: "x".repeat(300) + i, source: `https://example.org/${i}` }));
     const { records } = normalizeRecords(items, ["name"], 3, hosts);

@@ -74,10 +74,11 @@ the keys the request lists, plus "source".
   Fewer items, or [], is a correct answer.
 - Trips (flights, trains, buses) are the one exception to that date rule, since results list carriers, routes and
   fares, rarely the departures of one day. An item is one carrier or route that serves the requested trip, named
-  by a result for this origin and destination; keep it even when no result shows the requested date. A fare a
+  by a result for this origin and destination; keep it even when no result shows the requested date, and leave it
+  out when no result names its carrier. A price is only the amount as the result writes it ("from €605"). A fare a
   result lists for other dates or for a round trip may be kept only with a tag that says what it is ("round trip",
-  "Nov fares"); never present it as the fare for the requested date. No comments in values ("No fare shown for
-  that day" is wrong): say it with a tag, or leave the value null.
+  "Nov fares"); never present it as the fare for the requested date. No comments in values, no parentheses
+  ("No fare shown for that day", "€460 (round trip)" are wrong): say it with a tag, or leave the value null.
 - One item per real thing (a place, an event, a route, a product), never a list page or an article.
 - English, at most 80 characters per string.`;
 
@@ -212,9 +213,13 @@ function matchingBracket(text: string, start: number): number {
   return -1;
 }
 
+/** A trip item is named by its carrier (the card's title): one without it shows nothing to choose. */
+const IDENTITY_FIELDS: readonly string[] = ["carrier"];
+
 /**
  * Keeps only the requested fields, coerced to string | number | string[] | null, plus a source the
- * search returned (by host) and an id r1..rN. Items with no requested fact are dropped.
+ * search returned (by host) and an id r1..rN. Items with no requested fact, or without a requested
+ * carrier, are dropped.
  */
 export function normalizeRecords(
   items: JsonValue[],
@@ -243,7 +248,7 @@ export function normalizeRecords(
       rec[f] = v;
       if (v !== null) facts++;
     }
-    if (facts === 0) {
+    if (facts === 0 || IDENTITY_FIELDS.some((f) => fields.includes(f) && rec[f] === null)) {
       dropped++;
       continue;
     }
