@@ -1,6 +1,7 @@
 {
   "name": "brick-box",
   "private": true,
+  "description": "Voice-driven generative UI: speak, and Claude builds the screen from 17 shadcn components using A2UI. Runs on Cloudflare Workers.",
   "version": "0.1.0",
   "type": "module",
   "scripts": {
