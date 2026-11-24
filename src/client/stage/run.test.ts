@@ -147,6 +147,10 @@ describe("bigNumbers", () => {
     ]);
   });
 
+  test("a decision-model value is the first content of a patch", () => {
+    expect(firstContent([{ msg: data("/booking/guests", 6), origin: "knob", atMs: 180 }])).toEqual({ ms: 180, basis: "value" });
+  });
+
   test("without data, first content is the first component that is not a container", () => {
     expect(firstContent(msgs.slice(0, 2))).toEqual({ ms: 1200, basis: "component" });
     expect(firstContent(msgs.slice(0, 1))).toBeNull();

@@ -232,7 +232,7 @@ describe("compactLines: surfaces, data and renderer lines", () => {
     ]);
     expect(lines.map((l) => [l.kind, l.text])).toEqual([
       ["action", '↑ pick_flight(id="r1", carrier="Lufthansa")'],
-      ["error", "✕ refused /components/0/component · Not in the catalog"],
+      ["error", "✕ /components/0/component · Not in the catalog"],
       ["invalid", "invalid message"],
     ]);
   });

@@ -94,7 +94,7 @@ function isDataWrite(m: TurnMessage): boolean {
   return (m.origin === "data" || m.origin === "knob") && isPlainObject(m.msg) && isPlainObject(m.msg.updateDataModel);
 }
 
-export type FirstContent = { ms: number; basis: "data" | "component" };
+export type FirstContent = { ms: number; basis: "data" | "value" | "component" };
 
 /**
  * When the screen first showed content, on the client clock: the first live data or decision-model value when the
@@ -102,7 +102,7 @@ export type FirstContent = { ms: number; basis: "data" | "component" };
  */
 export function firstContent(messages: readonly TimedMessage[]): FirstContent | null {
   const data = messages.find((m) => isDataWrite(m) && m.atMs !== null);
-  if (data && data.atMs !== null) return { ms: data.atMs, basis: "data" };
+  if (data && data.atMs !== null) return { ms: data.atMs, basis: data.origin === "knob" ? "value" : "data" };
   const comp = messages.find((m) => m.origin !== "renderer" && hasContentComponent(m.msg) && m.atMs !== null);
   return comp && comp.atMs !== null ? { ms: comp.atMs, basis: "component" } : null;
 }
@@ -119,7 +119,7 @@ export function bigNumbers(item: AgentItem, messages: readonly TimedMessage[], d
       key: "content",
       label: "First content",
       value: content ? formatSeconds(content.ms) : missing(item),
-      caption: content ? (content.basis === "data" ? "first data" : "first component") : "content on screen",
+      caption: content ? { data: "first data", value: "first value", component: "first component" }[content.basis] : "content on screen",
     },
     { key: "done", label: "Done", value: doneMs !== null ? formatSeconds(doneMs) : missing(item), caption: "turn finished" },
   ];

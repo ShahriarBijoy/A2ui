@@ -340,7 +340,7 @@ export function compactLines(messages: readonly TurnMessage[], fetches: readonly
       drafts.push({
         ...base,
         kind: "error",
-        tokens: [t("error", "✕ refused "), t("path", String(e.path ?? "")), t("punct", " · "), t("error", truncate(String(e.message ?? ""), 48))],
+        tokens: [t("error", "✕ "), t("path", String(e.path ?? "")), t("punct", " · "), t("error", truncate(String(e.message ?? ""), 48))],
       });
       return;
     }

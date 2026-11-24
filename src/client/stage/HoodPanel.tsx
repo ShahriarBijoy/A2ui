@@ -16,7 +16,7 @@ type Tab = "bricks" | "stream" | "json" | "run" | "data";
 
 /** A segmented control: five tabs share the panel's width, so all of them stay readable at 340 px. */
 const TRIGGER =
-  "h-7 min-w-0 flex-auto gap-1 rounded-[7px] border-0 px-2 text-[0.78125rem] font-medium text-muted-foreground hover:text-foreground data-active:bg-card data-active:text-foreground data-active:shadow-[0_1px_0_var(--border),0_0_0_1px_var(--border)]";
+  "h-7 min-w-0 flex-auto gap-1 rounded-[7px] border-0 px-2 text-[0.78125rem] font-medium text-muted-foreground hover:text-foreground data-active:bg-card data-active:text-foreground data-active:shadow-[0_1px_0_var(--border),0_0_0_1px_var(--border)] focus-visible:border-transparent focus-visible:ring-2 focus-visible:ring-ring/25 focus-visible:outline-0";
 
 /** "Under the hood": bricks, the selected turn as a JSON stream, raw JSON and a run, and its screen's data. */
 export function HoodPanel() {
