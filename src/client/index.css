@@ -148,6 +148,11 @@
   stroke-width: 1.75;
 }
 
+/* Brick glyphs keep one line weight at any tile size. */
+.bb-glyph :is(path, rect, circle) {
+  vector-effect: non-scaling-stroke;
+}
+
 /* Stage voice dock: the mic breathes while it listens. */
 @keyframes bb-mic-pulse {
   0%,

@@ -4,10 +4,10 @@ import { BRICKS } from "@shared/catalog";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { formatTokens, wireCounts } from "@/format";
 import { cn } from "@/lib/utils";
-import { BrickPool } from "@/panels/BrickPool";
 import { DataPanel, WireLog } from "@/panels/Inspector";
 import type { SessionTotals } from "@/state";
 import { useStore } from "@/store";
+import { BrickTiles } from "./BrickTiles";
 import { STAGE_LABEL } from "./styles";
 
 type Tab = "bricks" | "wire" | "data";
@@ -48,8 +48,8 @@ export function HoodPanel() {
             Data
           </TabsTrigger>
         </TabsList>
-        <TabsContent value="bricks" className="flex min-h-0 flex-col border-t">
-          <BrickPool pool={pool} />
+        <TabsContent value="bricks" className="flex min-h-0 flex-col">
+          <BrickTiles pool={pool} />
         </TabsContent>
         <TabsContent value="wire" className="flex min-h-0 flex-col">
           <WireLog wire={wire} />
