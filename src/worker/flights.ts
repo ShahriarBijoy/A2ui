@@ -34,9 +34,13 @@ export function longDate(iso: string): string {
   return `${WEEKDAYS[day]} ${d} ${MONTHS[m - 1]} ${y}`;
 }
 
-export function flightQuery(input: JsonObject): FlightQuery {
+/**
+ * The tool input as a query. `origin` (the venue's city) stands in for an origin the person did not name, as
+ * in the composer ("where the person is now is STATE.city"); the form shows it, so it stays visible and honest.
+ */
+export function flightQuery(input: JsonObject, origin?: string): FlightQuery {
   const q: FlightQuery = {};
-  const from = place(input.from);
+  const from = place(input.from) ?? place(origin);
   const to = place(input.to);
   if (from) q.from = from;
   if (to) q.to = to;
@@ -48,7 +52,7 @@ export function flightQuery(input: JsonObject): FlightQuery {
 
 /**
  * "flights from <from> to <to> on <weekday d Month yyyy>". Null without both ends: a trip search needs them,
- * and nothing here guesses one. Without a date the query names none rather than assume one.
+ * and nothing here guesses a destination. Without a date the query names none rather than assume one.
  */
 export function flightSearch(q: FlightQuery): SearchRequest | null {
   if (!q.from || !q.to) return null;

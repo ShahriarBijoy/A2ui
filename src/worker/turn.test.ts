@@ -1151,6 +1151,9 @@ describe("runTurn: widgets and html modes", () => {
 
   test("widgetSearch: both widgets search live; flights only when from and to are known; unknown tools get none", () => {
     expect(widgetSearch({ name: "show_flight_search", input: { date: "2026-11-24" } }, ctx)?.sreq).toBeNull();
+    // The origin defaults to the venue's city (ctx.city), as in the composer; the form shows it.
+    expect(widgetSearch({ name: "show_flight_search", input: { to: "Oslo" } }, ctx)?.sreq?.query).toBe("flights from Bremen to Oslo");
+    expect(widgetSearch({ name: "show_flight_search", input: { to: "Oslo" } }, ctx)?.widget([]).ev.props).toEqual({ flights: [], from: "Bremen", to: "Oslo" });
     expect(widgetSearch({ name: "show_flight_search", input: { from: "Bremen", to: "New York" } }, ctx)?.sreq).toEqual({
       query: "flights from Bremen to New York",
       fields: ["carrier", "route", "price", "tags"],

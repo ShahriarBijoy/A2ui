@@ -10,6 +10,13 @@ describe("flightQuery", () => {
     expect(flightQuery({ from: 3, to: "  ", date: "tomorrow" })).toEqual({});
     expect(flightQuery({ to: "x".repeat(200) }).to?.length).toBeLessThanOrEqual(60);
   });
+
+  test("an origin the person did not name is the venue's city; a named one wins; no destination is ever filled in", () => {
+    expect(flightQuery({ to: "New York", date: "2026-11-26" }, "Bremen")).toEqual({ from: "Bremen", to: "New York", date: "2026-11-26" });
+    expect(flightQuery({ from: "Hamburg", to: "Oslo" }, "Bremen")).toEqual({ from: "Hamburg", to: "Oslo" });
+    expect(flightQuery({ from: " " }, "Bremen")).toEqual({ from: "Bremen" });
+    expect(flightQuery({}, " ")).toEqual({});
+  });
 });
 
 describe("flightSearch", () => {

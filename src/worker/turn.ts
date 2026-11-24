@@ -946,7 +946,7 @@ export function widgetSearch(tool: ToolCall, ctx: PromptContext): WidgetSearch |
     };
   }
   if (tool.name === "show_flight_search") {
-    const q = flightQuery(tool.input);
+    const q = flightQuery(tool.input, ctx.city);
     return {
       what: "flight",
       sreq: flightSearch(q),
