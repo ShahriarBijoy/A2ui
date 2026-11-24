@@ -107,6 +107,14 @@ their expected bricks (`--strict`) and step 2 shows at least 1 OptionCard drawn 
 |---|---|---|---|---|---|---|---|---|
 | vA f01bcef | **3/10** | 10/10 (0 fetches in 10/10) | 10/10 | **3/10** | 10/10 | 4,4,4,3,2,4,4,3,3,3 | 2755 (2466-3139) | 4.80 s (4.41-6.06) |
 | vB e774dbe | **10/10** | 10/10 (0 fetches in 10/10) | 10/10 | 10/10 | 10/10 | 3,3,3,3,1,3,1,2,3,2 | 2514 (1918-2959) | 5.00 s (3.97-5.71) |
+| vC 9af6f6d | **10/10** | 10/10 (0 fetches in 10/10) | 10/10 | 10/10 | 9/10 | 2,4,1,2,4,3,3,2,2,3 | 2551 (1884-3169) | 5.02 s (4.12-6.15) |
+- vC (shipped prompt) only replaces the travel rule's price examples ("from €605", "€460", which were the route's real
+  fares) with the price hint's neutral "from €39", "€25". Its 4 probe runs still returned 460 € and from 605 €
+  (10 records, 2 prices with parentheses), as the very first probe did before any price example: web values, not echoes.
+  vC step 4 miss (run 8): the seat step's Button was named pick_seat, so the smoke found no confirm_ action (not in the bar).
+  vC step 2 skipped 1 prose line in 7/10, repaired 0; step 1 skipped 1 in 1/10. Every step-2 line made 1 web search (10/10);
+  2 searches dropped 1 item each. vC timings (median, min-max): step 1 first UI 1.64 s (1.45-2.38), screen 4.12 s;
+  step 2 first UI 2.49 s (1.59-2.91), screen 4.93 s; tap → seat map 1.73 / 4.28 s; confirm 1.75 / 2.86 s.
 - vA failure cause (7/10): after pick_flight the composer built a confirm or passengers step (Stepper, Stat) instead of a
   seat pick; a fare listing has no times, so it no longer read as a booking with assigned seats. vB adds to rule 11:
   "A flight is such a booking: picking a flight leads to its seat step." No other failures in vA or vB.
@@ -115,9 +123,10 @@ their expected bricks (`--strict`) and step 2 shows at least 1 OptionCard drawn 
   runs (carrier rule or source check).
 - vB timings (median, min-max): step 1 first UI 1.58 s (1.43-2.45), screen 4.22 s; step 2 first UI 1.84 s (0.86-2.58),
   screen 4.60 s; tap → seat map first UI 1.66 s, screen 4.01 s; confirm 1.54 / 2.57 s.
-- Typical cards (vB run 4, shipped as F5): Air France · BRE → JFK · 1 stop · €460 [round trip, Nov 26 outbound];
-  Lufthansa · BRE → NYC · connecting · from €605 [Nov 26 fare, one stop]; KLM · BRE → JFK · connecting · from EUR590
-  [round trip, Nov 2026 fares]. Sources: skyscanner.de, lufthansa.com, klm.de. Fares are as listed, not bookable quotes.
+- Typical cards (vC run 7, shipped as F4-F6; search 2637 ms): Lufthansa · BRE → NYC · 1 stop · from 605 € [flight,
+  economy, Nov 26 fare]; Air France · BRE → JFK · 1 stop · 460 € [flight, round trip, Nov 26 outbound]; KLM · BRE → JFK ·
+  1 stop · from EUR590 [flight, round trip, Nov fares]. Sources: lufthansa.com, skyscanner.de, klm.de. Fares are as
+  listed, not bookable quotes.
 - Widgets: smoke's widgets line ("I need to book a flight tomorrow.", no destination) → vA a text answer, vB
   FlightSearchWidget in 754 ms (form only, no search). Manual 2-turn chains (that line, then "To New York, give me
   options."), 3 each: at e774dbe the widgets model left "from" empty in 2/3 second turns (no search, no rows). Since

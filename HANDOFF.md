@@ -53,10 +53,10 @@ The owner raised the Anthropic spend limit. The key answers again (Haiku 1.3 s, 
 | F2 | tap a place → time + guests + Reserve |
 | F3 | "We're six, and later." → decision-model patch, compose – |
 | **Esc** | **required between F3 and F4** (both sequences start at surface s1) |
-| F4 | "I need to book a flight tomorrow." (From Bremen, To empty, Day Thu 26 Nov, "Find flights") |
-| F5 | "To New York, give me options." (3 web results: Air France €460, Lufthansa from €605, KLM from EUR590; fares as listed, with tags) |
-| F6 | tap Air France → seat map + Confirm flight |
-- Tapping the live buttons after F3 ("Reserve table") or F6 ("Confirm seat") sends a real turn (spends API budget; fails if offline).
+| F4 | "I need to book a flight tomorrow." (From Bremen, To empty, Day Thu 26 Nov, "Search flights") |
+| F5 | "To New York, give me options." (3 web results: Lufthansa from 605 €, Air France 460 €, KLM from EUR590; fares as listed, with tags) |
+| F6 | tap Lufthansa → seat map + Confirm flight |
+- Tapping the live buttons after F3 ("Reserve table") or F6 ("Confirm flight") sends a real turn (spends API budget; fails if offline).
 - The recordings' dates are fixed for Wed 25 Nov ("tonight", flight on Thu 26 Nov).
 - All six F-keys are taken by the shipped set, so Shift+R saves get no key. Swap `src/client/replays.json` if rehearsal produces better turns (Shift+E exports).
 

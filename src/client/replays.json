@@ -531,7 +531,7 @@
     },
     "events": [
       {
-        "t": 1025.5543000000034,
+        "t": 1588.5843000000023,
         "ev": {
           "type": "a2ui",
           "msg": {
@@ -545,7 +545,7 @@
         }
       },
       {
-        "t": 1434.1709000000046,
+        "t": 1988.5285999999905,
         "ev": {
           "type": "a2ui",
           "msg": {
@@ -581,7 +581,7 @@
         }
       },
       {
-        "t": 2270.1483000000007,
+        "t": 2788.12999999999,
         "ev": {
           "type": "a2ui",
           "msg": {
@@ -615,7 +615,7 @@
                   "label": "Day",
                   "enableDate": true,
                   "value": {
-                    "@path": "/trip/day"
+                    "@path": "/trip/date"
                   }
                 }
               ]
@@ -625,7 +625,7 @@
         }
       },
       {
-        "t": 3270.2018000000025,
+        "t": 3958.3076999999903,
         "ev": {
           "type": "a2ui",
           "msg": {
@@ -648,8 +648,8 @@
                         "to": {
                           "@path": "/trip/to"
                         },
-                        "day": {
-                          "@path": "/trip/day"
+                        "date": {
+                          "@path": "/trip/date"
                         }
                       }
                     }
@@ -660,18 +660,29 @@
                         "@call": "required",
                         "args": {
                           "value": {
+                            "@path": "/trip/from"
+                          }
+                        }
+                      },
+                      "message": "Enter departure city"
+                    },
+                    {
+                      "condition": {
+                        "@call": "required",
+                        "args": {
+                          "value": {
                             "@path": "/trip/to"
                           }
                         }
                       },
-                      "message": "Where to?"
+                      "message": "Enter destination"
                     }
                   ]
                 },
                 {
                   "id": "go_label",
                   "component": "Text",
-                  "text": "Find flights"
+                  "text": "Search flights"
                 }
               ]
             }
@@ -680,7 +691,7 @@
         }
       },
       {
-        "t": 3950.0764000000054,
+        "t": 4814.05339999999,
         "ev": {
           "type": "a2ui",
           "msg": {
@@ -691,7 +702,7 @@
               "value": {
                 "from": "Bremen",
                 "to": "",
-                "day": "2026-11-26"
+                "date": "2026-11-26"
               }
             }
           },
@@ -699,30 +710,30 @@
         }
       },
       {
-        "t": 3954.5819000000047,
+        "t": 4814.225200000001,
         "ev": {
           "type": "caption",
-          "text": "Flight search for tomorrow, just add a destination"
+          "text": "Flight form for tomorrow, destination needed"
         }
       },
       {
-        "t": 3954.6163000000015,
+        "t": 4814.239999999991,
         "ev": {
           "type": "usage",
           "model": "claude-sonnet-5-5",
           "input_tokens": 235,
-          "output_tokens": 689,
+          "output_tokens": 735,
           "cache_read_tokens": 6043,
           "cache_write_tokens": 0,
-          "first_ui_ms": 1021,
-          "compose_ms": 3953,
+          "first_ui_ms": 1586,
+          "compose_ms": 4813,
           "skipped_lines": 0,
           "repaired_lines": 0,
           "thinking": "between-tools"
         }
       },
       {
-        "t": 3954.647799999999,
+        "t": 4814.257400000002,
         "ev": {
           "type": "done"
         }
@@ -739,34 +750,19 @@
     },
     "events": [
       {
-        "t": 154.98859999999695,
+        "t": 177.1545000000042,
         "ev": {
           "type": "route",
           "kind": "new",
           "decision": "compose",
-          "ms": 150,
+          "ms": 172,
           "engine": "jev-1.14.0",
-          "reason": "not an edit (new 0.97)",
+          "reason": "not an edit (new 0.98)",
           "patches": 0
         }
       },
       {
-        "t": 861.4218000000037,
-        "ev": {
-          "type": "a2ui",
-          "msg": {
-            "version": "1.0",
-            "updateDataModel": {
-              "surfaceId": "s1",
-              "path": "/trip/to",
-              "value": "New York"
-            }
-          },
-          "origin": "llm"
-        }
-      },
-      {
-        "t": 1128.373099999997,
+        "t": 1039.8041999999987,
         "ev": {
           "type": "a2ui",
           "msg": {
@@ -780,7 +776,7 @@
         }
       },
       {
-        "t": 1658.902399999999,
+        "t": 1837.1459000000032,
         "ev": {
           "type": "a2ui",
           "msg": {
@@ -816,7 +812,7 @@
         }
       },
       {
-        "t": 2866.2339999999967,
+        "t": 2782.4772000000085,
         "ev": {
           "type": "a2ui",
           "msg": {
@@ -843,10 +839,10 @@
                 {
                   "id": "day",
                   "component": "DateTimeInput",
-                  "label": "Day",
+                  "label": "Date",
                   "enableDate": true,
                   "value": {
-                    "@path": "/trip/day"
+                    "@path": "/trip/date"
                   }
                 },
                 {
@@ -864,7 +860,7 @@
         }
       },
       {
-        "t": 3717.020900000003,
+        "t": 3669.558400000009,
         "ev": {
           "type": "a2ui",
           "msg": {
@@ -914,7 +910,7 @@
         }
       },
       {
-        "t": 4280.645100000002,
+        "t": 3954.0674,
         "ev": {
           "type": "a2ui",
           "msg": {
@@ -925,7 +921,7 @@
               "value": {
                 "from": "Bremen",
                 "to": "New York",
-                "day": "2026-11-26"
+                "date": "2026-11-26"
               }
             }
           },
@@ -933,30 +929,30 @@
         }
       },
       {
-        "t": 4280.7935,
+        "t": 4100.7618000000075,
         "ev": {
           "type": "caption",
           "text": "Flight options from Bremen to New York tomorrow"
         }
       },
       {
-        "t": 4280.8079,
+        "t": 4100.786600000007,
         "ev": {
           "type": "usage",
           "model": "claude-sonnet-5-5",
-          "input_tokens": 413,
-          "output_tokens": 790,
+          "input_tokens": 412,
+          "output_tokens": 736,
           "cache_read_tokens": 6043,
           "cache_write_tokens": 0,
-          "first_ui_ms": 710,
-          "compose_ms": 4127,
+          "first_ui_ms": 864,
+          "compose_ms": 3927,
           "skipped_lines": 0,
           "repaired_lines": 0,
           "thinking": "between-tools"
         }
       },
       {
-        "t": 4500.898500000003,
+        "t": 4568.545400000003,
         "ev": {
           "type": "a2ui",
           "msg": {
@@ -967,34 +963,37 @@
               "value": [
                 {
                   "id": "r1",
+                  "carrier": "Lufthansa",
+                  "route": "BRE → NYC · 1 stop",
+                  "price": "from 605 €",
+                  "tags": [
+                    "flight",
+                    "economy",
+                    "Nov 26 fare"
+                  ],
+                  "source": "https://www.lufthansa.com/xx/en/flights/flight-bremen-new+york"
+                },
+                {
+                  "id": "r2",
                   "carrier": "Air France",
                   "route": "BRE → JFK · 1 stop",
-                  "price": "€460",
+                  "price": "460 €",
                   "tags": [
+                    "flight",
                     "round trip",
                     "Nov 26 outbound"
                   ],
                   "source": "https://www.skyscanner.de/routen/bre/nyca/bremen-nach-new-york-city.html"
                 },
                 {
-                  "id": "r2",
-                  "carrier": "Lufthansa",
-                  "route": "BRE → NYC · connecting",
-                  "price": "from €605",
-                  "tags": [
-                    "Nov 26 fare",
-                    "one stop"
-                  ],
-                  "source": "https://www.lufthansa.com/xx/en/flights/flight-bremen-new+york"
-                },
-                {
                   "id": "r3",
                   "carrier": "KLM",
-                  "route": "BRE → JFK · connecting",
+                  "route": "BRE → JFK · 1 stop",
                   "price": "from EUR590",
                   "tags": [
+                    "flight",
                     "round trip",
-                    "Nov 2026 fares"
+                    "Nov fares"
                   ],
                   "source": "https://www.klm.de/en-de/flights-from-bremen-to-new-york"
                 }
@@ -1005,21 +1004,21 @@
         }
       },
       {
-        "t": 4501.122499999998,
+        "t": 4568.680099999998,
         "ev": {
           "type": "fetch",
           "source": "search",
           "query": "flights from Bremen to New York on Thursday 26 November 2026",
           "ok": true,
           "records": 3,
-          "ms": 2479,
+          "ms": 2637,
           "searches": 1,
           "input_tokens": 15487,
-          "output_tokens": 383
+          "output_tokens": 433
         }
       },
       {
-        "t": 4501.203699999998,
+        "t": 4568.702600000004,
         "ev": {
           "type": "done"
         }
@@ -1027,7 +1026,7 @@
     ]
   },
   {
-    "display": "pick_flight · r1, Air France, BRE → JFK · 1 stop, €460",
+    "display": "pick_flight · r1, Lufthansa, BRE → NYC · 1 stop, from 605 €",
     "via": "tap",
     "mode": "a2ui",
     "input": {
@@ -1036,18 +1035,18 @@
         "name": "pick_flight",
         "surfaceId": "s2",
         "sourceComponentId": "flight",
-        "timestamp": "2026-11-24T02:49:58.411Z",
+        "timestamp": "2026-11-24T03:08:32.657Z",
         "context": {
           "id": "r1",
-          "carrier": "Air France",
-          "route": "BRE → JFK · 1 stop",
-          "price": "€460"
+          "carrier": "Lufthansa",
+          "route": "BRE → NYC · 1 stop",
+          "price": "from 605 €"
         }
       }
     },
     "events": [
       {
-        "t": 1017.2857999999978,
+        "t": 1218.4511000000057,
         "ev": {
           "type": "a2ui",
           "msg": {
@@ -1061,7 +1060,7 @@
         }
       },
       {
-        "t": 1738.5822999999946,
+        "t": 1683.1425000000017,
         "ev": {
           "type": "a2ui",
           "msg": {
@@ -1079,7 +1078,7 @@
                   "component": "Column",
                   "children": [
                     "title",
-                    "summary",
+                    "flightinfo",
                     "seats",
                     "go"
                   ]
@@ -1088,12 +1087,6 @@
                   "id": "title",
                   "component": "Text",
                   "text": "## Pick your seat"
-                },
-                {
-                  "id": "summary",
-                  "component": "Text",
-                  "text": "Air France · BRE → JFK · 1 stop · €460",
-                  "variant": "caption"
                 }
               ]
             }
@@ -1102,7 +1095,7 @@
         }
       },
       {
-        "t": 3355.885000000002,
+        "t": 2763.3963000000076,
         "ev": {
           "type": "a2ui",
           "msg": {
@@ -1111,31 +1104,47 @@
               "surfaceId": "s3",
               "components": [
                 {
+                  "id": "flightinfo",
+                  "component": "Text",
+                  "text": "Lufthansa · BRE → NYC · 1 stop · from 605 € · Thu 26 Nov",
+                  "variant": "caption"
+                },
+                {
                   "id": "seats",
                   "component": "SeatMap",
-                  "rows": 28,
+                  "rows": 24,
                   "layout": "ABC DEF",
                   "taken": [
                     "1A",
                     "1B",
                     "2C",
                     "3D",
-                    "4E",
-                    "5A",
-                    "6F",
+                    "5E",
+                    "7A",
                     "7B",
-                    "8C",
-                    "9D",
-                    "10A",
-                    "10B",
-                    "12E",
-                    "14F",
-                    "15C"
+                    "9F",
+                    "12C",
+                    "14D"
                   ],
                   "value": {
                     "@path": "/seat/choice"
                   }
-                },
+                }
+              ]
+            }
+          },
+          "origin": "llm"
+        }
+      },
+      {
+        "t": 3812.3169000000053,
+        "ev": {
+          "type": "a2ui",
+          "msg": {
+            "version": "1.0",
+            "updateComponents": {
+              "surfaceId": "s3",
+              "components": [
                 {
                   "id": "go",
                   "component": "Button",
@@ -1145,9 +1154,10 @@
                     "event": {
                       "name": "confirm_flight",
                       "context": {
-                        "carrier": "Air France",
-                        "route": "BRE → JFK · 1 stop",
-                        "price": "€460",
+                        "carrier": "Lufthansa",
+                        "route": "BRE → NYC · 1 stop",
+                        "price": "from 605 €",
+                        "date": "2026-11-26",
                         "seat": {
                           "@path": "/seat/choice"
                         }
@@ -1180,7 +1190,7 @@
         }
       },
       {
-        "t": 4026.100599999998,
+        "t": 4031.6512999999977,
         "ev": {
           "type": "a2ui",
           "msg": {
@@ -1189,7 +1199,7 @@
               "surfaceId": "s3",
               "path": "/seat",
               "value": {
-                "choice": "12C"
+                "choice": "12A"
               }
             }
           },
@@ -1197,30 +1207,30 @@
         }
       },
       {
-        "t": 4026.2557000000015,
+        "t": 4238.390100000004,
         "ev": {
           "type": "caption",
-          "text": "Seat selection for your Air France flight to New York"
+          "text": "Seat selection for the Lufthansa flight to New York"
         }
       },
       {
-        "t": 4026.2693999999974,
+        "t": 4238.410799999998,
         "ev": {
           "type": "usage",
           "model": "claude-sonnet-5-5",
-          "input_tokens": 793,
-          "output_tokens": 633,
+          "input_tokens": 809,
+          "output_tokens": 701,
           "cache_read_tokens": 6043,
           "cache_write_tokens": 0,
-          "first_ui_ms": 1012,
-          "compose_ms": 4022,
+          "first_ui_ms": 1214,
+          "compose_ms": 4237,
           "skipped_lines": 0,
           "repaired_lines": 0,
           "thinking": "between-tools"
         }
       },
       {
-        "t": 4026.282100000004,
+        "t": 4238.431400000001,
         "ev": {
           "type": "done"
         }
