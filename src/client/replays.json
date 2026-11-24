@@ -531,21 +531,21 @@
     },
     "events": [
       {
-        "t": 1388.258199999982,
+        "t": 1025.5543000000034,
         "ev": {
           "type": "a2ui",
           "msg": {
             "version": "1.0",
             "createSurface": {
               "surfaceId": "s1",
-              "catalogId": "http://localhost:5182/catalog/brick-box/v1"
+              "catalogId": "http://localhost:5199/catalog/brick-box/v1"
             }
           },
           "origin": "llm"
         }
       },
       {
-        "t": 1632.2943000000087,
+        "t": 1434.1709000000046,
         "ev": {
           "type": "a2ui",
           "msg": {
@@ -581,7 +581,7 @@
         }
       },
       {
-        "t": 2457.6129000000074,
+        "t": 2270.1483000000007,
         "ev": {
           "type": "a2ui",
           "msg": {
@@ -593,6 +593,7 @@
                   "id": "from",
                   "component": "TextField",
                   "label": "From",
+                  "placeholder": "Departure city",
                   "variant": "shortText",
                   "value": {
                     "@path": "/trip/from"
@@ -614,7 +615,7 @@
                   "label": "Day",
                   "enableDate": true,
                   "value": {
-                    "@path": "/trip/date"
+                    "@path": "/trip/day"
                   }
                 }
               ]
@@ -624,7 +625,7 @@
         }
       },
       {
-        "t": 3381.5503000000026,
+        "t": 3270.2018000000025,
         "ev": {
           "type": "a2ui",
           "msg": {
@@ -647,8 +648,8 @@
                         "to": {
                           "@path": "/trip/to"
                         },
-                        "date": {
-                          "@path": "/trip/date"
+                        "day": {
+                          "@path": "/trip/day"
                         }
                       }
                     }
@@ -663,7 +664,7 @@
                           }
                         }
                       },
-                      "message": "Enter a destination"
+                      "message": "Where to?"
                     }
                   ]
                 },
@@ -679,7 +680,7 @@
         }
       },
       {
-        "t": 3882.3046999999788,
+        "t": 3950.0764000000054,
         "ev": {
           "type": "a2ui",
           "msg": {
@@ -690,7 +691,7 @@
               "value": {
                 "from": "Bremen",
                 "to": "",
-                "date": "2026-11-26"
+                "day": "2026-11-26"
               }
             }
           },
@@ -698,30 +699,30 @@
         }
       },
       {
-        "t": 3886.7728999999817,
+        "t": 3954.5819000000047,
         "ev": {
           "type": "caption",
-          "text": "Flight form for tomorrow; destination needed"
+          "text": "Flight search for tomorrow, just add a destination"
         }
       },
       {
-        "t": 3888.8004000000074,
+        "t": 3954.6163000000015,
         "ev": {
           "type": "usage",
           "model": "claude-sonnet-5-5",
           "input_tokens": 235,
-          "output_tokens": 679,
-          "cache_read_tokens": 6038,
+          "output_tokens": 689,
+          "cache_read_tokens": 6043,
           "cache_write_tokens": 0,
-          "first_ui_ms": 1377,
-          "compose_ms": 3878,
+          "first_ui_ms": 1021,
+          "compose_ms": 3953,
           "skipped_lines": 0,
           "repaired_lines": 0,
           "thinking": "between-tools"
         }
       },
       {
-        "t": 3888.831599999976,
+        "t": 3954.647799999999,
         "ev": {
           "type": "done"
         }
@@ -738,33 +739,48 @@
     },
     "events": [
       {
-        "t": 197.15129999996861,
+        "t": 154.98859999999695,
         "ev": {
           "type": "route",
           "kind": "new",
           "decision": "compose",
-          "ms": 186,
+          "ms": 150,
           "engine": "jev-1.14.0",
-          "reason": "not an edit (new 0.96)",
+          "reason": "not an edit (new 0.97)",
           "patches": 0
         }
       },
       {
-        "t": 1554.9945999999763,
+        "t": 861.4218000000037,
         "ev": {
           "type": "a2ui",
           "msg": {
             "version": "1.0",
-            "createSurface": {
-              "surfaceId": "s2",
-              "catalogId": "http://localhost:5182/catalog/brick-box/v1"
+            "updateDataModel": {
+              "surfaceId": "s1",
+              "path": "/trip/to",
+              "value": "New York"
             }
           },
           "origin": "llm"
         }
       },
       {
-        "t": 2249.220900000015,
+        "t": 1128.373099999997,
+        "ev": {
+          "type": "a2ui",
+          "msg": {
+            "version": "1.0",
+            "createSurface": {
+              "surfaceId": "s2",
+              "catalogId": "http://localhost:5199/catalog/brick-box/v1"
+            }
+          },
+          "origin": "llm"
+        }
+      },
+      {
+        "t": 1658.902399999999,
         "ev": {
           "type": "a2ui",
           "msg": {
@@ -800,78 +816,7 @@
         }
       },
       {
-        "t": 2273.287699999986,
-        "ev": {
-          "type": "a2ui",
-          "msg": {
-            "version": "1.0",
-            "updateDataModel": {
-              "surfaceId": "s2",
-              "path": "/flights",
-              "value": [
-                {
-                  "id": "f1",
-                  "carrier": "Demo Air",
-                  "from": "Bremen",
-                  "to": "New York",
-                  "depart": "2026-11-26T07:15",
-                  "arrive": "2026-11-26T15:45",
-                  "stops": 0,
-                  "price_eur": 164,
-                  "demo": true
-                },
-                {
-                  "id": "f2",
-                  "carrier": "Hanse Demo",
-                  "from": "Bremen",
-                  "to": "New York",
-                  "depart": "2026-11-26T12:30",
-                  "arrive": "2026-11-26T21:20",
-                  "stops": 0,
-                  "price_eur": 607,
-                  "demo": true
-                },
-                {
-                  "id": "f3",
-                  "carrier": "Blue Demo",
-                  "from": "Bremen",
-                  "to": "New York",
-                  "depart": "2026-11-26T16:15",
-                  "arrive": "2026-11-27T01:05",
-                  "stops": 0,
-                  "price_eur": 428,
-                  "demo": true
-                },
-                {
-                  "id": "f4",
-                  "carrier": "Northwind Demo",
-                  "from": "Bremen",
-                  "to": "New York",
-                  "depart": "2026-11-26T19:50",
-                  "arrive": "2026-11-27T05:45",
-                  "stops": 1,
-                  "price_eur": 95,
-                  "demo": true
-                }
-              ]
-            }
-          },
-          "origin": "data"
-        }
-      },
-      {
-        "t": 2273.5518000000156,
-        "ev": {
-          "type": "fetch",
-          "source": "flights",
-          "query": "Bremen → New York 2026-11-26",
-          "ok": true,
-          "records": 4,
-          "ms": 0
-        }
-      },
-      {
-        "t": 3068.1570000000065,
+        "t": 2866.2339999999967,
         "ev": {
           "type": "a2ui",
           "msg": {
@@ -901,7 +846,7 @@
                   "label": "Day",
                   "enableDate": true,
                   "value": {
-                    "@path": "/trip/date"
+                    "@path": "/trip/day"
                   }
                 },
                 {
@@ -919,7 +864,7 @@
         }
       },
       {
-        "t": 4235.5865999999805,
+        "t": 3717.020900000003,
         "ev": {
           "type": "a2ui",
           "msg": {
@@ -934,22 +879,13 @@
                     "@path": "carrier"
                   },
                   "subtitle": {
-                    "@call": "formatDate",
-                    "args": {
-                      "value": {
-                        "@path": "depart"
-                      },
-                      "format": "EEE d MMM, HH:mm"
-                    }
+                    "@path": "route"
+                  },
+                  "tags": {
+                    "@path": "tags"
                   },
                   "price": {
-                    "@call": "formatCurrency",
-                    "args": {
-                      "value": {
-                        "@path": "price_eur"
-                      },
-                      "currency": "EUR"
-                    }
+                    "@path": "price"
                   },
                   "action": {
                     "event": {
@@ -961,14 +897,11 @@
                         "carrier": {
                           "@path": "carrier"
                         },
-                        "depart": {
-                          "@path": "depart"
+                        "route": {
+                          "@path": "route"
                         },
-                        "arrive": {
-                          "@path": "arrive"
-                        },
-                        "price_eur": {
-                          "@path": "price_eur"
+                        "price": {
+                          "@path": "price"
                         }
                       }
                     }
@@ -981,7 +914,7 @@
         }
       },
       {
-        "t": 4706.21100000001,
+        "t": 4280.645100000002,
         "ev": {
           "type": "a2ui",
           "msg": {
@@ -992,7 +925,7 @@
               "value": {
                 "from": "Bremen",
                 "to": "New York",
-                "date": "2026-11-26"
+                "day": "2026-11-26"
               }
             }
           },
@@ -1000,30 +933,93 @@
         }
       },
       {
-        "t": 4711.152499999967,
+        "t": 4280.7935,
         "ev": {
           "type": "caption",
-          "text": "Bremen to New York flight options for tomorrow"
+          "text": "Flight options from Bremen to New York tomorrow"
         }
       },
       {
-        "t": 4713.16399999999,
+        "t": 4280.8079,
         "ev": {
           "type": "usage",
           "model": "claude-sonnet-5-5",
-          "input_tokens": 412,
-          "output_tokens": 795,
-          "cache_read_tokens": 6038,
+          "input_tokens": 413,
+          "output_tokens": 790,
+          "cache_read_tokens": 6043,
           "cache_write_tokens": 0,
-          "first_ui_ms": 1360,
-          "compose_ms": 4517,
+          "first_ui_ms": 710,
+          "compose_ms": 4127,
           "skipped_lines": 0,
           "repaired_lines": 0,
           "thinking": "between-tools"
         }
       },
       {
-        "t": 4713.20749999996,
+        "t": 4500.898500000003,
+        "ev": {
+          "type": "a2ui",
+          "msg": {
+            "version": "1.0",
+            "updateDataModel": {
+              "surfaceId": "s2",
+              "path": "/flights",
+              "value": [
+                {
+                  "id": "r1",
+                  "carrier": "Air France",
+                  "route": "BRE → JFK · 1 stop",
+                  "price": "€460",
+                  "tags": [
+                    "round trip",
+                    "Nov 26 outbound"
+                  ],
+                  "source": "https://www.skyscanner.de/routen/bre/nyca/bremen-nach-new-york-city.html"
+                },
+                {
+                  "id": "r2",
+                  "carrier": "Lufthansa",
+                  "route": "BRE → NYC · connecting",
+                  "price": "from €605",
+                  "tags": [
+                    "Nov 26 fare",
+                    "one stop"
+                  ],
+                  "source": "https://www.lufthansa.com/xx/en/flights/flight-bremen-new+york"
+                },
+                {
+                  "id": "r3",
+                  "carrier": "KLM",
+                  "route": "BRE → JFK · connecting",
+                  "price": "from EUR590",
+                  "tags": [
+                    "round trip",
+                    "Nov 2026 fares"
+                  ],
+                  "source": "https://www.klm.de/en-de/flights-from-bremen-to-new-york"
+                }
+              ]
+            }
+          },
+          "origin": "data"
+        }
+      },
+      {
+        "t": 4501.122499999998,
+        "ev": {
+          "type": "fetch",
+          "source": "search",
+          "query": "flights from Bremen to New York on Thursday 26 November 2026",
+          "ok": true,
+          "records": 3,
+          "ms": 2479,
+          "searches": 1,
+          "input_tokens": 15487,
+          "output_tokens": 383
+        }
+      },
+      {
+        "t": 4501.203699999998,
         "ev": {
           "type": "done"
         }
@@ -1031,7 +1027,7 @@
     ]
   },
   {
-    "display": "pick_flight · f1, Demo Air, 2026-11-26T07:15, 2026-11-26T15:45, 164",
+    "display": "pick_flight · r1, Air France, BRE → JFK · 1 stop, €460",
     "via": "tap",
     "mode": "a2ui",
     "input": {
@@ -1040,33 +1036,32 @@
         "name": "pick_flight",
         "surfaceId": "s2",
         "sourceComponentId": "flight",
-        "timestamp": "2026-11-23T22:41:02.376Z",
+        "timestamp": "2026-11-24T02:49:58.411Z",
         "context": {
-          "id": "f1",
-          "carrier": "Demo Air",
-          "depart": "2026-11-26T07:15",
-          "arrive": "2026-11-26T15:45",
-          "price_eur": 164
+          "id": "r1",
+          "carrier": "Air France",
+          "route": "BRE → JFK · 1 stop",
+          "price": "€460"
         }
       }
     },
     "events": [
       {
-        "t": 1316.8916000000318,
+        "t": 1017.2857999999978,
         "ev": {
           "type": "a2ui",
           "msg": {
             "version": "1.0",
             "createSurface": {
               "surfaceId": "s3",
-              "catalogId": "http://localhost:5182/catalog/brick-box/v1"
+              "catalogId": "http://localhost:5199/catalog/brick-box/v1"
             }
           },
           "origin": "llm"
         }
       },
       {
-        "t": 1735.422900000005,
+        "t": 1738.5822999999946,
         "ev": {
           "type": "a2ui",
           "msg": {
@@ -1084,9 +1079,8 @@
                   "component": "Column",
                   "children": [
                     "title",
-                    "sum",
+                    "summary",
                     "seats",
-                    "seatmap",
                     "go"
                   ]
                 },
@@ -1094,6 +1088,12 @@
                   "id": "title",
                   "component": "Text",
                   "text": "## Pick your seat"
+                },
+                {
+                  "id": "summary",
+                  "component": "Text",
+                  "text": "Air France · BRE → JFK · 1 stop · €460",
+                  "variant": "caption"
                 }
               ]
             }
@@ -1102,7 +1102,7 @@
         }
       },
       {
-        "t": 2899.7119999999995,
+        "t": 3355.885000000002,
         "ev": {
           "type": "a2ui",
           "msg": {
@@ -1111,20 +1111,9 @@
               "surfaceId": "s3",
               "components": [
                 {
-                  "id": "sum",
-                  "component": "Text",
-                  "text": "Demo Air, Bremen to New York, Thu 26 Nov, 07:15 to 15:45, €164"
-                },
-                {
                   "id": "seats",
-                  "component": "Text",
-                  "variant": "caption",
-                  "text": "Choose one seat"
-                },
-                {
-                  "id": "seatmap",
                   "component": "SeatMap",
-                  "rows": 24,
+                  "rows": 28,
                   "layout": "ABC DEF",
                   "taken": [
                     "1A",
@@ -1132,36 +1121,21 @@
                     "2C",
                     "3D",
                     "4E",
-                    "5F",
-                    "6A",
+                    "5A",
+                    "6F",
                     "7B",
                     "8C",
                     "9D",
-                    "10E",
-                    "11F",
-                    "12A",
-                    "12B",
-                    "14C"
+                    "10A",
+                    "10B",
+                    "12E",
+                    "14F",
+                    "15C"
                   ],
                   "value": {
-                    "@path": "/seat/pick"
+                    "@path": "/seat/choice"
                   }
-                }
-              ]
-            }
-          },
-          "origin": "llm"
-        }
-      },
-      {
-        "t": 3967.2764000000316,
-        "ev": {
-          "type": "a2ui",
-          "msg": {
-            "version": "1.0",
-            "updateComponents": {
-              "surfaceId": "s3",
-              "components": [
+                },
                 {
                   "id": "go",
                   "component": "Button",
@@ -1169,16 +1143,14 @@
                   "child": "go_label",
                   "action": {
                     "event": {
-                      "name": "confirm_seat",
+                      "name": "confirm_flight",
                       "context": {
+                        "carrier": "Air France",
+                        "route": "BRE → JFK · 1 stop",
+                        "price": "€460",
                         "seat": {
-                          "@path": "/seat/pick"
-                        },
-                        "flight_id": "f1",
-                        "carrier": "Demo Air",
-                        "depart": "2026-11-26T07:15",
-                        "arrive": "2026-11-26T15:45",
-                        "price_eur": 164
+                          "@path": "/seat/choice"
+                        }
                       }
                     }
                   },
@@ -1188,7 +1160,7 @@
                         "@call": "required",
                         "args": {
                           "value": {
-                            "@path": "/seat/pick"
+                            "@path": "/seat/choice"
                           }
                         }
                       },
@@ -1199,7 +1171,7 @@
                 {
                   "id": "go_label",
                   "component": "Text",
-                  "text": "Confirm seat"
+                  "text": "Confirm flight"
                 }
               ]
             }
@@ -1208,7 +1180,7 @@
         }
       },
       {
-        "t": 4482.100299999991,
+        "t": 4026.100599999998,
         "ev": {
           "type": "a2ui",
           "msg": {
@@ -1217,7 +1189,7 @@
               "surfaceId": "s3",
               "path": "/seat",
               "value": {
-                "pick": "12C"
+                "choice": "12C"
               }
             }
           },
@@ -1225,30 +1197,30 @@
         }
       },
       {
-        "t": 4483.260799999989,
+        "t": 4026.2557000000015,
         "ev": {
           "type": "caption",
-          "text": "Seat selection for the Demo Air flight"
+          "text": "Seat selection for your Air France flight to New York"
         }
       },
       {
-        "t": 4485.225199999986,
+        "t": 4026.2693999999974,
         "ev": {
           "type": "usage",
           "model": "claude-sonnet-5-5",
-          "input_tokens": 854,
-          "output_tokens": 749,
-          "cache_read_tokens": 6038,
+          "input_tokens": 793,
+          "output_tokens": 633,
+          "cache_read_tokens": 6043,
           "cache_write_tokens": 0,
-          "first_ui_ms": 1305,
-          "compose_ms": 4474,
+          "first_ui_ms": 1012,
+          "compose_ms": 4022,
           "skipped_lines": 0,
           "repaired_lines": 0,
           "thinking": "between-tools"
         }
       },
       {
-        "t": 4485.247700000007,
+        "t": 4026.282100000004,
         "ev": {
           "type": "done"
         }
