@@ -18,7 +18,7 @@ Contract files: `src/shared/{a2ui,catalog,protocol,pointer}.ts` and `src/client/
 The owner raised the Anthropic spend limit. The key answers again (Haiku 1.3 s, Sonnet 1.9 s). On production 787b35e both main scenarios pass 6/6 with the result-judging smoke; see NOTES → "Production main scenarios after the spend-limit raise". **Watch spend:** avoid large smoke runs; one full smoke is roughly 60–80 turns.
 
 ## Status at hand-off (updated 2026-11-24 ~00:00)
-- **Production:** https://brick-box.shahriarbijoy.workers.dev runs **787b35e** (deployed 2026-11-24 ~00:35): composer `claude-sonnet-5-5` (search, widgets and html on Haiku), live web search, the decision model with time/date/Day fixes and the silent-drop guard, replay with **shipped F1–F6**, voice-glow, the Esc wave, live widgets, the voice fragment guard, and readable API errors. Open it with `?k=<DEMO_KEY from .dev.vars>`. While the spend limit holds, live turns show "Claude API: usage limit reached — access returns 2026-12-01 00:00 UTC".
+- **Production:** https://brick-box.shahriarbijoy.workers.dev runs **787b35e** (deployed 2026-11-24 ~00:35): composer `claude-sonnet-5-5` (search, widgets and html on Haiku), live web search, the decision model with time/date/Day fixes and the silent-drop guard, replay with **shipped F1–F6**, voice-glow, the Esc wave, live widgets, the voice fragment guard, and readable API errors. Open it with `?k=<DEMO_KEY from .dev.vars>`. Live turns work again since the spend-limit raise (2026-11-24 ~01:20).
 - **Everything built is reviewed.** 422 tests pass, and `bunx tsc -b` is clean. Ledger: `.superpowers/sdd/progress.md` (every task, review, ruling and parked minor).
 - **Talk-clock main scenarios: 19/20 (95%)**; see NOTES → "Main scenarios at the talk's clock". Flight is 10/10 including the seat map. "We're six, and later" patches in about 200 ms with no LLM.
 - **Remaining (owner-dependent):** (the API key works again)
@@ -56,7 +56,7 @@ The owner raised the Anthropic spend limit. The key answers again (Haiku 1.3 s, 
 | F4 | "I need to book a flight tomorrow." |
 | F5 | "To New York, give me options." (4 demo flights) |
 | F6 | tap a flight → seat map + Confirm seat |
-- Don't tap the live buttons after F3 ("Reserve table") or F6 ("Confirm seat") while the API is down: a tap sends a real turn.
+- Tapping the live buttons after F3 ("Reserve table") or F6 ("Confirm seat") sends a real turn (spends API budget; fails if offline).
 - The recordings' dates are fixed for Wed 25 Nov ("tonight", flight on Thu 26 Nov).
 - All six F-keys are taken by the shipped set, so Shift+R saves get no key. Swap `src/client/replays.json` if rehearsal produces better turns (Shift+E exports).
 
