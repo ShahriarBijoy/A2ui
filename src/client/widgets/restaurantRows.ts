@@ -5,6 +5,7 @@
 import type { JsonObject, JsonValue } from "@shared/a2ui";
 import type { Place, RestaurantWidgetProps } from "@shared/protocol";
 import { formatPriceLevel } from "@/format";
+import { hostLabel, httpUrl } from "./sourceLink";
 
 /** What one row shows; null parts are not rendered. */
 export type PlaceRowParts = { meta: string; price: string | null; walk: string | null; host: string | null };
@@ -20,27 +21,6 @@ export function placeRowParts(p: Place): PlaceRowParts {
 
 const str = (v: JsonValue | undefined): string | undefined => (typeof v === "string" ? v : undefined);
 const num = (v: JsonValue | undefined): number | undefined => (typeof v === "number" && Number.isFinite(v) ? v : undefined);
-
-/** "https://www.example.org/x" → "example.org". */
-function hostLabel(url: string): string | null {
-  try {
-    return new URL(url).hostname.replace(/^www\./, "") || null;
-  } catch {
-    return null;
-  }
-}
-
-/** Only http(s): the URL becomes a link. */
-function httpUrl(v: JsonValue | undefined): string | undefined {
-  const s = str(v);
-  if (!s) return undefined;
-  try {
-    const u = new URL(s);
-    return u.protocol === "https:" || u.protocol === "http:" ? u.href : undefined;
-  } catch {
-    return undefined;
-  }
-}
 
 function toPlace(v: JsonValue, i: number): Place | null {
   if (v === null || typeof v !== "object" || Array.isArray(v)) return null;

@@ -2,8 +2,6 @@ import { describe, expect, test } from "bun:test";
 import {
   buildTimeline,
   chipParts,
-  dayOffset,
-  formatClock,
   formatMs,
   formatPriceLevel,
   formatSeconds,
@@ -68,15 +66,10 @@ describe("number formatting", () => {
     expect(formatTokens(12_345)).toBe("12k");
     expect(formatTokens(1_250_000)).toBe("1.3M");
   });
-  test("price level, clock, day offset", () => {
+  test("price level", () => {
     expect(formatPriceLevel(2)).toBe("€€");
     expect(formatPriceLevel(0)).toBe("€");
     expect(formatPriceLevel(9)).toBe("€€€€");
-    expect(formatClock("2026-11-24T07:40")).toBe("07:40");
-    expect(formatClock("later")).toBe("later");
-    expect(dayOffset("2026-11-24T22:10", "2026-11-25T06:05")).toBe(1);
-    expect(dayOffset("2026-11-24T07:40", "2026-11-24T10:05")).toBe(0);
-    expect(dayOffset("bad", "2026-11-24T10:05")).toBe(0);
   });
   test("tailText keeps the newest words", () => {
     expect(tailText("short", 20)).toBe("short");
@@ -176,12 +169,11 @@ describe("chipParts: live data lines", () => {
     expect(chipParts(item).find((p) => p.key === "fetch0")?.title).toBe("dinner near the venue · 1 web search");
   });
   test("one segment per data line, never a summed or longest time", () => {
-    const flights = { source: "flights" as const, query: "BRE-JFK", ok: true, records: 1, ms: 3 };
+    const flights = { source: "search" as const, query: "flights from Bremen to New York", ok: true, records: 1, ms: 3400 };
     const item = agent({}, { usage, llmCalled: true, fetches: [search, flights] });
     const t = texts(item);
     expect(t).toContain("search 6.2 s · 5 results");
-    // A demo generator is labelled by its source, not as a search.
-    expect(t).toContain("flights 3 ms · 1 result");
+    expect(t).toContain("search 3.4 s · 1 result");
     expect(t).toContain("722 tok");
   });
   test("a failed search reads 'search failed' in the failed tone, never '0 results'", () => {

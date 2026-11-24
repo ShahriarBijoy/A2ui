@@ -72,6 +72,12 @@ the keys the request lists, plus "source".
   Leave out every item whose stated opening hours or dates contradict the requested day or time
   (it closes at 17:00 for a dinner after 20:00, or it is closed on that weekday).
   Fewer items, or [], is a correct answer.
+- Trips (flights, trains, buses) are the one exception to that date rule, since results list carriers, routes and
+  fares, rarely the departures of one day. An item is one carrier or route that serves the requested trip, named
+  by a result for this origin and destination; keep it even when no result shows the requested date. A fare a
+  result lists for other dates or for a round trip may be kept only with a tag that says what it is ("round trip",
+  "Nov fares"); never present it as the fare for the requested date. No comments in values ("No fare shown for
+  that day" is wrong): say it with a tag, or leave the value null.
 - One item per real thing (a place, an event, a route, a product), never a list page or an article.
 - English, at most 80 characters per string.`;
 
@@ -91,6 +97,9 @@ const FIELD_HINTS: Record<string, string> = {
   venue: "where it takes place",
   rating: 'the rating as written in the result (e.g. "4.5/5")',
   distance: "the distance as written in the result",
+  // Trips (flights, trains, buses): route-level listings, never departures or a computed fare.
+  carrier: "the airline, rail or bus company name only, as a result states it",
+  route: 'airports or cities and stops as a result states them, e.g. "BRE → JFK · 1 stop via FRA"; "nonstop" only if a result says so',
   // Widgets mode's restaurant rows (restaurants.ts). Each is null unless a result states it.
   kind: "the cuisine or kind of place (e.g. italian, vegan, pub)",
   walk_min: "walking minutes from the person's location as a number, only if a result states it",

@@ -2,7 +2,10 @@ import { describe, expect, test } from "bun:test";
 import type { CatalogComponent, JsonValue } from "@shared/a2ui";
 import { deriveKnobs } from "@shared/knobs";
 import { setAt } from "@shared/pointer";
-import { PATCH_EXPECT, changedLeaves, checkPatchOutcome, countControl, parseTime, planPatch, timeControls } from "./smoke";
+import type { SurfaceState } from "../src/client/state";
+import { FIXTURE_CATALOG_ID } from "../src/client/a2ui/fixtures";
+import { applyMessage } from "../src/client/a2ui/processor";
+import { PATCH_EXPECT, changedLeaves, checkPatchOutcome, countControl, listedOptions, parseTime, planPatch, timeControls } from "./smoke";
 
 // The talk clock (DEV_NOW); date knobs list today..today+14 from it.
 const NOW = new Date(2026, 10, 25, 18, 45);
@@ -129,5 +132,45 @@ describe("changedLeaves", () => {
     expect(changedLeaves({ a: { b: 1, c: [1, 2] }, "x/y": 1 }, { a: { b: 1, c: [1, 3, 4] }, "x/y": 2 })).toEqual(["/a/c/1", "/a/c/2", "/x~1y"]);
     expect(changedLeaves({ a: 1 }, { a: 1 })).toEqual([]);
     expect(changedLeaves(1, 2)).toEqual(["/"]);
+  });
+});
+
+describe("listedOptions", () => {
+  /** One surface built by the real processor: a List of OptionCards over /flights, plus whatever else is given. */
+  function surface(flights: JsonValue, extra: Record<string, unknown>[] = []): SurfaceState {
+    const msgs = [
+      { version: "1.0", createSurface: { surfaceId: "s2", catalogId: FIXTURE_CATALOG_ID } },
+      {
+        version: "1.0",
+        updateComponents: {
+          surfaceId: "s2",
+          components: [
+            { id: "root", component: "Column", children: ["list", ...extra.map((c) => c.id as string)] },
+            { id: "list", component: "List", children: { path: "/flights", componentId: "card" } },
+            { id: "card", component: "OptionCard", title: { "@path": "carrier" }, action: { event: { name: "pick_flight" } } },
+            ...extra,
+          ],
+        },
+      },
+      { version: "1.0", updateDataModel: { surfaceId: "s2", path: "/flights", value: flights } },
+    ];
+    let surfaces: Record<string, SurfaceState> = {};
+    for (const m of msgs) surfaces = applyMessage(surfaces, m, { now: 1, turnId: null }).surfaces;
+    return surfaces.s2;
+  }
+
+  test("counts the cards a List draws from data, each with a title", () => {
+    expect(listedOptions(surface([{ id: "r1", carrier: "Lufthansa" }, { id: "r2", carrier: "KLM" }]))).toBe(2);
+  });
+
+  test("an empty list, a list not yet filled, or items without a title count as no options", () => {
+    expect(listedOptions(surface([]))).toBe(0);
+    expect(listedOptions(surface(null))).toBe(0);
+    expect(listedOptions(surface([{ id: "r1", carrier: null }, { id: "r2", carrier: " " }, { id: "r3", carrier: "KLM" }]))).toBe(1);
+  });
+
+  test("a literal OptionCard the composer wrote itself is not a listed option", () => {
+    const literal = { id: "lit", component: "OptionCard", title: "Invented Air", action: { event: { name: "pick_flight" } } };
+    expect(listedOptions(surface([], [literal]))).toBe(0);
   });
 });

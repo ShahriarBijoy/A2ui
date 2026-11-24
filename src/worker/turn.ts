@@ -38,8 +38,7 @@ import {
   type Prompt,
   type ToolCall,
 } from "./claude";
-import { resolveData, type DataDefaults } from "./data";
-import { generateFlights, isIsoDate } from "./data/flights";
+import { flightProps, flightQuery, flightSearch, recordsToFlights } from "./flights";
 import { COMPOSER_RETRY_NOTE, composerPrompt, composerUnreachableNote, htmlPrompt, widgetsPrompt, type PromptContext } from "./prompts";
 import { placeQuery, recordsToPlaces, restaurantProps, restaurantSearch } from "./restaurants";
 import { parseSearchArgs, SEARCH_TIMEOUT_MS, type SearchOutcome, type SearchRequest } from "./search";
@@ -409,10 +408,6 @@ function valueLabel(value: JsonValue, knob: Knob | undefined): string {
   return JSON.stringify(value);
 }
 
-function dataDefaults(ctx: PromptContext): DataDefaults {
-  return { from: ctx.city, date: ctx.tomorrow };
-}
-
 /** Why the model stopped, as a short error line, when the stop is a failure. */
 function stopProblem(stopReason: string | null, producedUi: boolean): string | null {
   if (stopReason === "refusal") return "Claude declined this request";
@@ -435,7 +430,7 @@ async function composeA2ui(req: TurnRequest, deps: TurnDeps, send: Emit, signal:
    * sent at once it would land on the old surface (and createSurface resets the new one), so it waits
    * for the next A2UI message and goes to that message's surface. `after` is its fetch event.
    */
-  let pending: { into: string; records: JsonValue; after: TurnEvent | null; ui: boolean; requeued?: boolean }[] = [];
+  let pending: { into: string; records: JsonValue; after: TurnEvent | null; requeued?: boolean }[] = [];
   /** The caption is held until the attempt ends: it is sent once, and only if a screen exists. */
   let caption: string | null = null;
   /** Components sent by the current attempt, per surface (createSurface starts a surface over). */
@@ -443,21 +438,19 @@ async function composeA2ui(req: TurnRequest, deps: TurnDeps, send: Emit, signal:
   /** Data paths the current attempt requested. */
   let intos = new Set<string>();
   /** Data already emitted: a retry that rebuilds the step gets it again on its own surface. */
-  const delivered: { into: string; records: JsonValue; ui: boolean }[] = [];
+  const delivered: { into: string; records: JsonValue }[] = [];
   /** Unreachable Lists (and their templates) whose requested data shows nowhere, and those data paths; set when an attempt ends. */
   let unshown: { ids: string[]; paths: string[] } = { ids: [], paths: [] };
   /** The last surface this turn created: a retry that builds nothing new still has attempt 1's surface. */
   let lastCreated: string | null = null;
   /** Data paths that already received records this turn: an empty answer never replaces them. */
   const filled = new Set<string>();
-  /** Demo data lines already resolved (path + query): a repeated line in a retry adds no second copy. */
-  const demoDone = new Set<string>();
   /** surfaceId + " " + absolute path → the input type bound there: the request's knobs, then this turn's components. */
   const bound = new Map<string, string>();
   const boundKey = (surfaceId: string, path: string) => `${surfaceId} ${path}`;
   if (req.surface) for (const k of req.surface.knobs) bound.set(boundKey(req.surface.id, k.path), k.component);
 
-  /** `ui: false` for live search results: they arrive seconds later and are not the first UI. */
+  /** `ui: false` for live data: it arrives seconds later and is not the first UI. */
   const emitA2ui = async (msg: A2uiMessage, origin: "llm" | "data", ui = true) => {
     if (ui) firstUi ??= Math.round(deps.now() - t0);
     await send({ type: "a2ui", msg, origin });
@@ -467,22 +460,22 @@ async function composeA2ui(req: TurnRequest, deps: TurnDeps, send: Emit, signal:
     updateDataModel: { surfaceId, path: into, value: records },
   });
   /** `after` is the data line's fetch event; a copy carried into a retry has none (it was sent once). */
-  const emitData = async (surfaceId: string, into: string, records: JsonValue, after: TurnEvent | null, ui: boolean) => {
-    await emitA2ui(dataMsg(surfaceId, into, records), "data", ui);
-    delivered.push({ into, records, ui });
+  const emitData = async (surfaceId: string, into: string, records: JsonValue, after: TurnEvent | null) => {
+    await emitA2ui(dataMsg(surfaceId, into, records), "data", false);
+    delivered.push({ into, records });
     if (hasRecords(records)) filled.add(into);
     if (after) await send(after);
   };
   const flushPending = async (surfaceId: string) => {
     const held = pending;
     pending = [];
-    for (const p of held) await emitData(surfaceId, p.into, p.records, p.after, p.ui);
+    for (const p of held) await emitData(surfaceId, p.into, p.records, p.after);
   };
   const fallbackSurface = () => createdSurface ?? lastCreated ?? req.surface?.id ?? req.nextSurfaceId;
-  /** Nothing shown and nothing about to be: held demo data is a screen once flushed, a held search result is not. */
-  const noScreen = () => firstUi === null && !pending.some((p) => p.ui);
+  /** Nothing shown yet: held search results fill a screen, they are not one. */
+  const noScreen = () => firstUi === null;
   /** Resolved data goes to this turn's new surface, waits for it while the model still writes, else the fallback. */
-  const deliver = async (into: string, records: JsonValue, after: TurnEvent, ui: boolean) => {
+  const deliver = async (into: string, records: JsonValue, after: TurnEvent) => {
     // Records already shown or waiting for this path are never replaced by an empty answer (a cap hit, a failure).
     if (!hasRecords(records) && (filled.has(into) || pending.some((p) => p.into === into && hasRecords(p.records)))) {
       warn(`empty data for ${into} not written: this turn already has records for it`);
@@ -492,10 +485,10 @@ async function composeA2ui(req: TurnRequest, deps: TurnDeps, send: Emit, signal:
     // A copy carried over from the attempt before gives way to a fresh delivery for the same path.
     pending = pending.filter((p) => !(p.requeued && p.into === into));
     if (!createdSurface && holding) {
-      pending.push({ into, records, after, ui });
+      pending.push({ into, records, after });
       return;
     }
-    await emitData(createdSurface ?? fallbackSurface(), into, records, after, ui);
+    await emitData(createdSurface ?? fallbackSurface(), into, records, after);
   };
   const track = (msg: A2uiMessage) => {
     if ("createSurface" in msg) {
@@ -616,45 +609,34 @@ async function composeA2ui(req: TurnRequest, deps: TurnDeps, send: Emit, signal:
       }
       return;
     }
+    // "search" is the only source (owner direction: no fixed or demo data); any other line is skipped.
+    if (c.source !== "search") return skip(`unknown data source "${c.source}"`, line);
     const into = c.into;
     const args = resolveArgBindings(c.args, req.surface?.data ?? null);
-    if (c.source === "search") {
-      const parsed = parseSearchArgs(args);
-      if (!parsed.ok) return skip(parsed.error, line);
-      intos.add(into);
-      // Only the first search per data path counts: a retry or a reworded repeat reuses it, whatever its query.
-      const key = `search ${into}`;
-      if (live.has(key)) return;
-      const search = deps.search;
-      const sreq = parsed.req;
-      if (live.size >= MAX_SEARCHES_PER_TURN) {
-        warn(`search not started (more than ${MAX_SEARCHES_PER_TURN} in one turn): ${sreq.query}`);
-        // [] turns the skeleton into "Nothing found" instead of shimmering until done.
-        await deliver(into, [], { type: "fetch", source: "search", query: sreq.query, ok: false, records: 0, ms: 0, error: "too many searches" }, false);
-        return;
-      }
-      // Not awaited: the search runs beside the compose stream; done waits for it (runTurn).
-      live.start(
-        key,
-        (sig) => (search ? search(sreq, sig) : Promise.resolve<SearchOutcome>({ ok: false, error: "live search is not configured" })),
-        async ({ outcome, ms }) => {
-          if (!outcome.ok) warn(`search failed (${outcome.error}): ${sreq.query}`);
-          else if (outcome.dropped > 0) warn(`search dropped ${outcome.dropped} invalid item(s): ${sreq.query}`);
-          await deliver(into, outcome.ok ? outcome.records : [], fetchEvent("search", sreq.query, outcome, ms), false);
-        },
-      );
+    const parsed = parseSearchArgs(args);
+    if (!parsed.ok) return skip(parsed.error, line);
+    intos.add(into);
+    // Only the first search per data path counts: a retry or a reworded repeat reuses it, whatever its query.
+    const key = `search ${into}`;
+    if (live.has(key)) return;
+    const search = deps.search;
+    const sreq = parsed.req;
+    if (live.size >= MAX_SEARCHES_PER_TURN) {
+      warn(`search not started (more than ${MAX_SEARCHES_PER_TURN} in one turn): ${sreq.query}`);
+      // [] turns the skeleton into "Nothing found" instead of shimmering until done.
+      await deliver(into, [], { type: "fetch", source: "search", query: sreq.query, ok: false, records: 0, ms: 0, error: "too many searches" });
       return;
     }
-    const tData = deps.now();
-    const res = resolveData({ source: c.source, args }, dataDefaults(deps.context));
-    if (!res.ok) return skip(res.error, line);
-    intos.add(into);
-    const demoKey = `${into} ${res.query}`;
-    // A retry that repeats the line: the first copy already follows the retry's surface.
-    if (demoDone.has(demoKey)) return;
-    demoDone.add(demoKey);
-    const after: TurnEvent = { type: "fetch", source: res.source, query: res.query, ok: true, records: res.records.length, ms: Math.round(deps.now() - tData) };
-    await deliver(into, res.records, after, true);
+    // Not awaited: the search runs beside the compose stream; done waits for it (runTurn).
+    live.start(
+      key,
+      (sig) => (search ? search(sreq, sig) : Promise.resolve<SearchOutcome>({ ok: false, error: "live search is not configured" })),
+      async ({ outcome, ms }) => {
+        if (!outcome.ok) warn(`search failed (${outcome.error}): ${sreq.query}`);
+        else if (outcome.dropped > 0) warn(`search dropped ${outcome.dropped} invalid item(s): ${sreq.query}`);
+        await deliver(into, outcome.ok ? outcome.records : [], fetchEvent("search", sreq.query, outcome, ms));
+      },
+    );
   };
 
   // Without thinking the composer occasionally answers a tap with a caption only (measured ~1 in 10
@@ -909,22 +891,6 @@ export const WIDGET_TOOLS: Anthropic.Tool[] = [
   },
 ];
 
-/** The widget a tool call shows at once: the flight search (demo flights). show_restaurants searches first (composeWidgets). */
-export function widgetEvent(tool: ToolCall, defaults: DataDefaults): Extract<TurnEvent, { type: "widget" }> | null {
-  const input = tool.input;
-  if (tool.name === "show_flight_search") {
-    const from = typeof input.from === "string" && input.from.trim() ? input.from.trim() : undefined;
-    const to = typeof input.to === "string" && input.to.trim() ? input.to.trim() : undefined;
-    const date = typeof input.date === "string" && isIsoDate(input.date) ? input.date : undefined;
-    const props: JsonObject = { flights: from && to ? generateFlights(from, to, date ?? defaults.date) : [] };
-    if (from) props.from = from;
-    if (to) props.to = to;
-    if (date) props.date = date;
-    return { type: "widget", name: "FlightSearchWidget" satisfies WidgetName, props };
-  }
-  return null;
-}
-
 async function composeWidgets(req: TurnRequest, deps: TurnDeps, send: Emit, signal: AbortSignal, live: LiveFetches): Promise<void> {
   const t0 = deps.now();
   const reply = await abortable(deps.llm.callTools(widgetsPrompt(req, deps.context), WIDGET_TOOLS, signal), signal);
@@ -937,17 +903,19 @@ async function composeWidgets(req: TurnRequest, deps: TurnDeps, send: Emit, sign
     firstUi ??= Math.round(deps.now() - t0);
     await send(ev);
   };
-  if (tool?.name === "show_restaurants") {
-    startRestaurantSearch(tool.input, deps, send, show, live);
-    // The widget is not streamed: it shows once the search has answered (or failed, with no places).
+  const search = tool ? widgetSearch(tool, deps.context) : null;
+  if (search?.sreq) {
+    startWidgetSearch(search.what, search.sreq, search.widget, deps, send, show, live);
+    // The widget is not streamed: it shows once the search has answered (or failed, with no rows).
     await live.settle();
     if (live.cancelled) return;
-  } else {
-    const widget = tool ? widgetEvent(tool, dataDefaults(deps.context)) : null;
-    if (widget) await show(widget);
-    else if (text) await show({ type: "text", delta: text });
+  } else if (search) {
+    // A flight search without both ends: the form as given, no search, no rows.
+    await show(search.widget([]).ev);
+  } else if (text) {
+    await show({ type: "text", delta: text });
   }
-  // compose_ms is the tool call; first_ui_ms includes the restaurant search, since the widget waits for it.
+  // compose_ms is the tool call; first_ui_ms includes the live search, since the widget waits for it.
   const usageEvent = {
     type: "usage" as const,
     ...reply.usage,
@@ -961,25 +929,61 @@ async function composeWidgets(req: TurnRequest, deps: TurnDeps, send: Emit, sign
   if (problem) await send({ type: "error", message: problem });
 }
 
+type WidgetRows = { ev: Extract<TurnEvent, { type: "widget" }>; rows: number };
+type WidgetSearch = { what: string; sreq: SearchRequest | null; widget: (records: readonly JsonObject[]) => WidgetRows };
+
+/** What a widget tool call searches for, and how its records become the widget. Null for an unknown tool. */
+export function widgetSearch(tool: ToolCall, ctx: PromptContext): WidgetSearch | null {
+  if (tool.name === "show_restaurants") {
+    const q = placeQuery(tool.input);
+    return {
+      what: "restaurant",
+      sreq: restaurantSearch(q, ctx),
+      widget: (records) => {
+        const places = recordsToPlaces(records, q.max_walk_min);
+        return { ev: { type: "widget", name: "RestaurantWidget" satisfies WidgetName, props: restaurantProps(places, q) }, rows: places.length };
+      },
+    };
+  }
+  if (tool.name === "show_flight_search") {
+    const q = flightQuery(tool.input);
+    return {
+      what: "flight",
+      sreq: flightSearch(q),
+      widget: (records) => {
+        const flights = recordsToFlights(records);
+        return { ev: { type: "widget", name: "FlightSearchWidget" satisfies WidgetName, props: flightProps(flights, q) }, rows: flights.length };
+      },
+    };
+  }
+  return null;
+}
+
 /**
- * show_restaurants: the same live search as a2ui data lines, with the same budget (LiveFetches) and
- * validation (runSearch). Then the widget (no places on failure), then its measured fetch event.
+ * A widget's rows: the same live search as a2ui data lines, with the same budget (LiveFetches) and
+ * validation (runSearch). Then the widget (no rows on failure), then its measured fetch event.
  */
-function startRestaurantSearch(input: JsonObject, deps: TurnDeps, send: Emit, show: Emit, live: LiveFetches): void {
+function startWidgetSearch(
+  what: string,
+  sreq: SearchRequest,
+  widget: WidgetSearch["widget"],
+  deps: TurnDeps,
+  send: Emit,
+  show: Emit,
+  live: LiveFetches,
+): void {
   const warn = deps.warn ?? ((m: string) => console.warn(m));
-  const q = placeQuery(input);
-  const sreq = restaurantSearch(q, deps.context);
   const search = deps.search;
   live.start(
-    "restaurants",
+    what,
     (sig) => (search ? search(sreq, sig) : Promise.resolve<SearchOutcome>({ ok: false, error: "live search is not configured" })),
     async ({ outcome, ms }) => {
-      if (!outcome.ok) warn(`restaurant search failed (${outcome.error}): ${sreq.query}`);
-      else if (outcome.dropped > 0) warn(`restaurant search dropped ${outcome.dropped} invalid item(s): ${sreq.query}`);
-      const places = outcome.ok ? recordsToPlaces(outcome.records, q.max_walk_min) : [];
-      await show({ type: "widget", name: "RestaurantWidget" satisfies WidgetName, props: restaurantProps(places, q) });
+      if (!outcome.ok) warn(`${what} search failed (${outcome.error}): ${sreq.query}`);
+      else if (outcome.dropped > 0) warn(`${what} search dropped ${outcome.dropped} invalid item(s): ${sreq.query}`);
+      const { ev, rows } = widget(outcome.ok ? outcome.records : []);
+      await show(ev);
       // records counts the rows the widget shows, so the chip and the list agree.
-      await send({ ...fetchEvent("search", sreq.query, outcome, ms), records: places.length });
+      await send({ ...fetchEvent("search", sreq.query, outcome, ms), records: rows });
     },
   );
 }

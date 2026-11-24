@@ -395,7 +395,8 @@ export function createStore(): StoreApi {
           };
           break;
         case "fetch": {
-          // A live search is a Claude call; demo sources (places, flights) are not, so they add no call.
+          // A live search is a Claude call. "search" is the only source today; the check keeps any future
+          // non-LLM source from counting as one.
           const search = ev.source === "search";
           a = {
             ...a,

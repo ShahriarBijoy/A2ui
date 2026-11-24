@@ -41,20 +41,6 @@ export function formatPriceLevel(level: number): string {
   return "€".repeat(n);
 }
 
-/** "2026-11-24T07:40" → "07:40"; anything else passes through unchanged. */
-export function formatClock(isoLocal: string): string {
-  const m = /T(\d{2}:\d{2})/.exec(isoLocal);
-  return m ? m[1] : isoLocal;
-}
-
-/** Whole days between the date parts of two ISO local date-times ("+1" on an overnight flight). */
-export function dayOffset(fromIso: string, toIso: string): number {
-  const a = Date.parse(`${fromIso.slice(0, 10)}T00:00:00Z`);
-  const b = Date.parse(`${toIso.slice(0, 10)}T00:00:00Z`);
-  if (Number.isNaN(a) || Number.isNaN(b)) return 0;
-  return Math.round((b - a) / 86_400_000);
-}
-
 /** The end of a long transcript, cut at a word boundary, so the newest words stay visible on one line. */
 export function tailText(text: string, max: number): string {
   if (text.length <= max) return text;
@@ -138,7 +124,7 @@ function finiteCount(n: number | undefined): number {
   return typeof n === "number" && Number.isFinite(n) && n > 0 ? n : 0;
 }
 
-/** "search 6.2 s · 5 results", or "search failed". The label is the source: demo generators never read as a search. */
+/** "search 6.2 s · 5 results", or "search failed". The label is the data line's source. */
 function fetchPart(f: FetchMetrics, i: number): ChipPart {
   const key = `fetch${i}`;
   if (!f.ok) {

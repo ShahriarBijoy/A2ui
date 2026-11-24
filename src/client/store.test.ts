@@ -245,12 +245,12 @@ describe("phase 2", () => {
     expect(st.wire).toEqual([]);
   });
 
-  test("a demo-source fetch is not an LLM call; missing token counts add nothing", () => {
+  test("a search fetch without token counts is still one call and adds no tokens", () => {
     const s = createStore();
     const t = s.beginTurn(utter("flights"));
-    s.applyTurnEvent(t, fetchEv({ source: "flights", input_tokens: undefined, output_tokens: undefined, searches: undefined }));
-    expect(s.getState().totals).toMatchObject({ llmCalls: 0, inputTokens: 0, outputTokens: 0 });
-    expect(agentOf(s, t)?.metrics.llmCalled).toBe(false);
+    s.applyTurnEvent(t, fetchEv({ input_tokens: undefined, output_tokens: undefined, searches: undefined }));
+    expect(s.getState().totals).toMatchObject({ llmCalls: 1, inputTokens: 0, outputTokens: 0 });
+    expect(agentOf(s, t)?.metrics.llmCalled).toBe(true);
     expect(agentOf(s, t)?.metrics.fetches).toHaveLength(1);
   });
 
