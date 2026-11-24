@@ -245,3 +245,95 @@ export const GALLERY = fixture("gallery", "All bricks", [
     },
   },
 ]);
+
+/** Visual check for the ten bricks added on 2026-11-24 (placeholder values; the Image has no url, so it hides). */
+export const NEW_BRICKS = fixture("new-bricks", "New bricks", [
+  { version: "1.0", createSurface: { surfaceId: "s8", catalogId: FIXTURE_CATALOG_ID } },
+  {
+    version: "1.0",
+    updateComponents: {
+      surfaceId: "s8",
+      components: [
+        { id: "root", component: "Card", child: "main" },
+        {
+          id: "main",
+          component: "Column",
+          children: ["n_title", "n_head", "n_photo", "n_alert", "n_table", "n_chart", "n_plan", "n_progress", "n_more", "n_pick", "n_go"],
+        },
+        { id: "n_title", component: "Text", text: "## New bricks" },
+        { id: "n_head", component: "Row", align: "center", children: ["n_icon", "n_name", "n_rating", "n_badge"] },
+        { id: "n_icon", component: "Icon", name: "coffee", size: "lg" },
+        { id: "n_name", component: "Text", text: "**Placeholder Café**" },
+        { id: "n_rating", component: "Rating", value: { "@path": "/cafe/rating" } },
+        { id: "n_badge", component: "Badge", text: "Open now", variant: "success" },
+        { id: "n_photo", component: "Image", url: { "@path": "/cafe/image" }, alt: "Photo of Placeholder Café" },
+        { id: "n_alert", component: "Alert", variant: "warning", title: "Heads up", text: "Sample notice text for the visual check." },
+      ],
+    },
+  },
+  {
+    version: "1.0",
+    updateComponents: {
+      surfaceId: "s8",
+      components: [
+        {
+          id: "n_table",
+          component: "Table",
+          columns: [
+            { label: "Plan", field: "name" },
+            { label: "Data", field: "data" },
+            { label: "Price", field: "price" },
+          ],
+          rows: [
+            { id: "a", name: "Sample Plan A", data: "10 GB", price: "€9.99" },
+            { id: "b", name: "Sample Plan B", data: "25 GB", price: null },
+            { id: "c", name: "Sample Plan C", data: "Unlimited", price: "€29.99" },
+          ],
+        },
+        {
+          id: "n_chart",
+          component: "Chart",
+          unit: "€",
+          items: [
+            { label: "Plan A", value: 9.99 },
+            { label: "Plan B", value: 14.5 },
+            { label: "Plan C", value: 29.99 },
+          ],
+        },
+        {
+          id: "n_plan",
+          component: "Timeline",
+          items: [
+            { title: "Breakfast", time: "09:00", detail: "Sample detail line" },
+            { title: "Harbour walk", time: "10:30" },
+            { title: "Lunch", time: "13:00", detail: "Another sample detail" },
+          ],
+        },
+        { id: "n_progress", component: "Progress", label: "Packed", value: 3, max: 5 },
+        {
+          id: "n_more",
+          component: "Accordion",
+          items: [
+            { title: "What is included", child: "n_more_text" },
+            { title: "Status", child: "n_more_badge" },
+          ],
+        },
+        { id: "n_more_text", component: "Text", text: "Sample text inside the first section." },
+        { id: "n_more_badge", component: "Badge", text: "Sample", variant: "neutral" },
+        {
+          id: "n_pick",
+          component: "OptionCard",
+          icon: "plane",
+          title: "Sample Air",
+          subtitle: "AAA → BBB · 1 stop",
+          tags: ["sample"],
+          price: "€123",
+          action: { event: { name: "pick_flight", context: { id: "f1" } } },
+        },
+        { id: "n_go", component: "Button", variant: "primary", icon: "check", child: "n_go_label", action: { event: { name: "confirm_sample" } } },
+        { id: "n_go_label", component: "Text", text: "Confirm" },
+      ],
+    },
+  },
+  { version: "1.0", updateDataModel: { surfaceId: "s8", path: "/cafe", value: { rating: "4.5/5", image: null } } },
+]);

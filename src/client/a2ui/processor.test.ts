@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import type { SurfaceState } from "@/state";
-import { DINNER_STEP_2, FLIGHT_SEAT_MAP, REFUSED } from "./fixtures";
+import { DINNER_STEP_2, FLIGHT_SEAT_MAP, GALLERY, NEW_BRICKS, REFUSED } from "./fixtures";
 import { applyMessage, DEFAULT_CHECK_MESSAGE } from "./processor";
 
 const CAT = "https://example.test/catalog/brick-box/v1";
@@ -393,8 +393,8 @@ describe("deleteSurface", () => {
 });
 
 describe("fixtures", () => {
-  test("dinner and seat map apply cleanly", () => {
-    for (const f of [DINNER_STEP_2, FLIGHT_SEAT_MAP]) {
+  test("dinner, seat map and the galleries apply cleanly", () => {
+    for (const f of [DINNER_STEP_2, FLIGHT_SEAT_MAP, GALLERY, NEW_BRICKS]) {
       const { results } = run(f.messages);
       expect(results.flatMap((r) => r.errors)).toEqual([]);
     }
