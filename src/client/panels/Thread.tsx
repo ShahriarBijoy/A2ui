@@ -1,4 +1,4 @@
-import { Fragment, memo, useCallback, useMemo, useRef, useState, type ReactNode, type RefCallback } from "react";
+import { Fragment, memo, useCallback, useMemo, useRef, useState, type MouseEvent, type ReactNode, type RefCallback } from "react";
 import {
   ArrowDownIcon,
   ChevronDownIcon,
@@ -10,7 +10,7 @@ import {
 } from "lucide-react";
 import type { CatalogComponent } from "@shared/a2ui";
 import { deriveKnobs } from "@shared/knobs";
-import { Surface } from "@/a2ui/Surface";
+import { Surface, SURFACE_CANVAS, SURFACE_CANVAS_ON, SURFACE_FRAME } from "@/a2ui/Surface";
 import { Button } from "@/components/ui/button";
 import { ThreadWave } from "@/fx/ThreadWave";
 import {
@@ -45,6 +45,10 @@ type Props = {
   layout?: "classic" | "stage";
   /** Earlier turns fold to one line (what was said, what was built); the newest and the interactive screen stay open. */
   foldEarlier?: boolean;
+  /** Stage: the turn the hood is pinned to (marked beside it), or null while the hood follows the newest turn. */
+  selectedTurnId?: string | null;
+  /** Stage: a click on a turn (not on a control inside its screen) shows that turn in the hood. */
+  onSelectTurn?: (turnId: string) => void;
 };
 
 /** Stage column: px-8 on each side, so the content is exactly --surface-w wide. The bottom padding keeps the newest
@@ -69,6 +73,8 @@ export function Thread({
   replaying,
   layout = "classic",
   foldEarlier = false,
+  selectedTurnId = null,
+  onSelectTurn,
 }: Props) {
   const stage = layout === "stage";
   const timeline = useMemo(() => buildTimeline(thread, surfaces), [thread, surfaces]);
@@ -113,7 +119,7 @@ export function Thread({
   }, [open, timeline]);
 
   const renderEntry = (e: TimelineEntry): ReactNode => {
-    if (e.kind === "user") return <UserLine key={e.item.id} item={e.item} />;
+    if (e.kind === "user") return <UserLine key={e.item.id} item={e.item} onSelect={onSelectTurn} />;
     if (e.kind === "surface") {
       return (
         <div key={`surface-${e.surfaceId}`} className="flex flex-col items-start gap-2">
@@ -133,6 +139,8 @@ export function Thread({
         surfaceOwned={item.surfaceId ? owners.get(item.surfaceId) === item.id : false}
         interactive={item.surfaceId !== undefined && item.surfaceId === interactiveId}
         awaitingRoute={awaitingRoute}
+        selected={selectedTurnId === item.turnId}
+        onSelect={onSelectTurn}
       />
     );
   };
@@ -153,6 +161,8 @@ export function Thread({
           bricks={surfaceId ? countBricks(surfaces[surfaceId]) : 0}
           expanded={isOpen}
           onToggle={toggleTurn}
+          selected={selectedTurnId === id}
+          onSelect={onSelectTurn}
         />
         {isOpen && renderEntry(e)}
       </Fragment>
@@ -259,11 +269,25 @@ const VIA = {
   tap: { icon: MousePointerClickIcon, label: "tap" },
 } as const;
 
-const UserLine = memo(function UserLine({ item }: { item: UserItem }) {
+/** A click anywhere on a turn except on a control inside its live screen (tapping a chip must not move the hood). */
+function selectHandler(turnId: string, onSelect: ((turnId: string) => void) | undefined) {
+  if (!onSelect) return undefined;
+  return (ev: MouseEvent) => {
+    if (ev.target instanceof Element && ev.target.closest("section[data-surface-id]")) return;
+    onSelect(turnId);
+  };
+}
+
+/** Beside the turn the hood is pinned to; absolute, so marking a turn never moves the thread. */
+function SelectedMark() {
+  return <span aria-hidden className="pointer-events-none absolute top-0 bottom-0 -left-6 w-[3px] rounded-full bg-highlight" />;
+}
+
+const UserLine = memo(function UserLine({ item, onSelect }: { item: UserItem; onSelect?: (turnId: string) => void }) {
   const via = VIA[item.via];
   const Icon = via.icon;
   return (
-    <div className="bb-appear flex max-w-[85%] flex-col items-end gap-1.5 self-end">
+    <div onClickCapture={selectHandler(item.turnId, onSelect)} className="bb-appear flex max-w-[85%] flex-col items-end gap-1.5 self-end">
       <span className="flex items-center gap-1.5 font-mono text-[0.6875rem] uppercase tracking-[0.14em] text-muted-foreground">
         <Icon aria-hidden className="size-3" />
         You · {via.label}
@@ -313,8 +337,10 @@ const FoldedTurn = memo(function FoldedTurn(props: {
   bricks: number;
   expanded: boolean;
   onToggle: (turnId: string, row: HTMLElement) => void;
+  selected?: boolean;
+  onSelect?: (turnId: string) => void;
 }) {
-  const { turnId, user, agent, bricks, expanded, onToggle } = props;
+  const { turnId, user, agent, bricks, expanded, onToggle, selected = false, onSelect } = props;
   const via = VIA[user?.via ?? agent?.retry.via ?? "text"];
   const Icon = via.icon;
   const said = user?.text ?? agent?.retry.display ?? "";
@@ -328,9 +354,12 @@ const FoldedTurn = memo(function FoldedTurn(props: {
       type="button"
       aria-expanded={expanded}
       aria-label={`${expanded ? "Fold" : "Show"} earlier turn: ${said}`}
-      onClick={(ev) => onToggle(turnId, ev.currentTarget)}
+      onClick={(ev) => {
+        onToggle(turnId, ev.currentTarget);
+        onSelect?.(turnId);
+      }}
       className={cn(
-        "bb-appear grid w-full grid-cols-[auto_minmax(0,1.1fr)_auto_minmax(0,1fr)_auto_auto] items-center gap-2.5 rounded-xl border border-dashed border-input/80 px-3.5 py-2.5",
+        "bb-appear relative grid w-full grid-cols-[auto_minmax(0,1.1fr)_auto_minmax(0,1fr)_auto_auto] items-center gap-2.5 rounded-xl border border-dashed border-input/80 px-3.5 py-2.5",
         "text-left text-[0.8125rem] text-muted-foreground outline-none transition-colors duration-150 motion-reduce:transition-none",
         "hover:bg-card/70 hover:text-foreground focus-visible:ring-3 focus-visible:ring-ring/50 [&_svg.lucide]:[stroke-width:1.75]",
         expanded && "border-solid bg-card/60",
@@ -352,6 +381,7 @@ const FoldedTurn = memo(function FoldedTurn(props: {
         aria-hidden
         className={cn("size-4 shrink-0 transition-transform duration-150 motion-reduce:transition-none", expanded && "rotate-180")}
       />
+      {selected && <SelectedMark />}
     </button>
   );
 });
@@ -362,12 +392,20 @@ type AgentProps = {
   surfaceOwned: boolean;
   interactive: boolean;
   awaitingRoute: boolean;
+  selected?: boolean;
+  onSelect?: (turnId: string) => void;
 };
 
 const AgentEntry = memo(function AgentEntry(props: AgentProps) {
-  const { item } = props;
+  const { item, selected = false, onSelect } = props;
   return (
-    <article className="flex flex-col items-start gap-2" data-status={item.status} aria-busy={!isTurnFinished(item)}>
+    <article
+      onClickCapture={selectHandler(item.turnId, onSelect)}
+      className="relative flex flex-col items-start gap-2"
+      data-status={item.status}
+      aria-busy={!isTurnFinished(item)}
+    >
+      {selected && <SelectedMark />}
       <AgentBody {...props} />
       {item.status === "error" && <ErrorLine item={item} />}
       {item.mode === "a2ui" ? (
@@ -434,13 +472,16 @@ function InPlaceLine({ surfaceId, pending = false }: { surfaceId?: string; pendi
 
 /** Same frame as a surface before its root arrives (U2): the turn shows up at once, before any network. */
 function SurfaceSkeleton() {
-  // Mirrors Surface's pre-root frame (a2ui/Surface.tsx) class for class, so the swap is invisible.
+  // Mirrors Surface's pre-root frame (a2ui/Surface.tsx) class for class, so the swap is invisible. It stands where the
+  // newest screen will be, so it sits on the newest screen's canvas.
   return (
-    <div className="relative w-full max-w-(--surface-w) rounded-xl border bg-card p-5 text-card-foreground">
-      <div className="flex flex-col gap-3" aria-busy="true" aria-label="Building">
-        <div className="bb-skeleton h-7 w-2/5" />
-        <div className="bb-skeleton h-10 w-full" />
-        <div className="bb-skeleton h-10 w-4/5" />
+    <div className={cn(SURFACE_CANVAS, SURFACE_CANVAS_ON)}>
+      <div className={SURFACE_FRAME}>
+        <div className="flex flex-col gap-3" aria-busy="true" aria-label="Building">
+          <div className="bb-skeleton h-7 w-2/5" />
+          <div className="bb-skeleton h-10 w-full" />
+          <div className="bb-skeleton h-10 w-4/5" />
+        </div>
       </div>
     </div>
   );

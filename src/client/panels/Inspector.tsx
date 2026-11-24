@@ -74,7 +74,8 @@ export function WireLog({ wire }: { wire: WireEntry[] }) {
   );
 }
 
-const ORIGIN: Record<WireEntry["origin"], string> = {
+/** Origin badge colours, shared with the stage hood's JSON views. */
+export const ORIGIN_BADGE: Record<WireEntry["origin"], string> = {
   llm: "border-input text-foreground",
   data: "border-transparent bg-secondary text-secondary-foreground",
   knob: "border-transparent bg-highlight text-highlight-foreground",
@@ -104,7 +105,7 @@ function WireRow({ entry }: { entry: WireEntry }) {
         <span
           className={cn(
             "rounded-[0.3rem] border px-1.5 text-[0.625rem] uppercase leading-[1.5] tracking-[0.08em]",
-            refused ? "border-destructive/40 text-destructive" : ORIGIN[entry.origin],
+            refused ? "border-destructive/40 text-destructive" : ORIGIN_BADGE[entry.origin],
           )}
         >
           {entry.origin}

@@ -4,7 +4,19 @@ import { cn } from "@/lib/utils";
 import { isPending, resolveString } from "@/a2ui/evaluate";
 import { evalCtx, InlineSkeleton, useSurfaceEnv, type BrickProps } from "./shared";
 
-const HEADING = ["text-2xl font-semibold tracking-tight", "text-xl font-semibold tracking-tight", "text-lg font-semibold"];
+/** "#", "##", "###": bold with tight tracking, like a product heading; "##" is the usual screen title. */
+const HEADING = [
+  "text-[1.75rem] leading-[1.15] font-bold tracking-[-0.03em]",
+  "text-[1.5rem] leading-tight font-bold tracking-[-0.025em]",
+  "text-lg leading-snug font-semibold tracking-[-0.01em]",
+];
+
+/** Body by default; "caption" and "subtitle" are muted (a subtitle is the one short line under a "##" heading). */
+const VARIANT = {
+  body: "text-base",
+  caption: "bb-caption text-sm text-muted-foreground",
+  subtitle: "bb-subtitle text-[0.9375rem] text-muted-foreground",
+} as const;
 
 /** "**bold**" spans as React nodes; never HTML. */
 function inline(text: string): ReactNode[] {
@@ -40,16 +52,20 @@ export function renderMarkdown(text: string): ReactNode[] {
 export function Text({ def, scope }: BrickProps<TextComponent>) {
   const env = useSurfaceEnv();
   const ctx = evalCtx(env, scope);
-  const caption = def.variant === "caption";
-  if (env.streaming && isPending(def.text, ctx)) return <InlineSkeleton className={caption ? "h-4 w-32" : "h-6 w-48"} />;
+  const variant = def.variant === "caption" || def.variant === "subtitle" ? def.variant : "body";
+  if (env.streaming && isPending(def.text, ctx)) {
+    // Same wrapper, class and line box as the arrived text: a caption or subtitle under a heading keeps its place.
+    return (
+      <div className={cn("flex flex-col gap-1 leading-snug", VARIANT[variant])}>
+        <p>
+          <InlineSkeleton className={variant === "body" ? "w-48" : "w-32"} />
+        </p>
+      </div>
+    );
+  }
   const text = resolveString(def.text, ctx);
   return (
-    <div
-      className={cn(
-        "flex flex-col gap-1 leading-snug",
-        caption ? "text-sm text-muted-foreground" : "text-base",
-      )}
-    >
+    <div className={cn("flex flex-col gap-1 leading-snug", VARIANT[variant])}>
       {renderMarkdown(text)}
     </div>
   );

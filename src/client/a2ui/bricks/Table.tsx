@@ -19,15 +19,15 @@ export function Table({ def, scope }: BrickProps<TableComponent>) {
   const view = resolveItems(def.rows, env.surface.data, scope, env.streaming);
   const columns = def.columns;
   return (
-    <div className="w-full overflow-x-auto rounded-lg border bg-card">
+    <div className="w-full overflow-x-auto rounded-[14px] border border-border/80 bg-card">
       <table className="w-full border-collapse text-sm">
         <thead>
-          <tr className="border-b bg-muted/45">
+          <tr className="border-b">
             {columns.map((col, i) => (
               <th
                 key={i}
                 scope="col"
-                className="px-3 py-2 text-left font-mono text-[0.7rem] font-medium tracking-wider whitespace-nowrap text-muted-foreground uppercase"
+                className="px-3.5 pt-3 pb-2 text-left text-[0.8125rem] font-medium whitespace-nowrap text-muted-foreground"
               >
                 {resolveString(col.label, ctx, col.field)}
               </th>
@@ -37,14 +37,14 @@ export function Table({ def, scope }: BrickProps<TableComponent>) {
         <tbody>
           {view.kind === "items" ? (
             view.items.map((row, r) => (
-              <tr key={typeof row.id === "string" ? row.id : r} className="border-b last:border-0">
+              <tr key={typeof row.id === "string" ? row.id : r} className="border-b border-border/60 last:border-0">
                 {columns.map((col, c) => (
                   <td
                     key={c}
                     className={cn(
-                      "px-3 py-2.5 align-top leading-snug",
+                      "px-3.5 py-2.5 align-top leading-snug",
                       c === 0 && "font-medium",
-                      typeof row[col.field] === "number" && "font-mono tabular-nums",
+                      typeof row[col.field] === "number" && "tabular-nums",
                     )}
                   >
                     {cell(row[col.field])}

@@ -32,7 +32,7 @@ export const BRICKS: readonly BrickDef[] = [
     group: "content",
     custom: false,
     purpose: "Headings and short text. Markdown subset: #, ##, ###, **bold**.",
-    props: 'text, variant?: "body"|"caption"',
+    props: 'text, variant?: "body"|"caption"|"subtitle"',
     predictHint: "a line of text or a heading",
   },
   {

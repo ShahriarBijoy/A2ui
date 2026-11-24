@@ -29,18 +29,18 @@ export function OptionCard({ def, scope }: BrickProps<OptionCardComponent>) {
         env.onAction(store.emitAction(env.surfaceId, def.id, def.action, scope));
       }}
       className={cn(
-        "flex w-full items-start gap-3 rounded-lg border bg-card p-3.5 text-left transition-colors outline-none",
-        "hover:bg-accent/50 focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50",
+        "flex w-full items-start gap-3.5 rounded-[14px] border border-border/80 bg-card px-4 py-3.5 text-left transition-colors outline-none",
+        "hover:bg-accent/40 focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50",
         selected && "border-highlight bg-highlight-soft/40",
       )}
     >
       {def.icon ? (
-        <span aria-hidden className="flex size-9 shrink-0 items-center justify-center rounded-md border bg-background text-foreground">
+        <span aria-hidden className="flex size-10 shrink-0 items-center justify-center rounded-[10px] bg-muted/70 text-foreground">
           <BrickIcon name={def.icon} size={18} />
         </span>
       ) : null}
       <span className="flex min-w-0 flex-1 flex-col gap-0.5">
-        <span className="text-base font-medium leading-snug">
+        <span className="text-base leading-snug font-semibold tracking-[-0.01em]">
           {pending.title ? <InlineSkeleton className="h-5 w-40" /> : title}
         </span>
         {pending.subtitle ? (
@@ -61,7 +61,7 @@ export function OptionCard({ def, scope }: BrickProps<OptionCardComponent>) {
       {pending.price ? (
         <InlineSkeleton className="h-5 w-12 shrink-0" />
       ) : price ? (
-        <span className="shrink-0 font-mono text-base tabular-nums">{price}</span>
+        <span className="shrink-0 self-center pl-2 text-right text-base font-semibold whitespace-nowrap tabular-nums">{price}</span>
       ) : null}
     </button>
   );

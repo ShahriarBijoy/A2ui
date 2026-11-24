@@ -61,6 +61,8 @@ describe("composer prompt", () => {
     expect(flat).toContain("rating, image (a photo, for an Image), carrier and route (trips)");
     // The 7-block design rule is still there.
     expect(flat).toContain("At most 7 visible blocks.");
+    // One muted line may sit under the heading (Text variant "subtitle").
+    expect(flat).toContain('one short line under it may be a Text with variant "subtitle"');
   });
 
   test("every example line is valid JSON", () => {

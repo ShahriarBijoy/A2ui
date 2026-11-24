@@ -143,6 +143,38 @@
   animation: bb-pulse 1.2s ease-in-out infinite;
 }
 
+/* Dotted canvas: the newest screen's ground and the Run tab's wireframe. Tokens only. */
+.bb-dots {
+  background-color: color-mix(in srgb, var(--background) 55%, var(--panel));
+  background-image: radial-gradient(circle, color-mix(in srgb, var(--foreground) 16%, transparent) 1px, transparent 1.3px);
+  background-size: var(--bb-dot-gap, 14px) var(--bb-dot-gap, 14px);
+  background-position: center;
+}
+
+/* A caption or subtitle right under a heading sits close to it, as one title block. */
+[data-a2ui-id]:has(> div > :is(h2, h3, h4):last-child) + [data-a2ui-id]:has(> :is(.bb-caption, .bb-subtitle)) {
+  margin-top: -0.5rem;
+}
+
+/* A Row of only Stats reads as equal columns with hairlines between them. */
+.bb-row:not(:has(> [data-a2ui-id] > :not(.bb-stat))) {
+  column-gap: 1.25rem;
+}
+.bb-row:not(:has(> [data-a2ui-id] > :not(.bb-stat))) > [data-a2ui-id] {
+  flex: 1 1 0;
+}
+.bb-row:not(:has(> [data-a2ui-id] > :not(.bb-stat))) > [data-a2ui-id] + [data-a2ui-id] {
+  border-left: 1px solid var(--border);
+  padding-left: 1.25rem;
+}
+
+/* Hood hover: the component a JSON-stream line or a component row names, outlined on the screen. */
+[data-bb-outline] {
+  outline: 2px solid var(--highlight);
+  outline-offset: 2px;
+  border-radius: var(--radius-sm);
+}
+
 /* Stage chrome (rail, top bar, dock, hood): one icon stroke everywhere. Screens keep their own. */
 .bb-chrome svg.lucide {
   stroke-width: 1.75;

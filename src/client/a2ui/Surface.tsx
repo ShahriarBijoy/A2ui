@@ -10,6 +10,15 @@ import { surfaceStreaming, useStore } from "@/store";
 import { brickComponent } from "./bricks";
 import { Refused, SkeletonBlock, SurfaceEnvContext, useSurfaceEnv, type SurfaceEnv } from "./bricks/shared";
 
+/**
+ * Every screen reserves the same canvas box around its frame (negative margin, equal padding), and only the newest,
+ * interactive screen paints it: dotted ground inside a light dashed edge. So a screen that stops being the newest
+ * changes paint only, never its size or position. The thread's pre-network skeleton uses the same two classes.
+ */
+export const SURFACE_CANVAS = "-mx-4 -mt-4 -mb-1 w-[calc(100%+2rem)] max-w-[calc(var(--surface-w)+2rem)] rounded-[28px] border border-dashed p-4";
+export const SURFACE_CANVAS_ON = "bb-dots border-input/80";
+export const SURFACE_FRAME = "relative w-full max-w-(--surface-w) rounded-[20px] border bg-card p-6 text-card-foreground";
+
 /** Ids on the path from root; a repeat means a cycle, which would otherwise recurse forever. */
 const AncestryContext = createContext<readonly string[]>([]);
 const MAX_DEPTH = 24;
@@ -106,16 +115,13 @@ export function Surface(props: {
   const hasRoot = surface?.components.root !== undefined;
 
   return (
+    <div className={cn(SURFACE_CANVAS, interactive ? SURFACE_CANVAS_ON : "border-transparent")}>
     <section
       aria-label={"Surface " + surfaceId}
       data-surface-id={surfaceId}
       // U8: older surfaces stay visible as history but cannot be used.
       inert={!interactive}
-      className={cn(
-        "relative w-full max-w-(--surface-w) rounded-xl border bg-card p-5 text-card-foreground",
-        "transition-opacity duration-150 motion-reduce:transition-none",
-        !interactive && "opacity-55",
-      )}
+      className={cn(SURFACE_FRAME, "transition-opacity duration-150 motion-reduce:transition-none", !interactive && "opacity-55")}
     >
       {surface?.hasDemoData ? (
         <Badge
@@ -135,5 +141,6 @@ export function Surface(props: {
         <p className="font-mono text-[0.8125rem] text-muted-foreground">Stopped before this screen was built.</p>
       )}
     </section>
+    </div>
   );
 }
