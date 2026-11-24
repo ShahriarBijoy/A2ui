@@ -23,6 +23,7 @@ import {
   pickInteractiveSurface,
   type TimelineEntry,
 } from "@/format";
+import type { WidgetName } from "@shared/protocol";
 import { cn } from "@/lib/utils";
 import type { AgentItem, SurfaceState, ThreadItem, UserItem } from "@/state";
 import { retryTurn, sendAction } from "@/turns";
@@ -178,7 +179,13 @@ export function Thread({
               <div
                 ref={contentRef}
                 inert={replaying}
-                className={cn("mx-auto flex w-full flex-col", stage ? STAGE_COLUMN : CLASSIC_COLUMN)}
+                className={cn(
+                  "mx-auto flex w-full flex-col",
+                  stage ? STAGE_COLUMN : CLASSIC_COLUMN,
+                  // Once turns fold, the column sits on the bottom edge: a fold shortens the thread above, and the
+                  // newest screen must not move when that happens (it would jump up once the thread fits the view).
+                  turns.size > 0 && "min-h-full justify-end",
+                )}
               >
                 {timeline.map(renderTimelineEntry)}
               </div>
@@ -193,7 +200,7 @@ export function Thread({
           className={cn(
             "absolute left-1/2 flex -translate-x-1/2 items-center gap-1.5 rounded-full border bg-card px-3.5 py-1.5 font-mono text-[0.75rem] text-foreground",
             // Above the stage's voice dock.
-            stage ? "bottom-[108px]" : "bottom-4",
+            stage ? "bottom-[120px]" : "bottom-4",
             "transition-opacity duration-150 motion-reduce:transition-none hover:bg-accent",
             atBottom ? "pointer-events-none opacity-0" : "opacity-100",
           )}
@@ -280,6 +287,24 @@ function countBricks(surface: SurfaceState | undefined): number {
   return n;
 }
 
+const WIDGET_LABEL: Record<WidgetName, string> = {
+  RestaurantWidget: "Restaurant widget",
+  FlightSearchWidget: "Flight search widget",
+};
+
+/** What a folded turn built, in words: the widget, page or text answer by name, else the caption or brick count. */
+function builtLabel(agent: AgentItem | undefined, bricks: number): string {
+  if (!agent) return "no answer";
+  if (agent.widget) return WIDGET_LABEL[agent.widget.name] ?? "Widget";
+  if (agent.html !== undefined) return "HTML page";
+  if (agent.text !== undefined) return "Text answer";
+  if (agent.caption) return agent.caption;
+  if (bricks > 0) return `${bricks} ${bricks === 1 ? "brick" : "bricks"}`;
+  if (agent.updatedSurfaceId) return "updated in place";
+  if (agent.status === "error") return "failed";
+  return agent.mode === "widgets" ? "no widget" : agent.mode === "html" ? "no page" : "no screen";
+}
+
 /** An earlier turn as one line: how it was asked, what was said, what was built and how long composing took. */
 const FoldedTurn = memo(function FoldedTurn(props: {
   turnId: string;
@@ -293,15 +318,7 @@ const FoldedTurn = memo(function FoldedTurn(props: {
   const via = VIA[user?.via ?? agent?.retry.via ?? "text"];
   const Icon = via.icon;
   const said = user?.text ?? agent?.retry.display ?? "";
-  const built =
-    agent?.caption ||
-    (bricks > 0
-      ? `${bricks} ${bricks === 1 ? "brick" : "bricks"}`
-      : agent?.updatedSurfaceId
-        ? "updated in place"
-        : agent?.status === "error"
-          ? "failed"
-          : "no screen");
+  const built = builtLabel(agent, bricks);
   // Measured only: compose time, or the decision model's time for a patch.
   const usage = agent?.metrics.usage;
   const route = agent?.metrics.route;

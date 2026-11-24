@@ -209,18 +209,30 @@ export function entryTurnId(e: TimelineEntry): string | null {
   return e.kind === "surface" ? null : e.item.turnId;
 }
 
+/** Turns kept open at the end of the thread: the newest and the one before it, so two answers can be compared. */
+export const OPEN_LAST_TURNS = 2;
+
+/** A widgets, HTML or text-reply answer: the talk compares these with A2UI, so they never fold. */
+export function isNonA2uiAnswer(item: AgentItem): boolean {
+  return item.widget !== undefined || item.html !== undefined || item.text !== undefined;
+}
+
 /**
- * Turns the stage shows in full; every other turn folds to one line. Open: the newest turn, and the turn that built
- * the interactive surface (a patched screen stays open even when its turn is older). While the newest turn is still
- * running, the screen it is replacing stays open too, so nothing above the stream collapses mid-stream; it folds
- * once the new turn has finished.
+ * Turns the stage shows in full; every other turn folds to one line. Open: the last two turns, every widgets, HTML
+ * and text-reply answer, and the turn that built the interactive surface (a patched screen stays open even when its
+ * turn is older). While the newest turn is still running, the screen it is replacing stays open too, so nothing
+ * above the stream collapses mid-stream.
  */
 export function openTurnIds(timeline: readonly TimelineEntry[], interactiveSurfaceId: string | null): Set<string> {
   const open = new Set<string>();
-  let newest: string | null = null;
-  for (let i = timeline.length - 1; i >= 0 && newest === null; i--) newest = entryTurnId(timeline[i]);
-  if (newest === null) return open;
-  open.add(newest);
+  const order: string[] = [];
+  for (const e of timeline) {
+    const id = entryTurnId(e);
+    if (id !== null && !order.includes(id)) order.push(id);
+  }
+  const newest = order[order.length - 1];
+  if (newest === undefined) return open;
+  for (const id of order.slice(-OPEN_LAST_TURNS)) open.add(id);
 
   let newestRunning = false;
   let previousScreen: string | null = null;
@@ -228,6 +240,7 @@ export function openTurnIds(timeline: readonly TimelineEntry[], interactiveSurfa
     if (e.kind !== "agent") continue;
     const { item } = e;
     if (item.surfaceId && item.surfaceId === interactiveSurfaceId) open.add(item.turnId);
+    if (isNonA2uiAnswer(item)) open.add(item.turnId);
     if (item.turnId === newest) {
       if (!isTurnFinished(item)) newestRunning = true;
     } else if (item.surfaceId) {
