@@ -10,7 +10,7 @@ import {
 } from "lucide-react";
 import type { CatalogComponent } from "@shared/a2ui";
 import { deriveKnobs } from "@shared/knobs";
-import { Surface } from "@/a2ui/Surface";
+import { Surface, SURFACE_CANVAS, SURFACE_CANVAS_ON, SURFACE_FRAME } from "@/a2ui/Surface";
 import { Button } from "@/components/ui/button";
 import { ThreadWave } from "@/fx/ThreadWave";
 import {
@@ -472,13 +472,16 @@ function InPlaceLine({ surfaceId, pending = false }: { surfaceId?: string; pendi
 
 /** Same frame as a surface before its root arrives (U2): the turn shows up at once, before any network. */
 function SurfaceSkeleton() {
-  // Mirrors Surface's pre-root frame (a2ui/Surface.tsx) class for class, so the swap is invisible.
+  // Mirrors Surface's pre-root frame (a2ui/Surface.tsx) class for class, so the swap is invisible. It stands where the
+  // newest screen will be, so it sits on the newest screen's canvas.
   return (
-    <div className="relative w-full max-w-(--surface-w) rounded-xl border bg-card p-5 text-card-foreground">
-      <div className="flex flex-col gap-3" aria-busy="true" aria-label="Building">
-        <div className="bb-skeleton h-7 w-2/5" />
-        <div className="bb-skeleton h-10 w-full" />
-        <div className="bb-skeleton h-10 w-4/5" />
+    <div className={cn(SURFACE_CANVAS, SURFACE_CANVAS_ON)}>
+      <div className={SURFACE_FRAME}>
+        <div className="flex flex-col gap-3" aria-busy="true" aria-label="Building">
+          <div className="bb-skeleton h-7 w-2/5" />
+          <div className="bb-skeleton h-10 w-full" />
+          <div className="bb-skeleton h-10 w-4/5" />
+        </div>
       </div>
     </div>
   );

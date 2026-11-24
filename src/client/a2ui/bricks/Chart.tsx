@@ -1,12 +1,14 @@
 import type { ChartComponent } from "@shared/a2ui";
+import { cn } from "@/lib/utils";
 import { resolveString, toNumber, toText } from "@/a2ui/evaluate";
-import { barWidths, formatAmount, resolveItems } from "./items";
+import { formatAmount, resolveItems } from "./items";
+import { niceScale, scalePct } from "./chartScale";
 import { evalCtx, InlineSkeleton, useSurfaceEnv, type BrickProps } from "./shared";
 
 const MAX_BARS = 12;
 const PENDING_WIDTHS = [82, 58, 36];
 
-/** Horizontal bars on one scale with their values; an item without a number is left out. */
+/** Horizontal bars on one round scale, faint gridlines and axis labels, the value beside each bar. An item without a number is left out. */
 export function Chart({ def, scope }: BrickProps<ChartComponent>) {
   const env = useSurfaceEnv();
   const ctx = evalCtx(env, scope);
@@ -31,26 +33,47 @@ export function Chart({ def, scope }: BrickProps<ChartComponent>) {
     })
     .slice(0, MAX_BARS);
   if (bars.length === 0) return <p className="text-sm text-muted-foreground">Nothing found</p>;
-  const widths = barWidths(bars.map((b) => b.value));
+  const scale = niceScale(bars.map((b) => b.value));
+  const last = scale.ticks.length - 1;
+  // Gridlines at every tick; labels at 0, the middle and the top, so they never crowd a narrow chart.
+  const labelled = new Set([0, Math.floor(last / 2), last]);
   return (
-    <ul aria-label="Bar chart" className="grid grid-cols-[fit-content(40%)_minmax(4rem,1fr)_auto] items-center gap-x-3 gap-y-2.5">
+    <div role="list" aria-label="Bar chart" className="grid grid-cols-[fit-content(38%)_minmax(4rem,1fr)_auto] items-center gap-x-3 gap-y-2.5">
+      <span aria-hidden className="pointer-events-none relative col-start-2 self-stretch" style={{ gridRow: `1 / span ${bars.length}` }}>
+        {scale.ticks.map((tick, i) => (
+          <span key={i} className="absolute -inset-y-1 w-px bg-border/80" style={{ left: scalePct(tick, scale) + "%" }} />
+        ))}
+      </span>
       {bars.map((b, i) => (
-        <li key={i} className="contents">
-          <span className="truncate text-sm" title={b.label}>
+        <div key={i} role="listitem" className="contents">
+          <span className="col-start-1 truncate text-sm" style={{ gridRow: i + 1 }} title={b.label}>
             {b.label}
           </span>
-          <span aria-hidden className="h-2.5 overflow-hidden rounded-full bg-muted">
+          <span aria-hidden className="relative col-start-2 h-3" style={{ gridRow: i + 1 }}>
             <span
-              className="block h-full rounded-full bg-foreground/80 transition-[width] duration-300 ease-out motion-reduce:transition-none"
-              style={{ width: widths[i] + "%" }}
+              className="absolute inset-y-0 left-0 rounded-[3px] bg-foreground/80 transition-[width] duration-300 ease-out motion-reduce:transition-none"
+              style={{ width: scalePct(b.value, scale) + "%" }}
             />
           </span>
-          <span className="text-right font-mono text-sm whitespace-nowrap tabular-nums">
+          <span className="col-start-3 text-right font-mono text-sm whitespace-nowrap tabular-nums" style={{ gridRow: i + 1 }}>
             {formatAmount(b.value)}
             {unit ? <span className="ml-1 text-muted-foreground">{unit}</span> : null}
           </span>
-        </li>
+        </div>
       ))}
-    </ul>
+      <span aria-hidden className="relative col-start-2 h-4 font-mono text-[0.6875rem] text-muted-foreground tabular-nums" style={{ gridRow: bars.length + 1 }}>
+        {scale.ticks.map((tick, i) =>
+          labelled.has(i) ? (
+            <span
+              key={i}
+              className={cn("absolute top-0 whitespace-nowrap", i === last && i > 0 ? "-translate-x-full" : i > 0 && "-translate-x-1/2")}
+              style={{ left: scalePct(tick, scale) + "%" }}
+            >
+              {formatAmount(tick)}
+            </span>
+          ) : null,
+        )}
+      </span>
+    </div>
   );
 }

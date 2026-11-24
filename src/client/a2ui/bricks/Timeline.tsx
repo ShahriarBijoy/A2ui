@@ -9,8 +9,8 @@ const PENDING_STEPS = 3;
 function Dot(props: { last: boolean }) {
   return (
     <span aria-hidden className="flex flex-col items-center">
-      <span className="mt-1.5 size-2.5 shrink-0 rounded-full border-2 border-foreground bg-card" />
-      {props.last ? null : <span className="mt-1 w-px flex-1 bg-border" />}
+      <span className="mt-[0.45rem] size-2 shrink-0 rounded-full bg-foreground/75 ring-[3px] ring-card" />
+      {props.last ? null : <span className="mt-1.5 w-px flex-1 bg-border" />}
     </span>
   );
 }
@@ -49,7 +49,7 @@ export function Timeline({ def, scope }: BrickProps<TimelineComponent>) {
             {timed ? <span className="pt-0.5 text-right font-mono text-sm whitespace-nowrap text-muted-foreground tabular-nums">{s.time}</span> : null}
             <Dot last={last} />
             <span className={cn("flex min-w-0 flex-col gap-0.5", !last && "pb-4")}>
-              <span className="text-base leading-snug font-medium">{s.title}</span>
+              <span className="text-base leading-snug font-semibold tracking-[-0.01em]">{s.title}</span>
               {s.detail ? <span className="text-sm leading-snug text-muted-foreground">{s.detail}</span> : null}
             </span>
           </li>

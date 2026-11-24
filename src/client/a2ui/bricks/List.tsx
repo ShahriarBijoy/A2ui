@@ -8,7 +8,7 @@ export function List({ def, scope }: BrickProps<ListComponent>) {
   return (
     <div
       className={cn(
-        "flex gap-2",
+        "flex gap-2.5",
         horizontal ? "flex-row overflow-x-auto pb-1 *:w-60 *:shrink-0" : "flex-col",
       )}
     >

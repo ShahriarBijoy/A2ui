@@ -20,10 +20,10 @@ export function Alert({ def, scope }: BrickProps<AlertComponent>) {
   const pending = env.streaming && isPending(def.text, ctx);
   const text = resolveString(def.text, ctx).trim();
   return (
-    <div role="note" className={cn("flex w-full gap-3 rounded-lg border px-4 py-3", style.box)}>
+    <div role="note" className={cn("flex w-full gap-3 rounded-[14px] border px-4 py-3.5", style.box)}>
       <Glyph aria-hidden size={18} strokeWidth={BRICK_ICON_STROKE} className={cn("mt-0.5 shrink-0", style.tone)} />
       <div className="flex min-w-0 flex-col gap-0.5">
-        {title ? <p className="text-base leading-snug font-medium">{title}</p> : null}
+        {title ? <p className="text-base leading-snug font-semibold">{title}</p> : null}
         {pending ? <InlineSkeleton className="h-4 w-48" /> : text ? <p className="text-sm leading-snug text-foreground/80">{text}</p> : null}
       </div>
     </div>

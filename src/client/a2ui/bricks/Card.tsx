@@ -7,5 +7,5 @@ export function Card({ def, scope }: BrickProps<CardComponent>) {
   const child = env.renderNode(def.child, scope);
   // The surface frame already is a card; a root Card would draw a second border inside it.
   if (def.id === "root" && scope === "/") return <>{child}</>;
-  return <UiCard className="gap-0 rounded-lg border p-4 text-base shadow-none ring-0">{child}</UiCard>;
+  return <UiCard className="gap-0 rounded-[14px] border border-border/75 p-4 text-base shadow-none ring-0">{child}</UiCard>;
 }
