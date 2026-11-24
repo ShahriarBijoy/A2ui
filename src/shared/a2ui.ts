@@ -44,7 +44,7 @@ export type Align = "start" | "center" | "end" | "stretch";
 // ── Components (catalog: brick-box/v1) ───────────────────────────────────────
 type Base<N extends string> = { id: string; component: N; "@checks"?: CheckRule[]; weight?: number };
 
-export type TextComponent = Base<"Text"> & { text: DynamicString; variant?: "body" | "caption" };
+export type TextComponent = Base<"Text"> & { text: DynamicString; variant?: "body" | "caption" | "subtitle" };
 export type CardComponent = Base<"Card"> & { child: string };
 export type RowComponent = Base<"Row"> & { children: ChildList; justify?: Justify; align?: Align };
 export type ColumnComponent = Base<"Column"> & { children: ChildList; justify?: Justify; align?: Align };

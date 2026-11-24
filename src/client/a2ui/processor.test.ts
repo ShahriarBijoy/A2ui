@@ -213,6 +213,33 @@ describe("lenient @checks", () => {
   });
 });
 
+describe("Text variant", () => {
+  const text = (variant: unknown) => ({ id: "t", component: "Text", text: "## Weather", variant });
+  const apply = (variant: unknown) =>
+    applyMessage({}, { version: v, updateComponents: { surfaceId: "s1", components: [text(variant)] } }, { now: 1, turnId: "t1" });
+
+  test("body, caption and subtitle are accepted as written", () => {
+    for (const variant of ["body", "caption", "subtitle", undefined]) {
+      const res = apply(variant);
+      expect(res.errors).toEqual([]);
+      const entry = res.surfaces.s1.components.t;
+      expect(entry.status).toBe("ok");
+      if (entry.status === "ok" && entry.def.component === "Text") expect(entry.def.variant).toBe(variant as "body" | undefined);
+    }
+  });
+  test("an unknown variant is dropped with an error; the Text stays and renders as body", () => {
+    const res = apply("heading");
+    expect(res.errors).toEqual([
+      { code: "VALIDATION_FAILED", surfaceId: "s1", path: "/components/0/variant", message: "Text variant is not one of body, caption, subtitle" },
+    ]);
+    expect(res.refused).toBe(0);
+    expect(res.acceptedTypes).toEqual(["Text"]);
+    const entry = res.surfaces.s1.components.t;
+    expect(entry.status).toBe("ok");
+    if (entry.status === "ok") expect(entry.def).not.toHaveProperty("variant");
+  });
+});
+
 describe("new bricks", () => {
   /** One updateComponents on a fresh surface; returns the entry for each id and the result. */
   function put(components: Record<string, unknown>[]) {

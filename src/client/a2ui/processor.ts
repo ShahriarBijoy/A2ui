@@ -208,7 +208,7 @@ function updateComponents(
       return;
     }
     // A bad check drops only that check (with its error); the Button is usually the screen's primary action.
-    const comp = sanitizeChecks(c, surfaceId, base, errors);
+    const comp = sanitizeTextVariant(sanitizeChecks(c, surfaceId, base, errors), type, surfaceId, base, errors);
     const badCall = findUnknownCall(comp);
     if (badCall) {
       refuse(badCall.path, "Unknown function", "Unknown function " + JSON.stringify(badCall.name));
@@ -379,6 +379,20 @@ function sanitizeChecks(c: Raw, surfaceId: string, base: string, errors: A2uiErr
     kept.push({ condition: check.condition, message });
   });
   return { ...c, "@checks": kept };
+}
+
+export const TEXT_VARIANTS: readonly string[] = ["body", "caption", "subtitle"];
+
+/**
+ * Lenient Text variant: an unknown one is dropped with a VALIDATION_FAILED error and the Text renders as body.
+ * Refusing it would blank a heading over a styling word (on stage a plain line beats a refused one).
+ */
+function sanitizeTextVariant(c: Raw, type: BrickName, surfaceId: string, base: string, errors: A2uiError[]): Raw {
+  if (type !== "Text" || oneOf(c.variant, TEXT_VARIANTS)) return c;
+  errors.push(err(surfaceId, base + "/variant", "Text variant is not one of " + TEXT_VARIANTS.join(", ")));
+  const rest = { ...c };
+  delete rest.variant;
+  return rest;
 }
 
 /** No icon (absent or null: older screens and replays) or a name from the icon set. */

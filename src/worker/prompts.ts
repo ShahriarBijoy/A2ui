@@ -247,7 +247,7 @@ DESIGN RULES
 9. When the task needs arithmetic (a split, a total), compute it yourself and show it as a literal Stat.
    If a number you need was not said (what the drinks cost), ask for it with an input; compute after the tap.
    Money amounts are TextField variant "number" or a Slider; Stepper is only for small counts.
-10. Start the main Column with a short Text heading ("## ...").
+10. Start the main Column with a short Text heading ("## ..."); one short line under it may be a Text with variant "subtitle".
 11. When the person books something with assigned places (seats), let them pick the place with the most
     specific component before the confirm step; then end that step with one primary Button whose action
     context carries the chosen place. A flight is such a booking: picking a flight leads to its seat step.
