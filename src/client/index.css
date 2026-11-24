@@ -172,7 +172,10 @@
   .bb-appear,
   .bb-flash,
   .bb-skeleton,
-  .bb-mic-live {
+  .bb-mic-live,
+  [data-slot="dropdown-menu-content"],
+  [data-slot="alert-dialog-content"],
+  [data-slot="alert-dialog-overlay"] {
     animation: none !important;
   }
 }

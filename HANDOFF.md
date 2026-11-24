@@ -51,18 +51,27 @@ The owner raised the Anthropic spend limit. The key answers again (Haiku 1.3 s, 
 - Per client IP, after the key check: `/api/turn` 40 per minute, other `/api/*` 300 per minute (Workers Rate Limiting binding, approximate, per Cloudflare location). Over the cap: 429 and "Too many requests: wait a minute, then try again."
 - Free plan: 100,000 Worker requests/day (reset 00:00 UTC = 01:00 Bremen; Error 1027 after). Static assets are free and unlimited, so only `/api/*` and `/catalog/*` count. No charge on the Free plan; over the limit the API pauses until the reset. A limiter cannot keep that count down (a refused request already ran the Worker); it protects the Claude/Soniox spend.
 
+## Stage layout A (branch stage-shell; production keeps the old layout until it merges)
+- The page opens **layout A**: sessions rail (left), top bar + thread + floating voice dock (middle), "Under the hood" (right: Bricks / Wire / Data tabs over the Turns / LLM calls avoided / Tokens totals).
+- **`?classic`** opens the previous layout on the same store and the same sessions. If the new layout misbehaves on stage, add `?classic` to the URL; nothing else changes.
+- **Stage flow:** dinner (F1–F3) → **New session** → flight (F4–F6). Dinner stays in the rail; one click on it brings its screens back. F1 and F4 open a fresh session themselves when the open one has turns, so forgetting New session is harmless.
+- **Before the talk:** rail "…" menu → **Delete all sessions** (in-page confirm), so no rehearsal titles reach the projector. Sessions live in this browser only (localStorage, newest 20); the page opens on the most recent one, or an empty one after Delete all.
+- **Esc** and the top bar's **Clear conversation** clear the open session (the wave). Earlier turns fold to one line (click to open); the newest turn and the patched screen stay open.
+- The totals count the page visit, not a session: replays excluded, reset by a reload (as before).
+
 ## Stage replay map (shipped, works offline; real Sonnet captures at the talk clock)
 | Key | Turn |
 |---|---|
-| F1 | "I want dinner after this event, pick a place nearby." (3 real places) |
+| F1 | "I want dinner after this event, pick a place nearby." (3 real places) · opens a fresh session if the open one has turns |
 | F2 | tap a place → time + guests + Reserve |
 | F3 | "We're six, and later." → decision-model patch, compose – |
-| **Esc** | **required between F3 and F4** (both sequences start at surface s1) |
-| F4 | "I need to book a flight tomorrow." ("Flight tomorrow": From Bremen, To empty, Date Thu 26 Nov, "Search flights") |
+| New session | optional: F4 opens a fresh session itself (no Esc needed any more) |
+| F4 | "I need to book a flight tomorrow." ("Flight tomorrow": From Bremen, To empty, Date Thu 26 Nov, "Search flights") · opens a fresh session if the open one has turns |
 | F5 | "To New York, give me options." (3 web results, fares as listed and each tagged round trip: Lufthansa from 605 €, Air France 460 €, KLM from EUR590) |
 | F6 | tap Lufthansa → generic seat map (no taken seats, none preselected) + Confirm flight |
 - Tapping the live buttons after F3 ("Reserve table") or F6 ("Confirm flight") sends a real turn (spends API budget; fails if offline).
 - The recordings' dates are fixed for Wed 25 Nov ("tonight", flight on Thu 26 Nov).
+- The top bar's **Replays** menu plays the same six recordings with the mouse.
 - All six F-keys are taken by the shipped set, so Shift+R saves get no key. Swap `src/client/replays.json` if rehearsal produces better turns (Shift+E exports).
 
 ## Verification done 2026-11-24 (before the spend limit hit)
@@ -77,6 +86,7 @@ The owner raised the Anthropic spend limit. The key answers again (Haiku 1.3 s, 
 - Shift+R after each good live turn to save it; Shift+E (or DevRunner "Copy replays JSON") to export, so the controller can ship them in `src/client/replays.json`.
 - Turn wifi off and replay: it must still work.
 - Esc: the wave carries the thread away.
+- Layout A: F1–F3, New session, F4–F6, click the dinner session (its screens return), Clear conversation, then rail "…" → **Delete all sessions** last, so the talk starts on an empty session. Check `?classic` once.
 
 ## Owner preferences
 - shadcn on **Base UI**, with the full component set installed. The catalog the agent sees stays at PLAN's 17 bricks (explained to the owner; ask before adding bricks).
