@@ -77,7 +77,8 @@ describe("composer prompt", () => {
     expect(COMPOSER_SYSTEM_PROMPT).not.toContain("places  args");
     expect(COMPOSER_SYSTEM_PROMPT).not.toContain("walk_min");
     const lines = data.split("\n").map((l) => l.trim()).filter((l) => l.startsWith("{"));
-    expect(lines.length).toBe(5);
+    // 5 search/flight pattern lines, then 14 weather pattern lines.
+    expect(lines.length).toBe(19);
     for (const l of lines) expect(() => JSON.parse(l)).not.toThrow();
     const search = JSON.parse(lines[0]);
     expect(search.data).toMatchObject({ source: "search", into: "/results", args: { fields: ["name", "subtitle", "tags"] } });
@@ -197,6 +198,43 @@ describe("composer prompt", () => {
       input: { type: "action", action: { name: "pick_place", surfaceId: "s1", sourceComponentId: "place", timestamp: "t", context: { id: "p3" } } },
     };
     expect(composerPrompt(tap, ctx).user).toContain('The person tapped: pick_place {"id":"p3"}');
+  });
+});
+
+describe("composer prompt: weather", () => {
+  const data = COMPOSER_SYSTEM_PROMPT.slice(COMPOSER_SYSTEM_PROMPT.indexOf("\nDATA\n"), COMPOSER_SYSTEM_PROMPT.indexOf("DESIGN RULES"));
+  const flat = COMPOSER_SYSTEM_PROMPT.replace(/\s+/g, " ");
+  const lines = data.split("\n").map((l) => l.trim()).filter((l) => l.startsWith("{")).map((l) => JSON.parse(l));
+
+  test("weather questions use the weather line, never a search, never a value written by the model", () => {
+    expect(COMPOSER_SYSTEM_PROMPT).toContain('{"data": {"source":"weather","args":{...},"into":"/pointer"}}');
+    expect(flat).toContain(
+      "Weather, temperature, rain or forecast questions always use a weather line (live forecast, no web search): never a search line, and never a temperature, condition or chance of rain written yourself.",
+    );
+    expect(data).toContain("weather  args {place, days?}");
+    expect(flat).toContain("null when the place is not found");
+    // Weather no longer goes through a search Text template.
+    expect(flat).not.toContain("tonight's weather");
+  });
+
+  test("the pattern: a weather line, a bound Icon, an area Chart on /weather/hours, a days List with a bound Icon, the credit", () => {
+    expect(lines.find((l) => l.data?.source === "weather")).toEqual({ data: { source: "weather", args: { place: "Lyon" }, into: "/weather" } });
+    const byId = new Map(lines.filter((l) => typeof l.id === "string").map((l) => [l.id, l]));
+    expect(byId.get("now_icon")).toMatchObject({ component: "Icon", name: { "@path": "/weather/now/icon" } });
+    expect(byId.get("hours")).toEqual({ id: "hours", component: "Chart", type: "area", items: { "@path": "/weather/hours" }, unit: "°" });
+    expect(byId.get("days")).toMatchObject({ component: "List", children: { path: "/weather/days", componentId: "day" } });
+    expect(byId.get("d_icon")).toMatchObject({ component: "Icon", name: { "@path": "icon" } });
+    expect(JSON.stringify(byId.get("d_temp"))).toContain("${min}° / ${max}°");
+    expect(JSON.stringify(byId.get("d_rain"))).toContain("${rain_pct}%");
+    expect(JSON.stringify(byId.get("credit"))).toContain("Weather data by Open-Meteo.com");
+    // Every child the pattern names is defined in it.
+    for (const l of byId.values()) for (const c of Array.isArray(l.children) ? l.children : []) expect(byId.has(c)).toBe(true);
+    // Heading, now, hours, days, credit: within the 7 visible blocks.
+    expect(flat).toContain('the main Column holds a "## " heading, now, hours, days and credit');
+  });
+
+  test("the pattern is another city and date: no talk values, no held-out cities", () => {
+    expect(flat).not.toMatch(/Bremen|Hamburg|\bNov\b|November|25 Nov|2026-11-25/);
   });
 });
 
