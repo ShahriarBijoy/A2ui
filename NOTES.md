@@ -344,3 +344,29 @@ delivered in that session. Code evaluated: **6943acb** (smoke "Script tree"). No
 - **Flight --runs 10 --strict: 10/10, 42/42 lines.** Step 2 options per run 4,3,2,2,3,4,3,3,2,3; data arrived 4.89 s (4.03–5.38), search 2614 ms (2135–3174).
 - **Dinner --runs 10: 9/10.** Opener places 3,4,2,2,1,1,2,2,2,2; "We're six, and later." patched 9/10 (median 160 ms); the miss routed compose ("partial edit: Time") instead of patching, so the screen was rebuilt by the composer (2.2 s) rather than patched.
 - Alerts/Badges across the 20 runs: 1 (dinner run 1, "Kitchen open Wednesday 17:30-22:00", from the search fields). None on a summary step; none stating an unstated fact. Before the line: 17 Alerts + 2 Badges in 80 turns.
+
+## Brick catalog fix round (review I1-I3 + minors; eval at 67f18a0, talk clock, in-process Bun server, 2026-11-24 ~14:56 Berlin)
+- I1 64a181d: an Image without an http(s) url draws nothing, streaming or not (no skeleton box that collapses at `done`);
+  the box appears once a url exists, skeleton until load, hidden on error.
+- I2 bdd62a5: og:image lookup reads only up to "</head>" or 32 KB (OG_IMAGE_MAX_BYTES 32768) and scans meta tags without
+  regex attribute matching (one forward pass). Bun bench: a 32 KB run of letters in one tag 0.83 ms, 3,200 attributes
+  0.69 ms, a normal head 0.02 ms (was 6.1 s for 64 KB of letters, per the review). Test: four 32 KB pathological heads < 20 ms each.
+- I3 3a548ad (knobs.ts, decision model only; composer prompt unchanged): a bare "later"/"earlier" on time chips with no
+  option exactly one hour away names the nearest chip in that direction ("pick 20:30 (the next later time)"); the
+  sentinel stays only when no chip exists in that direction.
+- Minors 67f18a0: image lookups get min(1.5 s, turn budget left - 0.5 s) and are skipped under 0.3 s (M1); data is listed
+  as delivered before its SSE write and held entries flush one by one, so a photo update cannot be lost (M2); lookups
+  cover the first 4 records of a search (M3, fewer parallel subrequests); a numeric-string Chart value is accepted
+  like a path-bound one (M6).
+
+| line set | command | result | bar |
+|---|---|---|---|
+| dinner | `--only dinner --runs 5` | **5/5 scenario runs**, 22/22 lines | ≥ 4/5, patch judged by result |
+| flight | `--only flight --runs 3 --strict` | **3/3 scenario runs**, 14/14 lines | 3/3 |
+- Dinner: every step-2 screen used time chips this time (expect 5/5). "We're six, and later." patched 5/5 by result,
+  170 ms median (154-217), no LLM. **Run 1 is the I3 case**: chips 19:00/19:30/20:00/20:30 with 20:00 selected; the
+  router patched Time → 20:30 (+30 min, same date) and Guests → 6. Runs 2-5 had a 21:00 chip and moved +60 min.
+  Places per run 1,3,2,1,2; search 3380 ms median (2936-3546); data arrived 5.44 s (5.20-5.82).
+- Flight: step 2 options 2,3,3; search 2842 ms median (2823-3191); data 5.50 s; seat map 3/3; confirm 3/3.
+- 0 Alerts, 0 Badges, 0 refused, 0 invented, 0 "notice on summary" in these 36 lines. Widgets and HTML lines pass.
+- Raw captures: session scratchpad `bricks-eval/` (fix-dinner.md, fix-flight.md, raw-fix-*).
