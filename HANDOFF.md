@@ -2,6 +2,14 @@
 
 Written 2026-11-23 when the owner moved from a Code Mode session to a normal one. Keep this file current; delete it when the build is done.
 
+## Resume here (paused 2026-11-24 ~05:40 at the owner's request)
+- **Production is unchanged and stable:** e65bae2 (live web flights, key box, rate limits). Nothing below is deployed.
+- **Redesign approved** (spec `docs/superpowers/specs/2026-11-24-stage-redesign-design.md`, plans in `docs/superpowers/plans/`). Two branches, both pushed to GitHub as backup:
+  - `stage-shell` (worktree `C:/Users/Shahr/AppData/Local/Temp/claude/4400adc4556695d6/dfd733ae-9a40-47f7-b403-5c3fd6ee7705/scratchpad/bb-shell`): layout A, sessions, Clear, drawn brick tiles, folded turns, `?classic` fallback. Done: 7 commits, 514 tests, browser-checked at 1920×1080 / 1600×900 / 1366×768 (screenshots `C:/Users/Shahr/AppData/Local/Temp/claude/4400adc4556695d6/dfd733ae-9a40-47f7-b403-5c3fd6ee7705/scratchpad/shell-shots/`). Report: `.superpowers/sdd/stage-shell-report.md`. Needs the owner's mic check.
+  - `brick-catalog` (worktree `C:/Users/Shahr/AppData/Local/Temp/claude/4400adc4556695d6/dfd733ae-9a40-47f7-b403-5c3fd6ee7705/scratchpad/bb-bricks`): the 10 new bricks + icon props, og:image enrichment. Done: 529 tests; talk-clock eval at 6943acb flight 10/10 strict, dinner 9/10, held-out 8/8. Report: `.superpowers/sdd/brick-catalog-report.md`. **Follow-up in progress** (WIP commit on the branch): a prompt line so Alerts/Badges never state unstated facts + a smoke check; **re-run flight 10 and dinner 10 at the talk clock, then finalise the commit.**
+- **Next steps:** (1) finish the brick-catalog follow-up eval; (2) merge both into master (expect conflicts in `Surface.tsx`, `index.css`, `HANDOFF.md`, `NOTES.md`); full `bun test` + `bunx tsc -b`; (3) deploy from a clean worktree; production smoke (flight 3, dinner 2) + browser checks (F1–F6, New session, Clear, key box); (4) owner rehearsal with the mic. **Go/no-go Wed 25 Nov 12:00**; if missed, production stays e65bae2.
+- The worktrees live in the session scratchpad; if it was cleared, recreate them from the pushed branches.
+
 ## Read in this order
 1. `PLAN.md`: the spec (authoritative). Build steps in §8, each with an acceptance check.
 2. `NOTES.md`: verified API facts, measurements and rulings. These override PLAN where they differ (for example: Soniox SDK = `@soniox/client`, `stt-rt-v6`; Jev knobs never list the current value; TS 7 has no `baseUrl`).
