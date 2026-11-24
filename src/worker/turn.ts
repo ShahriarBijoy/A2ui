@@ -44,6 +44,7 @@ import { OG_IMAGE_TIMEOUT_MS } from "./ogImage";
 import { COMPOSER_RETRY_NOTE, composerPrompt, composerUnreachableNote, htmlPrompt, widgetsPrompt, type PromptContext } from "./prompts";
 import { placeQuery, recordsToPlaces, restaurantProps, restaurantSearch } from "./restaurants";
 import { parseSearchArgs, SEARCH_TIMEOUT_MS, type SearchOutcome, type SearchRequest } from "./search";
+import { MAX_WEATHER_PER_TURN, parseWeatherArgs, WEATHER_TIMEOUT_MS, type WeatherOutcome, type WeatherRequest } from "./weather";
 
 export type Emit = (ev: TurnEvent) => void | Promise<void>;
 
@@ -63,6 +64,10 @@ export type TurnDeps = {
   search?: (req: SearchRequest, signal: AbortSignal) => Promise<SearchOutcome>;
   /** Budget per live fetch (default SEARCH_TIMEOUT_MS). */
   fetchTimeoutMs?: number;
+  /** Resolves "weather" data lines (Open-Meteo, weather.ts). Without it such lines fail visibly: null + fetch ok:false. */
+  weather?: (req: WeatherRequest, signal: AbortSignal) => Promise<WeatherOutcome>;
+  /** Budget per weather line, both of its requests (default WEATHER_TIMEOUT_MS). */
+  weatherTimeoutMs?: number;
   /** Every live fetch ends this many ms after the turn started (default TURN_BUDGET_MS). */
   turnBudgetMs?: number;
   /**
@@ -310,7 +315,9 @@ export async function runTurn(req: TurnRequest, deps: TurnDeps, emit: Emit, clie
   }
 }
 
-type FetchSettled = { outcome: SearchOutcome; ms: number };
+/** What a fetch that timed out, failed or lost its client delivers. */
+type FetchFailure = { ok: false; error: string };
+type FetchSettled<T> = { outcome: T | FetchFailure; ms: number };
 
 /**
  * The live data requests of one turn. Each runs beside the compose stream with its own budget
@@ -332,9 +339,11 @@ class LiveFetches {
     return this.pending.has(key);
   }
 
-  /** Fetches started this turn (a reused fetch counts once). */
-  get size(): number {
-    return this.pending.size;
+  /** Fetches started this turn whose key starts with `prefix` ("search ", "weather "); a reused fetch counts once. */
+  count(prefix: string): number {
+    let n = 0;
+    for (const key of this.pending.keys()) if (key.startsWith(prefix)) n++;
+    return n;
   }
 
   /** Ms left before every live fetch must have delivered (the turn budget). */
@@ -347,15 +356,16 @@ class LiveFetches {
     return this.signal.aborted;
   }
 
-  start(key: string, run: (signal: AbortSignal) => Promise<SearchOutcome>, deliver: (r: FetchSettled) => Promise<void>): void {
+  /** `timeoutMs` replaces the per-fetch timeout for this fetch (weather lines are shorter than searches). */
+  start<T>(key: string, run: (signal: AbortSignal) => Promise<T>, deliver: (r: FetchSettled<T>) => Promise<void>, timeoutMs = this.timeoutMs): void {
     const t0 = this.now();
-    const budget = Math.max(0, Math.min(this.timeoutMs, this.deadlineAt - t0));
+    const budget = Math.max(0, Math.min(timeoutMs, this.deadlineAt - t0));
     const outer = this.signal;
     const ctl = new AbortController();
     let timer: ReturnType<typeof setTimeout> | undefined;
     let onAbort = () => {};
     // Rejects nothing: resolves with a failure on timeout or when the client goes away.
-    const stop = new Promise<SearchOutcome>((resolve) => {
+    const stop = new Promise<FetchFailure>((resolve) => {
       onAbort = () => resolve({ ok: false, error: "cancelled" });
       if (outer.aborted) return onAbort();
       outer.addEventListener("abort", onAbort, { once: true });
@@ -363,8 +373,8 @@ class LiveFetches {
     });
     const work = Promise.resolve()
       .then(() => run(ctl.signal))
-      .catch((err): SearchOutcome => ({ ok: false, error: describeLlmError(err, "Fetch failed") }));
-    const done = Promise.race([work, stop])
+      .catch((err): FetchFailure => ({ ok: false, error: describeLlmError(err, "Fetch failed") }));
+    const done = Promise.race<T | FetchFailure>([work, stop])
       .then(async (outcome) => {
         clearTimeout(timer);
         outer.removeEventListener("abort", onAbort);
@@ -620,7 +630,8 @@ async function composeA2ui(req: TurnRequest, deps: TurnDeps, send: Emit, signal:
     const paths: string[] = [];
     for (const { surfaceId, list } of orphanLists) {
       const t = list.children;
-      if (!isChildTemplate(t) || !intos.has(t.path)) continue;
+      // A template may read under a requested path (a weather List at /weather/days of "into" /weather).
+      if (!isChildTemplate(t) || ![...intos].some((into) => t.path === into || t.path.startsWith(`${into}/`))) continue;
       if (reachable.some((c) => bindsPath(c, t.path))) continue;
       // An older List on the request surface may already show this path; its binding is not in the snapshot.
       if (!sent.get(surfaceId)?.created && req.surface?.id === surfaceId && req.surface.components.some((c) => c.component === "List")) continue;
@@ -666,7 +677,8 @@ async function composeA2ui(req: TurnRequest, deps: TurnDeps, send: Emit, signal:
       }
       return;
     }
-    // "search" is the only source (owner direction: no fixed or demo data); any other line is skipped.
+    // Live sources only (owner direction: no fixed or demo data); any other line is skipped.
+    if (c.source === "weather") return startWeather(c.into, c.args, line);
     if (c.source !== "search") return skip(`unknown data source "${c.source}"`, line);
     const into = c.into;
     const args = resolveArgBindings(c.args, req.surface?.data ?? null);
@@ -678,7 +690,7 @@ async function composeA2ui(req: TurnRequest, deps: TurnDeps, send: Emit, signal:
     if (live.has(key)) return;
     const search = deps.search;
     const sreq = parsed.req;
-    if (live.size >= MAX_SEARCHES_PER_TURN) {
+    if (live.count("search ") >= MAX_SEARCHES_PER_TURN) {
       warn(`search not started (more than ${MAX_SEARCHES_PER_TURN} in one turn): ${sreq.query}`);
       // [] turns the skeleton into "Nothing found" instead of shimmering until done.
       await deliver(into, [], { type: "fetch", source: "search", query: sreq.query, ok: false, records: 0, ms: 0, error: "too many searches" });
@@ -696,6 +708,37 @@ async function composeA2ui(req: TurnRequest, deps: TurnDeps, send: Emit, signal:
         await deliver(into, records, fetchEvent("search", sreq.query, outcome, ms));
         if (sreq.images && records.length > 0) await addImages(into, records);
       },
+    );
+  };
+
+  /**
+   * A "weather" line: one Open-Meteo lookup (geocoding + forecast) beside the stream, with its own budget and
+   * its own cap, so it never takes a search slot. One object, or null for an unknown place, goes to `into`.
+   */
+  const startWeather = async (into: string, rawArgs: JsonObject, line: string) => {
+    const parsed = parseWeatherArgs(resolveArgBindings(rawArgs, req.surface?.data ?? null), deps.context.city);
+    if (!parsed.ok) return skip(parsed.error, line);
+    intos.add(into);
+    // One lookup per data path: a retry or a repeated line reuses it.
+    const key = `weather ${into}`;
+    if (live.has(key)) return;
+    const wreq = parsed.req;
+    if (live.count("weather ") >= MAX_WEATHER_PER_TURN) {
+      warn(`weather not fetched (more than ${MAX_WEATHER_PER_TURN} in one turn): ${wreq.place}`);
+      await deliver(into, null, { type: "fetch", source: "weather", query: wreq.place, ok: false, records: 0, ms: 0, error: "too many weather lines" });
+      return;
+    }
+    const weather = deps.weather;
+    live.start<WeatherOutcome>(
+      key,
+      (sig) => (weather ? weather(wreq, sig) : Promise.resolve<WeatherOutcome>({ ok: false, error: "weather is not configured" })),
+      async ({ outcome, ms }) => {
+        if (!outcome.ok) warn(`weather failed (${outcome.error}): ${wreq.place}`);
+        const ev: Extract<TurnEvent, { type: "fetch" }> = { type: "fetch", source: "weather", query: wreq.place, ok: outcome.ok, records: outcome.ok ? 1 : 0, ms };
+        if (!outcome.ok) ev.error = outcome.error;
+        await deliver(into, outcome.ok ? outcome.record : null, ev);
+      },
+      deps.weatherTimeoutMs ?? WEATHER_TIMEOUT_MS,
     );
   };
 

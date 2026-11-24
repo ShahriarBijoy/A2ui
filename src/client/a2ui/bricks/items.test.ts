@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { barWidths, imageView, parseRating, resolveItems } from "./items";
+import { areaGeometry, barWidths, iconView, imageView, parseRating, resolveItems, thinLabels, withUnit } from "./items";
 
 describe("resolveItems", () => {
   const data = { plans: [{ id: "a", name: "A", price: null }, { id: "b", name: "B", price: "€10" }], empty: [], text: "x", trips: [{ legs: [{ title: "Fly" }] }] };
@@ -75,5 +75,85 @@ describe("imageView", () => {
   });
   test("a url that fails to load hides the brick (no broken-image icon)", () => {
     expect(imageView("https://example.test/404.jpg", "failed")).toBe("hidden");
+  });
+});
+
+describe("iconView (Icon name literal or bound)", () => {
+  const data = { weather: { now: { icon: "rain" }, days: [{ icon: "sun" }, { icon: "rocket" }, { icon: null }] } };
+
+  test("a literal name in the set draws; anything else draws nothing", () => {
+    expect(iconView("plane", data, "/", true)).toBe("plane");
+    expect(iconView("rocket", data, "/", false)).toBeNull();
+  });
+
+  test("an absolute or template-relative binding draws the name it reads, when it is in the set", () => {
+    expect(iconView({ "@path": "/weather/now/icon" }, data, "/", false)).toBe("rain");
+    expect(iconView({ "@path": "icon" }, data, "/weather/days/0", false)).toBe("sun");
+    expect(iconView({ "@path": "icon" }, data, "/weather/days/1", true)).toBeNull();
+    expect(iconView({ "@path": "icon" }, data, "/weather/days/2", true)).toBeNull();
+  });
+
+  test("a binding whose data has not arrived is pending while streaming, nothing after", () => {
+    expect(iconView({ "@path": "/weather/later/icon" }, data, "/", true)).toBe("pending");
+    expect(iconView({ "@path": "/weather/later/icon" }, data, "/", false)).toBeNull();
+    expect(iconView({ "@path": "/weather/now/icon" }, null, "/", true)).toBe("pending");
+  });
+});
+
+describe("areaGeometry (Chart type area)", () => {
+  test("one scale from min to max: max at the top pad, min at the bottom pad, the midpoint between", () => {
+    const g = areaGeometry([-4, 1, -1.5]);
+    expect(g.ticks).toEqual([
+      { value: 1, y: 8 },
+      { value: -1.5, y: 50 },
+      { value: -4, y: 92 },
+    ]);
+    expect(g.points).toEqual([
+      { x: 0, y: 92 },
+      { x: 50, y: 8 },
+      { x: 100, y: 50 },
+    ]);
+    expect(g.line).toBe("M0,92 L50,8 L100,50");
+    expect(g.area).toBe("M0,92 L50,8 L100,50 L100,100 L0,100 Z");
+  });
+
+  test("all-negative and all-positive series fill the same height (not scaled from zero)", () => {
+    const cold = areaGeometry([-10, -6, -8]).points.map((p) => p.y);
+    const warm = areaGeometry([20, 24, 22]).points.map((p) => p.y);
+    expect(cold).toEqual(warm);
+    expect(Math.max(...cold) - Math.min(...cold)).toBe(84);
+  });
+
+  test("a flat series is a level line through the middle with one label; one point sits in the middle", () => {
+    const flat = areaGeometry([3, 3, 3, 3]);
+    expect(flat.ticks).toEqual([{ value: 3, y: 50 }]);
+    expect(flat.points.every((p) => p.y === 50)).toBe(true);
+    const one = areaGeometry([7]);
+    expect(one.points).toEqual([{ x: 50, y: 50 }]);
+    expect(areaGeometry([])).toEqual({ ticks: [], points: [], line: "", area: "" });
+  });
+
+  test("x positions are spread evenly across the box", () => {
+    const xs = areaGeometry(Array.from({ length: 12 }, (_, i) => i)).points.map((p) => p.x);
+    expect(xs[0]).toBe(0);
+    expect(xs[11]).toBe(100);
+    expect(xs[1]).toBe(9.09);
+  });
+});
+
+describe("thinLabels and withUnit", () => {
+  test("at most max labels, evenly stepped from the first", () => {
+    expect(thinLabels(12, 6)).toEqual([0, 2, 4, 6, 8, 10]);
+    expect(thinLabels(13, 6)).toEqual([0, 3, 6, 9, 12]);
+    expect(thinLabels(4, 6)).toEqual([0, 1, 2, 3]);
+    expect(thinLabels(0, 6)).toEqual([]);
+  });
+
+  test("° and % sit on the number; other units get a space", () => {
+    expect(withUnit("-3", "°")).toBe("-3°");
+    expect(withUnit("4", "°C")).toBe("4°C");
+    expect(withUnit("40", "%")).toBe("40%");
+    expect(withUnit("12", "km/h")).toBe("12 km/h");
+    expect(withUnit("12", "")).toBe("12");
   });
 });

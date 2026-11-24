@@ -187,7 +187,7 @@ export const BRICKS: readonly BrickDef[] = [
     group: "content",
     custom: false,
     purpose: "A small symbol from ICONS beside text.",
-    props: 'name (one of ICONS), size?: "sm"|"md"|"lg"',
+    props: 'name (one of ICONS, or {"@path"} to a data field holding one), size?: "sm"|"md"|"lg"',
     predictHint: "a small icon or symbol next to text",
   },
   {
@@ -222,9 +222,9 @@ export const BRICKS: readonly BrickDef[] = [
     poolLabel: "Chart",
     group: "content",
     custom: true,
-    purpose: "Horizontal bars comparing up to 12 numbers on one scale.",
-    props: 'items: {"@path":"/pointer"} or literal [{label, value (number)}], unit?, type?: "bar"',
-    predictHint: "a bar chart comparing numbers",
+    purpose: 'Horizontal bars comparing up to 12 numbers on one scale; type "area" draws a series over time (hours, days).',
+    props: 'items: {"@path":"/pointer"} or literal [{label, value (number)}], unit?, type?: "bar"|"area"',
+    predictHint: "a bar chart comparing numbers, or a line chart of values over time",
   },
   {
     name: "Timeline",

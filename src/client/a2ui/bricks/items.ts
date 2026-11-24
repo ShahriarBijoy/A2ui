@@ -4,6 +4,7 @@
  */
 import type { JsonObject, JsonValue, PathBinding } from "@shared/a2ui";
 import { isPathBinding, isPlainObject } from "@shared/a2ui";
+import { isIconName, type IconName } from "@shared/icons";
 import { getAt, resolvePath } from "@shared/pointer";
 
 export type ItemsView = { kind: "skeleton" } | { kind: "empty" } | { kind: "items"; items: JsonObject[] };
@@ -113,4 +114,69 @@ export type ImageLoad = "loading" | "loaded" | "failed";
 export function imageView(url: string, load: ImageLoad): "skeleton" | "image" | "hidden" {
   if (!isHttpUrl(url) || load === "failed") return "hidden";
   return load === "loaded" ? "image" : "skeleton";
+}
+
+/**
+ * What an Icon draws. A literal name was validated on arrival. A bound name ({"@path":"icon"} in a List
+ * template, or an absolute path) is checked here: a name from the icon set draws, anything else draws
+ * nothing; data not arrived yet is "pending" while the turn streams and nothing after it.
+ */
+export function iconView(name: unknown, data: JsonValue, scope: string, streaming: boolean): IconName | "pending" | null {
+  if (!isPathBinding(name)) return isIconName(name) ? name : null;
+  let value: JsonValue | undefined;
+  try {
+    value = getAt(data, resolvePath(name["@path"], scope));
+  } catch {
+    value = undefined;
+  }
+  if (value === undefined) return streaming ? "pending" : null;
+  return isIconName(value) ? value : null;
+}
+
+/** Plot geometry of an area chart in a 0..100 box: x across, y down. */
+export type AreaGeometry = {
+  /** y labels: max at the top, the midpoint, min at the bottom (one label when every value is the same). */
+  ticks: { value: number; y: number }[];
+  points: { x: number; y: number }[];
+  /** SVG path of the line, and of the area under it down to the bottom edge. */
+  line: string;
+  area: string;
+};
+
+/** Room above the highest and below the lowest point, in box units, so the line never touches an edge. */
+const AREA_PAD = 8;
+const r2 = (n: number) => Math.round(n * 100) / 100;
+
+/**
+ * One scale from the series' own min to its max (not from zero like bars), so a cold day's -4..1 °C still
+ * fills the plot. Negative, mixed and flat series are fine; a flat series draws a level line through the middle.
+ */
+export function areaGeometry(values: readonly number[]): AreaGeometry {
+  const n = values.length;
+  if (n === 0) return { ticks: [], points: [], line: "", area: "" };
+  const min = Math.min(...values);
+  const max = Math.max(...values);
+  const span = max - min;
+  const y = (v: number) => (span === 0 ? 50 : AREA_PAD + ((max - v) / span) * (100 - 2 * AREA_PAD));
+  const x = (i: number) => (n === 1 ? 50 : (i / (n - 1)) * 100);
+  const points = values.map((v, i) => ({ x: r2(x(i)), y: r2(y(v)) }));
+  const ticks = span === 0 ? [{ value: min, y: 50 }] : [{ value: max, y: AREA_PAD }, { value: (max + min) / 2, y: 50 }, { value: min, y: 100 - AREA_PAD }];
+  const line = points.map((p, i) => `${i === 0 ? "M" : "L"}${p.x},${p.y}`).join(" ");
+  const area = `${line} L${points[n - 1].x},100 L${points[0].x},100 Z`;
+  return { ticks, points, line, area };
+}
+
+/** Indices of the x labels to print: every k-th from the first, at most `max` of them. */
+export function thinLabels(n: number, max: number): number[] {
+  if (n <= 0 || max <= 0) return [];
+  const step = Math.max(1, Math.ceil(n / max));
+  const out: number[] = [];
+  for (let i = 0; i < n; i += step) out.push(i);
+  return out;
+}
+
+/** "3°", "40%", "12 km/h": a unit that starts with ° or % sits on the number. */
+export function withUnit(text: string, unit: string): string {
+  if (!unit) return text;
+  return /^[°%]/.test(unit) ? text + unit : `${text} ${unit}`;
 }
