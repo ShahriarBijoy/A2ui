@@ -38,6 +38,27 @@ describe("extractOgImage", () => {
     expect(extractOgImage("", PAGE)).toBeNull();
   });
 
+  test("a 32 KB pathological head (long letter runs, many attributes, many open tags) finishes in < 20 ms", () => {
+    const fill = (s: string) => s.slice(0, 32768);
+    const heads = [
+      // The review's quadratic case: one long run of name characters with no "=".
+      fill("<head><meta " + "a".repeat(32760) + ">"),
+      // Thousands of attributes in one tag, the og tag after them.
+      fill("<head><meta " + 'x="1" y=2 '.repeat(3200) + 'property="og:image" content="https://cdn.example/x.jpg">'),
+      // Thousands of short tags, then one that never closes.
+      fill("<head>" + '<meta name="a" content="b">'.repeat(1100) + "<meta " + "b".repeat(4000)),
+      // Long runs inside quoted values and between "=" signs.
+      fill("<head><meta " + "=".repeat(8000) + 'content="' + "c".repeat(12000) + '" ' + "property".repeat(1500) + ">"),
+    ];
+    extractOgImage(heads[0].slice(0, 200), PAGE); // warm the code path
+    for (const h of heads) {
+      expect(h.length).toBeLessThanOrEqual(32768);
+      const t0 = performance.now();
+      extractOgImage(h, PAGE);
+      expect(performance.now() - t0).toBeLessThan(20);
+    }
+  });
+
   test("a huge page without a closing bracket stays fast", () => {
     const t0 = performance.now();
     expect(extractOgImage("<meta " + 'property="og:image" '.repeat(5000), PAGE)).toBeNull();
@@ -137,10 +158,28 @@ describe("fetchOgImages", () => {
     // At most one chunk past the cap (plus the stream's own read-ahead).
     expect(page.stats.pulled).toBeLessThan(OG_IMAGE_MAX_BYTES + 4 * 16_000);
     expect(page.stats.cancelled).toBe(true);
-    expect(OG_IMAGE_MAX_BYTES).toBe(65536);
+    expect(OG_IMAGE_MAX_BYTES).toBe(32768);
   });
 
-  test("a tag inside the first 64 KB is found even when the page goes on", async () => {
+  test("reading stops at </head>: the body is never downloaded", async () => {
+    const head = new TextEncoder().encode(html('<meta property="og:image" content="https://cdn.example/head.jpg">'));
+    let sentHead = false;
+    let pulled = 0;
+    const body = new ReadableStream<Uint8Array>({
+      pull(ctl) {
+        const chunk = sentHead ? new TextEncoder().encode("<p>more</p>".repeat(1500)) : head;
+        pulled += chunk.byteLength;
+        sentHead = true;
+        ctl.enqueue(chunk);
+      },
+    });
+    const fetchImpl = (async () => new Response(body, { headers: { "content-type": "text/html" } })) as unknown as typeof fetch;
+    expect(await fetchOgImages(["https://x.example/p"], fetchImpl, new AbortController().signal)).toEqual(["https://cdn.example/head.jpg"]);
+    // The head chunk, plus at most the stream's own read-ahead.
+    expect(pulled).toBeLessThan(head.byteLength + 2 * 16_500);
+  });
+
+  test("a tag inside the first 32 KB is found even when the page goes on", async () => {
     const head = html('<meta property="og:image" content="https://cdn.example/early.jpg">');
     const bytes = new TextEncoder().encode(head);
     let sentHead = false;

@@ -6,14 +6,16 @@
  */
 
 export const OG_IMAGE_TIMEOUT_MS = 1500;
-export const OG_IMAGE_MAX_BYTES = 65536;
+/** The meta tags live in the head: reading stops at "</head>" or after this many bytes. */
+export const OG_IMAGE_MAX_BYTES = 32768;
 
 /** Generic client name: no contact details, nothing about the person or the project. */
 const USER_AGENT = "Mozilla/5.0 (compatible; BrickBoxPreview/1.0)";
 
 /** Meta keys in the order they are trusted. */
 const KEYS = ["og:image", "og:image:url", "og:image:secure_url", "twitter:image", "twitter:image:src"] as const;
-const ATTR = /([a-zA-Z_:-]+)\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s"'>]+))/g;
+/** Where a meta tag starts: fixed length, so the search is one linear pass. */
+const META_START = /<meta[\s/>]/gi;
 const ENTITY = /&(#x[0-9a-f]+|#\d+|amp|quot|apos|lt|gt);/gi;
 const NAMED: Record<string, string> = { amp: "&", quot: '"', apos: "'", lt: "<", gt: ">" };
 
@@ -37,26 +39,64 @@ function httpUrl(raw: string, base: string): string | null {
   }
 }
 
+function isNameChar(c: number): boolean {
+  // A-Z a-z 0-9 _ : . -
+  return (c >= 65 && c <= 90) || (c >= 97 && c <= 122) || (c >= 48 && c <= 57) || c === 95 || c === 58 || c === 46 || c === 45;
+}
+
+function isSpace(c: number): boolean {
+  return c === 32 || c === 9 || c === 10 || c === 13 || c === 12;
+}
+
+/**
+ * property/name and content of one meta tag body, in one left-to-right pass: every step moves the
+ * index forward, so a tag costs at most its length (no regex, nothing to backtrack).
+ */
+export function metaAttributes(tag: string): { key: string | null; content: string | null } {
+  let key: string | null = null;
+  let content: string | null = null;
+  const n = tag.length;
+  let i = 0;
+  while (i < n) {
+    while (i < n && !isNameChar(tag.charCodeAt(i))) i++;
+    const nameStart = i;
+    while (i < n && isNameChar(tag.charCodeAt(i))) i++;
+    if (i === nameStart) break;
+    const name = i - nameStart <= 16 ? tag.slice(nameStart, i).toLowerCase() : "";
+    while (i < n && isSpace(tag.charCodeAt(i))) i++;
+    if (tag.charCodeAt(i) !== 61 /* = */) continue;
+    i++;
+    while (i < n && isSpace(tag.charCodeAt(i))) i++;
+    let value: string;
+    const q = tag[i];
+    if (q === '"' || q === "'") {
+      const close = tag.indexOf(q, i + 1);
+      const end = close < 0 ? n : close;
+      value = tag.slice(i + 1, end);
+      i = end + 1;
+    } else {
+      const valueStart = i;
+      while (i < n && !isSpace(tag.charCodeAt(i))) i++;
+      value = tag.slice(valueStart, i);
+    }
+    if (name === "property" || name === "name") key = value.trim().toLowerCase();
+    else if (name === "content") content = value;
+  }
+  return { key, content };
+}
+
 /**
  * The page's preview image: og:image, then og:image:secure_url, then twitter:image, relative URLs
- * resolved against pageUrl, http(s) only. The scan finds each "<meta" and the next ">": a tag that
- * never closes ends the scan, so a hostile page costs one pass.
+ * resolved against pageUrl, http(s) only. Linear in the page: each "<meta" start is found once, a tag
+ * that never closes ends the scan, and attributes are read in one pass (Workers Free allows 10 ms CPU).
  */
 export function extractOgImage(html: string, pageUrl: string): string | null {
   const found = new Map<string, string>();
-  const start = /<meta\b/gi;
+  const start = new RegExp(META_START.source, META_START.flags);
   for (let m = start.exec(html); m !== null; m = start.exec(html)) {
-    const end = html.indexOf(">", m.index);
+    const end = html.indexOf(">", m.index + 5);
     if (end < 0) break;
-    const tag = html.slice(m.index, end);
-    let key: string | null = null;
-    let content: string | null = null;
-    for (const a of tag.matchAll(ATTR)) {
-      const name = a[1].toLowerCase();
-      const value = a[2] ?? a[3] ?? a[4] ?? "";
-      if (name === "property" || name === "name") key = value.trim().toLowerCase();
-      else if (name === "content") content = value;
-    }
+    const { key, content } = metaAttributes(html.slice(m.index + 5, end));
     if (key && content !== null && !found.has(key) && (KEYS as readonly string[]).includes(key)) {
       const url = httpUrl(decodeEntities(content), pageUrl);
       if (url) found.set(key, url);
@@ -70,31 +110,33 @@ export function extractOgImage(html: string, pageUrl: string): string | null {
   return null;
 }
 
-async function readCapped(body: ReadableStream<Uint8Array>, maxBytes: number): Promise<string> {
+/** The page up to "</head>" (exclusive) or maxBytes, whichever comes first; the rest is never downloaded. */
+async function readHead(body: ReadableStream<Uint8Array>, maxBytes: number): Promise<string> {
   const reader = body.getReader();
-  const chunks: Uint8Array[] = [];
-  let total = 0;
+  // Default decoder: UTF-8, invalid bytes become U+FFFD (never throws).
+  const decoder = new TextDecoder();
+  let html = "";
+  let bytes = 0;
   try {
-    while (total < maxBytes) {
+    while (bytes < maxBytes) {
       const { done, value } = await reader.read();
-      if (done) break;
-      chunks.push(value);
-      total += value.byteLength;
+      if (done) {
+        html += decoder.decode();
+        break;
+      }
+      const take = value.subarray(0, maxBytes - bytes);
+      bytes += take.byteLength;
+      // Only the new text (and a "</head" split across chunks) is searched.
+      const from = Math.max(0, html.length - 6);
+      html += decoder.decode(take, { stream: true });
+      const close = html.slice(from).toLowerCase().indexOf("</head");
+      if (close >= 0) return html.slice(0, from + close);
     }
   } finally {
     // Stops the download: the rest of a big page is never read.
     reader.cancel().catch(() => {});
   }
-  const buf = new Uint8Array(Math.min(total, maxBytes));
-  let at = 0;
-  for (const c of chunks) {
-    if (at >= buf.length) break;
-    const part = c.subarray(0, buf.length - at);
-    buf.set(part, at);
-    at += part.length;
-  }
-  // Default decoder: UTF-8, invalid bytes become U+FFFD (never throws).
-  return new TextDecoder().decode(buf);
+  return html;
 }
 
 async function lookup(url: string, fetchImpl: typeof fetch, signal: AbortSignal, maxBytes: number): Promise<string | null> {
@@ -108,7 +150,7 @@ async function lookup(url: string, fetchImpl: typeof fetch, signal: AbortSignal,
     res.body?.cancel().catch(() => {});
     return null;
   }
-  const html = await readCapped(res.body, maxBytes);
+  const html = await readHead(res.body, maxBytes);
   return extractOgImage(html, res.url || url);
 }
 
@@ -136,7 +178,7 @@ function lookupOne(url: string | null, fetchImpl: typeof fetch, outer: AbortSign
 
 /**
  * The preview image of each source page, in order and in parallel: per page at most timeoutMs
- * (default 1500 ms) and maxBytes read (default 64 KB); non-HTML, errors and timeouts are null.
+ * (default 1500 ms) and the head read (at most maxBytes, default 32 KB); non-HTML, errors and timeouts are null.
  * Pass fetch wrapped in an arrow ((u, i) => fetch(u, i)): workerd rejects a detached fetch.
  */
 export function fetchOgImages(
