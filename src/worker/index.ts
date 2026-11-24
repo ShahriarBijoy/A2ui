@@ -8,6 +8,7 @@ import { LIMITS } from "@shared/protocol";
 import { anthropicLlm, anthropicWebSearch, composerRefusalFallbackFor, composerThinkingFor } from "./claude";
 import { predictBricks } from "./predict";
 import { promptContext } from "./prompts";
+import { rateLimit } from "./ratelimit";
 import { route } from "./router";
 import { runSearch } from "./search";
 import { createSonioxKey } from "./soniox";
@@ -29,6 +30,9 @@ app.use("/api/*", async (c, next) => {
   }
   await next();
 });
+
+/** Per-IP caps after the key check, so only key holders are counted (see ratelimit.ts). */
+app.use("/api/*", rateLimit<AppEnv>((c) => ({ turn: c.env.TURN_LIMITER, api: c.env.API_LIMITER })));
 
 app.get("/api/health", (c) =>
   c.json({

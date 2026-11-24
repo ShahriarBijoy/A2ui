@@ -138,7 +138,7 @@ export function createTurnClient(deps: TurnClientDeps): TurnClient {
       if (flight.ended) return;
       if (!res.ok) {
         const text = await res.text().catch(() => "");
-        end(flight, "HTTP " + res.status + ": " + shorten(text.trim() || res.statusText));
+        end(flight, httpErrorLine(res.status, text.trim() || res.statusText));
         return;
       }
       if (!res.body) {
@@ -232,6 +232,13 @@ export function retryTurn(agentItemId: string): void {
 /** Stops the in-flight turn quietly: its agent item ends as "done", not as an error. */
 export function abortTurn(): void {
   client.abortTurn();
+}
+
+/** 401 and 429 say what to do; any other status keeps its code and a short body. */
+export function httpErrorLine(status: number, body: string): string {
+  if (status === 401) return "Demo key missing or wrong: open the link with ?k=<key> once.";
+  if (status === 429) return "Too many requests: wait a minute, then try again.";
+  return "HTTP " + status + ": " + shorten(body);
 }
 
 function shorten(s: string, max = 120): string {

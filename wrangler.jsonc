@@ -18,8 +18,16 @@
     "JEV_URL": "https://api.typesafe.ai/v1/systemone",
     "VENUE_NAME": "JAAI (Just Add AI), Überseestadt",
     "VENUE_CITY": "Bremen",
-    // Unconfirmed: inferred from the event page's venue sponsor (JAAI HQ). Confirm with the owner.
+    // Venue and date (Wed 25 Nov 2026) confirmed by the owner 2026-11-24.
     "VENUE_ADDRESS": "Konsul-Smidt-Straße 8p, 28217 Bremen"
   },
+  // Per-IP caps on /api/* (src/worker/index.ts). Approximate, per Cloudflare location, 10 or 60 s periods only.
+  // They stop a runaway loop or a leaked demo key from spending the Claude/Soniox budgets; they cannot keep the
+  // free plan under 100k requests/day (a refused request has already run the Worker). The smoke sends turns
+  // one after another and stays well under the turn cap.
+  "ratelimits": [
+    { "name": "TURN_LIMITER", "namespace_id": "4201", "simple": { "limit": 40, "period": 60 } },
+    { "name": "API_LIMITER", "namespace_id": "4202", "simple": { "limit": 300, "period": 60 } }
+  ],
   "observability": { "enabled": true }
 }

@@ -114,6 +114,15 @@ describe("turn client", () => {
     expect(h.agent(h.lastTurn())).toMatchObject({ status: "error", error: "HTTP 500: boom upstream" });
   });
 
+  test("401 and 429 → a line that says what to do", async () => {
+    const a = harness({ status: 401, text: '{"error":"unauthorized"}' });
+    await a.client.sendTurn(utter("x"));
+    expect(a.agent(a.lastTurn())).toMatchObject({ status: "error", error: "Demo key missing or wrong: open the link with ?k=<key> once." });
+    const b = harness({ status: 429, text: '{"error":"Too many requests"}' });
+    await b.client.sendTurn(utter("x"));
+    expect(b.agent(b.lastTurn())).toMatchObject({ status: "error", error: "Too many requests: wait a minute, then try again." });
+  });
+
   test("network error → failTurn", async () => {
     const h = harness({ reject: new Error("offline") });
     await h.client.sendTurn(utter("x"));

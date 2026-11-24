@@ -13,7 +13,7 @@ import {
   QuotaError,
   SonioxClient,
 } from "@soniox/client";
-import { apiFetch } from "../apiBase";
+import { apiFetch, hasDemoKey } from "../apiBase";
 import type { SonioxKeyResponse } from "../../shared/protocol";
 import type { StoreApi, UserItem } from "../state";
 import type { PredictScheduler } from "./predictClient";
@@ -110,7 +110,10 @@ async function fetchKeyFromWorker(): Promise<SonioxKeyResponse> {
   } catch (cause) {
     throw new VoiceError("Voice unavailable: cannot reach the server.", { cause });
   }
-  if (res.status === 401) throw new VoiceError("Voice unavailable: demo key rejected.");
+  if (res.status === 401) {
+    throw new VoiceError(hasDemoKey() ? "Voice unavailable: wrong demo key in the link." : "Voice unavailable: no demo key. Open the link with ?k=<key> once.");
+  }
+  if (res.status === 429) throw new VoiceError("Voice unavailable: too many requests. Wait a minute.");
   if (!res.ok) throw new VoiceError(`Voice unavailable: speech service error (${res.status}).`);
   const body = (await res.json()) as Partial<SonioxKeyResponse>;
   if (typeof body.api_key !== "string" || typeof body.expires_at !== "string") {
