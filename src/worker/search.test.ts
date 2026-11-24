@@ -13,6 +13,9 @@ import {
   runSearch,
   SEARCH_SYSTEM_PROMPT,
   searchPrompt,
+  tidyPrice,
+  tidyRecords,
+  tidyTags,
   type SearchRequest,
 } from "./search";
 // A real reply (Haiku 5.5, web_search_20250305, max_uses 1), trimmed: preamble text, two parallel
@@ -276,5 +279,55 @@ describe("searchPrompt and runSearch", () => {
     expect(out).toEqual({ ok: false, error: "Search failed: boom" });
     const good = await runSearch(req, async () => reply(), ctx, new AbortController().signal);
     expect(good.ok && good.records).toHaveLength(5);
+  });
+});
+
+describe("tidy-up (removes words, never adds or computes a fact)", () => {
+  test("tags: no generic 'flight', no duplicates (any case), and a one-way next to a round-trip label drops both", () => {
+    expect(tidyTags(["flight", "Round trip", "round trip", "Economy", "Flights"])).toEqual(["Round trip", "Economy"]);
+    expect(tidyTags(["one-way outbound", "round trip", "Nov fares"])).toEqual(["Nov fares"]);
+    expect(tidyTags(["One way", "return"])).toBeNull();
+    expect(tidyTags(["round-trip", "1 stop"])).toEqual(["round-trip", "1 stop"]);
+    expect(tidyTags(["flight"])).toBeNull();
+  });
+
+  test("price: bracketed notes and trailing per-person words go; amount, currency and 'from' stay as written", () => {
+    expect(tidyPrice("460 € pro Person")).toBe("460 €");
+    expect(tidyPrice("€460 per person (round trip, Nov 26 out)")).toBe("€460");
+    expect(tidyPrice("from 605 € (Nov. 26 date listed)")).toBe("from 605 €");
+    expect(tidyPrice("From EUR590")).toBe("From EUR590");
+    expect(tidyPrice("$494 pp")).toBe("$494");
+    expect(tidyPrice("39 € p.P.")).toBe("39 €");
+    expect(tidyPrice("€25–€40 [mains]")).toBe("€25–€40");
+    expect(tidyPrice("(round trip)")).toBeNull();
+  });
+
+  test("records: first card per carrier (any case); a fare label only in the price note moves to the tags; places untouched", () => {
+    const out = tidyRecords([
+      { id: "r1", carrier: "Lufthansa", route: "A → B", price: "from 605 € (round trip)", tags: ["flight", "economy"], source: "https://a.example/" },
+      { id: "r2", carrier: "Air France", route: "A → B", price: "460 € pro Person", tags: ["one-way", "round trip"], source: "https://b.example/" },
+      { id: "r3", carrier: "lufthansa", route: "A → B", price: "$494", tags: ["round trip"], source: "https://c.example/" },
+      { id: "r4", carrier: "KLM", route: null, price: null, tags: null, source: "https://d.example/" },
+    ]);
+    expect(out).toEqual([
+      { id: "r1", carrier: "Lufthansa", route: "A → B", price: "from 605 €", tags: ["round trip", "economy"], source: "https://a.example/" },
+      { id: "r2", carrier: "Air France", route: "A → B", price: "460 €", tags: null, source: "https://b.example/" },
+      { id: "r4", carrier: "KLM", route: null, price: null, tags: null, source: "https://d.example/" },
+    ]);
+    const place = { id: "r1", name: "Riva", subtitle: "Mediterranean", tags: ["Italian", "Pizza"], source: "https://riva.example/" };
+    expect(tidyRecords([place, { ...place, id: "r2" }])).toEqual([place, { ...place, id: "r2" }]);
+  });
+
+  test("parseSearchReply tidies before the cap and renumbers ids", () => {
+    const host = (reply().blocks.find((b) => b.type === "results") as { urls: string[] }).urls[0];
+    const items = ["Lufthansa", "LUFTHANSA", "KLM", "Air France"].map((carrier, i) => ({ carrier, route: "A → B", price: `€${100 + i}`, tags: ["flight"], source: host }));
+    const r = reply({ blocks: [...reply().blocks.filter((b) => b.type !== "text"), { type: "text", text: JSON.stringify(items) }] });
+    const out = parseSearchReply(r, { query: "q", fields: ["carrier", "route", "price", "tags"], max: 3 });
+    if (!out.ok) throw new Error(out.error);
+    expect(out.records.map((x) => [x.id, x.carrier, x.tags])).toEqual([
+      ["r1", "Lufthansa", null],
+      ["r2", "KLM", null],
+      ["r3", "Air France", null],
+    ]);
   });
 });

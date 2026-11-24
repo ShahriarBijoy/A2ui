@@ -179,8 +179,72 @@ export function parseSearchReply(reply: SearchReply, req: SearchRequest): Search
   const items = extractJsonArray(answer);
   if (!items) return fail(NOT_JSON);
   const hosts = new Set(urls.map(hostOf).filter((h): h is string => h !== null));
-  const { records, dropped } = normalizeRecords(items, req.fields, req.max, hosts);
+  // Tidied before the cap, so a second card for the same carrier does not take a slot.
+  const { records: valid, dropped } = normalizeRecords(items, req.fields, items.length, hosts);
+  const records = tidyRecords(valid).slice(0, req.max).map((r, i) => ({ ...r, id: `r${i + 1}` }));
   return { ok: true, records, dropped, ...metrics };
+}
+
+// ── Tidy-up (removes words, never adds or computes a fact) ────────────────────
+
+const GENERIC_TAGS = new Set(["flight", "flights"]);
+const ONE_WAY = /\bone[- ]way\b/i;
+const ROUND_TRIP = /\bround[- ]trip\b|\breturn\b/i;
+const BRACKETED = /\s*[([][^)\]]*[)\]]/g;
+const PER_PERSON = /\s*(?:pro Person|per person|p\.\s?P\.|pp\.?)\s*$/i;
+
+/**
+ * Measured on live flight cards (2 of 20 runs showed "one-way" next to "round trip"; "460 € pro Person"; the same
+ * airline twice in two currencies). Tags: no generic "flight", no duplicates, and a one-way label next to a round-trip
+ * label drops both (which one is right is unknown). Price: a bracketed note and trailing per-person words go; the
+ * amount, currency and a leading "from" stay as written. A round-trip or one-way label stated only in that note
+ * moves to the tags, so trimming never hides what the fare is. Trips: the first card per carrier wins.
+ */
+export function tidyRecords(records: readonly JsonObject[]): JsonObject[] {
+  const carriers = new Set<string>();
+  const out: JsonObject[] = [];
+  for (const r of records) {
+    const carrier = typeof r.carrier === "string" ? r.carrier.trim().toLowerCase() : null;
+    if (carrier) {
+      if (carriers.has(carrier)) continue;
+      carriers.add(carrier);
+    }
+    const rec: JsonObject = { ...r };
+    const moved = typeof r.price === "string" ? fareLabels(r.price) : [];
+    if (typeof r.price === "string") rec.price = tidyPrice(r.price);
+    if (Array.isArray(r.tags) || moved.length > 0) {
+      const tags = Array.isArray(r.tags) ? r.tags.filter((t): t is string => typeof t === "string") : [];
+      rec.tags = tidyTags([...moved, ...tags])?.slice(0, MAX_TAGS) ?? null;
+    }
+    out.push(rec);
+  }
+  return out;
+}
+
+export function tidyTags(tags: readonly string[]): string[] | null {
+  const seen = new Set<string>();
+  let kept = tags.filter((t) => {
+    const key = t.trim().toLowerCase();
+    if (!key || GENERIC_TAGS.has(key) || seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+  if (kept.some((t) => ONE_WAY.test(t)) && kept.some((t) => ROUND_TRIP.test(t))) kept = kept.filter((t) => !ONE_WAY.test(t) && !ROUND_TRIP.test(t));
+  return kept.length > 0 ? kept : null;
+}
+
+/** "round trip" / "one-way" when a bracketed note in the price states it. */
+function fareLabels(price: string): string[] {
+  const notes = price.match(BRACKETED) ?? [];
+  const labels: string[] = [];
+  if (notes.some((n) => ROUND_TRIP.test(n))) labels.push("round trip");
+  if (notes.some((n) => ONE_WAY.test(n))) labels.push("one-way");
+  return labels;
+}
+
+export function tidyPrice(price: string): string | null {
+  const s = price.replace(BRACKETED, "").replace(PER_PERSON, "").replace(/\s+/g, " ").trim();
+  return s ? s : null;
 }
 
 /**
