@@ -23,28 +23,31 @@ The owner raised the Anthropic spend limit. The key answers again (Haiku 1.3 s, 
 - **Talk-clock main scenarios: 19/20 (95%)**; see NOTES → "Main scenarios at the talk's clock". Flight is 10/10 including the seat map. "We're six, and later" patches in about 200 ms with no LLM.
 - **Remaining (owner-dependent):** (the API key works again)
   1. The owner's live mic rehearsal in Chrome (checklist below). Save good turns with Shift+R, export with Shift+E, and paste them into `src/client/replays.json` (shipped F-key replays), then redeploy.
-  2. Confirm the venue and date (JAAI, Konsul-Smidt-Straße 8p, Wed 25 Nov 18:00). They drive `VENUE_*` vars and the "nearby" search.
-  3. Flights: demo-badged (current) vs indicative web results.
+  2. ~~Confirm the venue and date~~ **Confirmed by the owner 2026-11-24:** JAAI, Konsul-Smidt-Straße 8p, Wed 25 Nov 18:00.
+  3. **Flights: owner chose web search (2026-11-24).** In progress on branch `flights-web` (worktree in the session scratchpad; brief `.superpowers/sdd/flights-web-brief.md`). Deploy only when the flight chain passes ≥ 9/10 at the talk clock; until then production keeps the demo flights.
   4. Re-run `bun run smoke` against production during the evening before the talk (18:30–19:30) and commit `scripts/smoke-results.md`. Those are the numbers for the talk.
 - **Parked minors** are in the ledger. The notable ones: block count can reach 8; the patch caption shows a raw ISO value for merged date+time patches; PLAN §9.3 should say "A2UI v1.0" (upstream marks it stable).
 - **Talk content notes:** the §9.1 beats now depend on what the composer builds, since there are no scripted flows; replay is the safety net. The closing line's N/M comes from the session totals, which replays don't change. Don't quote vendor numbers (§9.3).
 
-## Event (found by web search 2026-11-23; owner to confirm)
+## Event (found by web search 2026-11-23; **confirmed by the owner 2026-11-24**)
 - Next AI Tinkerers Bremen meetup: **Wednesday 2026-11-25, 18:00 CET** (18:30 demos, 20:00 networking + food). https://bremen.aitinkerers.org/p/ai-tinkerers-bremen-4
-- Location says "exact location details will be provided later". The venue sponsor logo is **Just Add AI (JAAI)**, HQ Konsul-Smidt-Straße 8p, 28217 Bremen (Überseestadt / Europahafen). This is an inference.
+- Venue: **Just Add AI (JAAI)**, Konsul-Smidt-Straße 8p, 28217 Bremen (Überseestadt / Europahafen). Confirmed by the owner.
 - **If this is the talk, the deadline is 2 days: apply PLAN's cut order up front.** Priorities: deploy → replay (never cut) → rehearsal → smoke numbers.
 - **Owner direction (2026-11-23): no fixed data and no scripted flows.** Anyone can ask anything; the UI renders on the fly with skeletons while live data loads. `places.json` is NOT used for the product; places come from live web search (see `.superpowers/sdd/phase2-W-live-search-brief.md`). The research in `places-research.md` is only background.
 - The owner likes **voice-glow** (VoiceBeam) and **distortion-waves** (DistortionWave) from libraries.dev; see `phase2-S-components-brief.md`.
 
 ## Waiting on the owner
 - (Keys: ANTHROPIC_API_KEY and SONIOX_API_KEY were added to `.dev.vars` and verified live on 2026-11-23: Claude answered, Soniox temp key minted 201.)
-- Confirm the venue (inferred JAAI, Überseestadt) and that the talk is the 25 Nov meetup.
 - Projector resolution (assume 1920×1080).
 - Talk wording: upstream A2UI now calls v1.0 **stable**, so PLAN §9.3's "v1.0 candidate" line should change.
 
 ## Open decisions
 - **UI SDK (vercel-labs/ui, ui-sdk.dev):** the owner suggested it to "not need prebuilt components". Investigated 2026-11-23. It is build-time behaviors for coding agents plus a runtime agent bridge that *operates* existing components. It has no runtime JSON renderer. Letting the runtime agent "build anything" would mean the LLM writes code, which collapses the talk's A2UI-vs-HTML contrast. **Ruling: keep the A2UI catalog with shadcn/Base UI bricks; don't install it mid-build.** The owner was asked "should the runtime agent compose (data) or write (code)?". If they choose code, that changes the thesis: revisit PLAN §0.1 / §9 with them before touching code. A later swap of the primitives would touch only `a2ui/bricks/*` and `components/ui`.
 - **Router latency from a Worker:** NOTES says the 800 ms budget holds, but that was measured from Bun with keep-alive. After deploy, measure `route.ms` from the deployed Worker, both cold and warm. If cold misses 800 ms, warm the Jev connection on page load or Space-down (the predict call already warms it). Do NOT silently raise the timeout.
+
+## Rate limits (7e120ba)
+- Per client IP, after the key check: `/api/turn` 40 per minute, other `/api/*` 300 per minute (Workers Rate Limiting binding, approximate, per Cloudflare location). Over the cap: 429 and "Too many requests: wait a minute, then try again."
+- Free plan: 100,000 Worker requests/day (reset 00:00 UTC = 01:00 Bremen; Error 1027 after). Static assets are free and unlimited, so only `/api/*` and `/catalog/*` count. No charge on the Free plan; over the limit the API pauses until the reset. A limiter cannot keep that count down (a refused request already ran the Worker); it protects the Claude/Soniox spend.
 
 ## Stage replay map (shipped, works offline; real Sonnet captures at the talk clock)
 | Key | Turn |
@@ -66,7 +69,7 @@ The owner raised the Anthropic spend limit. The key answers again (Haiku 1.3 s, 
 - The smoke now judges the "We're six, and later" patch by its result: 7/7 live patches correct (guests 6, time +60 min same date, nothing else). It catches the old false passes.
 
 ## Rehearsal checklist (owner, on the stage machine, Chrome)
-- Open the deployed URL with `?k=<DEMO_KEY>`. Allow the mic.
+- Open the deployed URL with `?k=<DEMO_KEY>` once; the browser remembers the key (localStorage), so later tabs work without it. "no demo key" / "Demo key missing or wrong" means this step was skipped or the key was mistyped. Allow the mic.
 - Hold Space: the transcript appears grey, then final; the glow rises; release, and the turn goes out.
 - Press real F1, F3, F5 and F6: they must play replays, not reload, open help or find, or jump to the address bar. Slots 5–6 may leak in Chrome; if so, use F1–F4 on stage.
 - Shift+R after each good live turn to save it; Shift+E (or DevRunner "Copy replays JSON") to export, so the controller can ship them in `src/client/replays.json`.

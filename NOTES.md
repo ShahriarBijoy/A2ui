@@ -59,6 +59,12 @@ Read this before calling any external API. Items here override PLAN.md where the
 - Smoke held-out lines (first version) were reconstructed from summaries; exact intended wording: "Plan a 3-day trip to Lisbon in March", "Compare two phone plans for me", "I want to adopt a dog, what do I need?", "Help me pick a gift for my mum, budget 50 euros", "Book a haircut for Saturday morning".
 - Known quality limits: some sources are yelp search pages (3/25 rows); a place closing at 17:00 can appear for "dinner" when the query lacks a time; walk_min is null in practice (25/25), since sources rarely state walking time.
 
+## Cloudflare free plan and rate limits (docs fetched 2026-11-24)
+- Workers Free: 100,000 requests/day, reset at midnight UTC, Error 1027 after; 10 ms CPU per request; 50 subrequests per request.
+- "Requests to static assets are free and unlimited" (pricing page). With `run_worker_first: ["/api/*", "/catalog/*"]` only those paths run the Worker.
+- Rate Limiting binding (`ratelimits` in wrangler.jsonc, wrangler ≥ 4.36; we run 4.166): `limit({key})` → `{success}`; periods 10 or 60 s only; approximate and local to each Cloudflare location. A strict or daily cap would need a Durable Object (Free plan: SQLite-backed DOs only). Ruling: binding only, no DO two days before the talk (advisor).
+- Rate-limited and unauthorized requests still count toward the 100k/day (the Worker ran). The limiter protects the Claude/Soniox spend, not the request count.
+
 ## Composer model A/B (2026-11-23, local, DEV_NOW=2026-11-25T18:45, HEAD 8918fc0, 10 runs per main scenario)
 | | Haiku 5.5 | Sonnet 5.5 |
 |---|---|---|
