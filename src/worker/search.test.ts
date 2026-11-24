@@ -267,11 +267,11 @@ describe("searchPrompt and runSearch", () => {
     expect(await runSearch(trip, empty.fn, ctx, new AbortController().signal)).toMatchObject({ ok: true, searches: 2 });
     expect(empty.calls()).toBe(2);
 
-    // An empty list of places can be right (kitchens closed): asked once.
-    const places = scripted(text("[]"), good);
+    // An empty list of places is asked once more too (an empty opener is the worst stage screen).
+    const places = scripted(text("[]"), text("[]"));
     const p = await runSearch(req, places.fn, ctx, new AbortController().signal);
-    expect(places.calls()).toBe(1);
-    expect(p.ok && p.records).toEqual([]);
+    expect(places.calls()).toBe(2);
+    expect(p).toMatchObject({ ok: true, records: [], searches: 2 });
 
     // A second miss stays a miss, with both calls counted; the client leaving stops the retry.
     const twice = scripted(text("no"), text("still no"));

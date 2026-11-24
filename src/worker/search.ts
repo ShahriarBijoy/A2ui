@@ -133,14 +133,15 @@ export function searchPrompt(req: SearchRequest, ctx: PromptContext): Prompt {
 const NOT_JSON = "answer was not a JSON array";
 
 /**
- * Runs the search, and once more when the answer is malformed (prose instead of the array) or a trip list
- * comes back empty: the two misses measured in flight chains (2 of 10 at f35faaa). A real route always has
- * carriers, while an empty list of places can be right, so only trips retry on []. A thrown error, a refusal
- * or the client leaving is not retried. Never throws: every failure becomes { ok: false, error }.
+ * Runs the search, and once more when the answer is malformed (prose instead of the array) or the list comes
+ * back empty: the misses measured in flight chains (2 of 10 at f35faaa) and on the dinner opener (1 of 2 on
+ * production, 2026-11-24 15:03). An empty list can be right (kitchens closed), but on stage it is the worst
+ * screen, so it costs one more search (~3 s) before "Nothing found". A thrown error, a refusal or the client
+ * leaving is not retried. Never throws: every failure becomes { ok: false, error }.
  */
 export async function runSearch(req: SearchRequest, webSearch: WebSearch, ctx: PromptContext, signal: AbortSignal): Promise<SearchOutcome> {
   const first = await searchOnce(req, webSearch, ctx, signal);
-  if (signal.aborted || !worthRetry(first, req)) return first;
+  if (signal.aborted || !worthRetry(first)) return first;
   const second = await searchOnce(req, webSearch, ctx, signal);
   // Both calls ran and were billed: the measured counts are their sums.
   const sum = (a: number | undefined, b: number | undefined) => (a ?? 0) + (b ?? 0);
@@ -148,9 +149,9 @@ export async function runSearch(req: SearchRequest, webSearch: WebSearch, ctx: P
   return { ...second, ...metrics };
 }
 
-function worthRetry(o: SearchOutcome, req: SearchRequest): boolean {
+function worthRetry(o: SearchOutcome): boolean {
   if (!o.ok) return o.error === NOT_JSON;
-  return o.records.length === 0 && IDENTITY_FIELDS.some((f) => req.fields.includes(f));
+  return o.records.length === 0;
 }
 
 async function searchOnce(req: SearchRequest, webSearch: WebSearch, ctx: PromptContext, signal: AbortSignal): Promise<SearchOutcome> {
