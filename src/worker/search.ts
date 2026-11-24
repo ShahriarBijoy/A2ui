@@ -14,8 +14,11 @@ export const MAX_SEARCH_ITEMS = 6;
 export const DEFAULT_SEARCH_ITEMS = 5;
 /** Used when the composer names no usable fields: what an OptionCard template usually binds. */
 export const DEFAULT_SEARCH_FIELDS: readonly string[] = ["name", "subtitle", "tags"];
-/** "id" and "source" are added by the server, so the composer cannot ask the search for them. */
-const SERVER_FIELDS = new Set(["id", "source"]);
+/**
+ * Added by the server, so the search model is never asked for them: "id", "source", and "image"
+ * (the photo URL is read from the source page's og:image by the Worker, see ogImage.ts).
+ */
+const SERVER_FIELDS = new Set(["id", "source", "image"]);
 const MAX_FIELDS = 8;
 const MAX_QUERY_CHARS = 300;
 const MAX_TEXT_CHARS = 200;
@@ -23,7 +26,8 @@ const MAX_TAG_CHARS = 40;
 const MAX_TAGS = 5;
 const FIELD_NAME = /^[A-Za-z][A-Za-z0-9_]{0,31}$/;
 
-export type SearchRequest = { query: string; fields: string[]; max: number };
+/** images: the composer asked for "image"; the Worker fills it from each record's source page. */
+export type SearchRequest = { query: string; fields: string[]; max: number; images?: boolean };
 
 export type SearchOutcome =
   | { ok: true; records: JsonObject[]; dropped: number; searches: number; inputTokens: number; outputTokens: number }
@@ -35,10 +39,12 @@ export function parseSearchArgs(args: JsonObject): { ok: true; req: SearchReques
   const query = typeof args.query === "string" ? args.query.trim().replace(/\s+/g, " ") : "";
   if (!query) return { ok: false, error: "search: missing 'query'" };
   const fields: string[] = [];
+  let images = false;
   if (Array.isArray(args.fields)) {
     for (const f of args.fields) {
       if (typeof f !== "string") continue;
       const name = f.trim();
+      if (name === "image") images = true;
       if (FIELD_NAME.test(name) && !SERVER_FIELDS.has(name) && !fields.includes(name)) fields.push(name);
     }
   }
@@ -50,6 +56,7 @@ export function parseSearchArgs(args: JsonObject): { ok: true; req: SearchReques
       query: query.slice(0, MAX_QUERY_CHARS),
       fields: fields.length > 0 ? fields.slice(0, MAX_FIELDS) : [...DEFAULT_SEARCH_FIELDS],
       max,
+      ...(images ? { images: true } : {}),
     },
   };
 }

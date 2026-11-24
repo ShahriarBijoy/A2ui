@@ -15,6 +15,7 @@ import {
   type WireComponent,
 } from "@shared/a2ui";
 import { CATALOG_PATH } from "@shared/catalog";
+import { isIconName } from "@shared/icons";
 import { formatPointer, getAt, parsePointer } from "@shared/pointer";
 import {
   LIMITS,
@@ -63,6 +64,11 @@ export type TurnDeps = {
   fetchTimeoutMs?: number;
   /** Every live fetch ends this many ms after the turn started (default TURN_BUDGET_MS). */
   turnBudgetMs?: number;
+  /**
+   * Photo URL per source page (og:image, see ogImage.ts) for searches that request "image". Without it
+   * such records keep image: null. Must never reject; the signal ends with the client.
+   */
+  ogImages?: (urls: readonly (string | null)[], signal: AbortSignal) => Promise<(string | null)[]>;
 };
 
 /** The client gives up after 25 s (CLIENT_TIMEOUT_MS); fetches end before that so their [] and error still arrive. */
@@ -309,7 +315,8 @@ class LiveFetches {
   private readonly pending = new Map<string, Promise<void>>();
 
   constructor(
-    private readonly signal: AbortSignal,
+    /** Aborts when the client goes away; work that runs after a fetch (image lookups) stops with it. */
+    readonly signal: AbortSignal,
     private readonly now: () => number,
     private readonly timeoutMs: number,
     private readonly deadlineAt: number,
@@ -437,8 +444,8 @@ async function composeA2ui(req: TurnRequest, deps: TurnDeps, send: Emit, signal:
   let sent = new Map<string, { created: boolean; comps: Map<string, WireComponent> }>();
   /** Data paths the current attempt requested. */
   let intos = new Set<string>();
-  /** Data already emitted: a retry that rebuilds the step gets it again on its own surface. */
-  const delivered: { into: string; records: JsonValue }[] = [];
+  /** Data already emitted (and where): a retry that rebuilds the step gets it again on its own surface. */
+  const delivered: { surfaceId: string; into: string; records: JsonValue }[] = [];
   /** Unreachable Lists (and their templates) whose requested data shows nowhere, and those data paths; set when an attempt ends. */
   let unshown: { ids: string[]; paths: string[] } = { ids: [], paths: [] };
   /** The last surface this turn created: a retry that builds nothing new still has attempt 1's surface. */
@@ -462,7 +469,7 @@ async function composeA2ui(req: TurnRequest, deps: TurnDeps, send: Emit, signal:
   /** `after` is the data line's fetch event; a copy carried into a retry has none (it was sent once). */
   const emitData = async (surfaceId: string, into: string, records: JsonValue, after: TurnEvent | null) => {
     await emitA2ui(dataMsg(surfaceId, into, records), "data", false);
-    delivered.push({ into, records });
+    delivered.push({ surfaceId, into, records });
     if (hasRecords(records)) filled.add(into);
     if (after) await send(after);
   };
@@ -489,6 +496,35 @@ async function composeA2ui(req: TurnRequest, deps: TurnDeps, send: Emit, signal:
       return;
     }
     await emitData(createdSurface ?? fallbackSurface(), into, records, after);
+  };
+  /**
+   * The same records with their image URLs filled in. A copy still held for a surface goes out with
+   * them; a copy already shown gets one more updateDataModel for the same path, on each surface it
+   * went to; a retry carries the filled copy. No second fetch event: it is not another search.
+   */
+  const upgrade = async (into: string, before: JsonValue, after: JsonValue) => {
+    pending = pending.map((p) => (p.into === into && p.records === before ? { ...p, records: after } : p));
+    const targets = new Set<string>();
+    for (const d of delivered) {
+      if (d.into !== into || d.records !== before) continue;
+      d.records = after;
+      targets.add(d.surfaceId);
+    }
+    for (const surfaceId of targets) await emitA2ui(dataMsg(surfaceId, into, after), "data", false);
+  };
+  /** og:image lookups for a search that requested "image": records first (image null), photos after. */
+  const addImages = async (into: string, records: JsonObject[]) => {
+    const lookup = deps.ogImages;
+    if (!lookup || live.cancelled) return;
+    let images: (string | null)[];
+    try {
+      images = await lookup(records.map((r) => (typeof r.source === "string" ? r.source : null)), live.signal);
+    } catch (err) {
+      warn(`image lookup failed (${err instanceof Error ? err.message : String(err)}) for ${into}`);
+      return;
+    }
+    if (live.cancelled || !images.some((u) => typeof u === "string")) return;
+    await upgrade(into, records, records.map((r, i) => ({ ...r, image: images[i] ?? null })));
   };
   const track = (msg: A2uiMessage) => {
     if ("createSurface" in msg) {
@@ -596,8 +632,10 @@ async function composeA2ui(req: TurnRequest, deps: TurnDeps, send: Emit, signal:
     if (c.kind === "a2ui") {
       const checks = fixChecks(fixCatalogId(c.msg, deps.context.catalogId));
       if (checks.fixed > 0) warn(`composer @checks fixed (${checks.fixed} bare condition): ${line.slice(0, 160)}`);
-      track(checks.msg);
-      const msg = normalize(checks.msg);
+      const icons = fixIcons(checks.msg);
+      if (icons.fixed > 0) warn(`composer icon dropped (${icons.fixed} not in the icon set): ${line.slice(0, 160)}`);
+      track(icons.msg);
+      const msg = normalize(icons.msg);
       if ("createSurface" in msg) {
         createdSurface = msg.createSurface.surfaceId;
         lastCreated = createdSurface;
@@ -634,7 +672,10 @@ async function composeA2ui(req: TurnRequest, deps: TurnDeps, send: Emit, signal:
       async ({ outcome, ms }) => {
         if (!outcome.ok) warn(`search failed (${outcome.error}): ${sreq.query}`);
         else if (outcome.dropped > 0) warn(`search dropped ${outcome.dropped} invalid item(s): ${sreq.query}`);
-        await deliver(into, outcome.ok ? outcome.records : [], fetchEvent("search", sreq.query, outcome, ms));
+        // A requested image is never the model's: every record starts with null and the Worker fills it.
+        const records = outcome.ok ? (sreq.images ? outcome.records.map((r) => ({ ...r, image: null })) : outcome.records) : [];
+        await deliver(into, records, fetchEvent("search", sreq.query, outcome, ms));
+        if (sreq.images && records.length > 0) await addImages(into, records);
       },
     );
   };
@@ -693,7 +734,7 @@ async function composeA2ui(req: TurnRequest, deps: TurnDeps, send: Emit, signal:
       // The retry rebuilds the step, maybe on a surface that starts over: data waits for the retry's
       // first message again, and what attempt 1 already delivered goes along.
       createdSurface = null;
-      pending = [...pending, ...delivered.map((d) => ({ ...d, after: null, requeued: true }))];
+      pending = [...pending, ...delivered.map((d) => ({ into: d.into, records: d.records, after: null, requeued: true }))];
     }
     sent = new Map();
     intos = new Set();
@@ -766,6 +807,26 @@ export function fixChecks(msg: A2uiMessage): { msg: A2uiMessage; fixed: number }
       return { condition: call, message };
     });
     return changed ? { ...comp, "@checks": next } : comp;
+  });
+  if (fixed === 0) return { msg, fixed };
+  return { msg: { version: A2UI_VERSION, updateComponents: { ...msg.updateComponents, components } }, fixed };
+}
+
+/**
+ * The client refuses an OptionCard or Button whose optional icon is outside the icon set, whole: a
+ * decoration would cost every card of a list. Drop the unknown icon instead (the Icon brick itself
+ * is left to the client, which refuses it visibly).
+ */
+export function fixIcons(msg: A2uiMessage): { msg: A2uiMessage; fixed: number } {
+  if (!("updateComponents" in msg)) return { msg, fixed: 0 };
+  let fixed = 0;
+  const components = msg.updateComponents.components.map((comp) => {
+    if (comp.component !== "OptionCard" && comp.component !== "Button") return comp;
+    if (comp.icon === undefined || comp.icon === null || isIconName(comp.icon)) return comp;
+    fixed++;
+    const rest: WireComponent = { ...comp };
+    delete rest.icon;
+    return rest;
   });
   if (fixed === 0) return { msg, fixed };
   return { msg: { version: A2UI_VERSION, updateComponents: { ...msg.updateComponents, components } }, fixed };

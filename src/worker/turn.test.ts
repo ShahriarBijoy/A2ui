@@ -8,6 +8,7 @@ import {
   childIds,
   encodeEvent,
   fixChecks,
+  fixIcons,
   MAX_SEARCHES_PER_TURN,
   normalizeInputValue,
   parseTurnRequest,
@@ -445,6 +446,28 @@ describe("runTurn: stop reasons, repairs, captions", () => {
     expect(fixChecks(ok).msg).toBe(ok);
   });
 
+  test("an OptionCard or Button icon outside the set is dropped (the client would refuse the card); the Icon brick is left alone", () => {
+    const msg = {
+      version: "1.0" as const,
+      updateComponents: {
+        surfaceId: "s3",
+        components: [
+          { id: "card", component: "OptionCard", title: "A", icon: "airplane" },
+          { id: "go", component: "Button", child: "l", action: { event: { name: "go" } }, icon: "check" },
+          { id: "i", component: "Icon", name: "rocket" },
+          { id: "c2", component: "OptionCard", title: "B", icon: null },
+        ],
+      },
+    };
+    const { msg: out, fixed } = fixIcons(msg);
+    expect(fixed).toBe(1);
+    const comps = (out as typeof msg).updateComponents.components;
+    expect(comps[0] as unknown).toEqual({ id: "card", component: "OptionCard", title: "A" });
+    expect(comps.slice(1)).toEqual(msg.updateComponents.components.slice(1));
+    const clean = { version: "1.0" as const, updateComponents: { surfaceId: "s3", components: [comps[1]] } };
+    expect(fixIcons(clean).msg).toBe(clean);
+  });
+
   test("at most one caption per turn, sent after the screen", async () => {
     const events = await collect(request({ decision: false }), deps({ llm: fakeLlm([`{"caption":"early"}\n${create}\n{"caption":"late"}\n`]) }));
     expect(events.filter((e) => e.type === "caption")).toEqual([{ type: "caption", text: "late" }]);
@@ -521,6 +544,141 @@ describe("runTurn: live search data lines", () => {
     expect(f).toMatchObject({ type: "fetch", source: "search", query: QUERY, ok: true, records: 2, searches: 1, input_tokens: 15000, output_tokens: 800 });
     expect(f.ms).toBeGreaterThan(0);
     expect(f.error).toBeUndefined();
+  });
+
+
+  describe("image field (og:image enrichment)", () => {
+    const SEARCH_IMG = `{"data":{"source":"search","args":{"query":"${QUERY}","fields":["name","image"],"max":3},"into":"/results"}}`;
+    const PHOTO = (i: number) => `https://cdn.example/${i}.jpg`;
+
+    test("image field: records first, then one update with image urls", async () => {
+      let seen: SearchRequest | null = null;
+      let urls: readonly (string | null)[] = [];
+      const ogImages = async (u: readonly (string | null)[]) => {
+        urls = u;
+        return u.map((_, i) => (i === 1 ? null : PHOTO(i)));
+      };
+      const events = await collect(
+        request({ decision: false }),
+        deps({
+          llm: fakeLlm([`${CREATE}\n${ROOT}\n${SEARCH_IMG}\n{"caption":"Cafés"}\n`]),
+          search: async (r) => {
+            seen = r;
+            return found(3);
+          },
+          ogImages,
+        }),
+      );
+      // The model is never asked for image: it is not in the search fields.
+      expect(seen!).toEqual({ query: QUERY, fields: ["name"], max: 3, images: true });
+      expect(urls).toEqual(items(3).map((r) => r.source));
+      const data = events.filter((e) => e.type === "a2ui" && e.origin === "data");
+      expect(data).toHaveLength(2);
+      expect(valueOf(data[0]).value).toEqual(items(3).map((r) => ({ ...r, image: null })));
+      expect(valueOf(data[1])).toEqual({ surfaceId: "s3", path: "/results", value: items(3).map((r, i) => ({ ...r, image: i === 1 ? null : PHOTO(i) })) });
+      // Records, their fetch event, then the photos; one fetch only (no extra search); done last.
+      const order = events.map(label);
+      expect(order.indexOf("fetch")).toBeGreaterThan(events.indexOf(data[0]));
+      expect(events.indexOf(data[1])).toBeGreaterThan(order.indexOf("fetch"));
+      expect(order.filter((l) => l === "fetch")).toHaveLength(1);
+      expect(order.at(-1)).toBe("done");
+    });
+
+    test("no image found: no second update", async () => {
+      const events = await collect(
+        request({ decision: false }),
+        deps({
+          llm: fakeLlm([`${CREATE}\n${ROOT}\n${SEARCH_IMG}\n{"caption":"x"}\n`]),
+          search: async () => found(2),
+          ogImages: async (u) => u.map(() => null),
+        }),
+      );
+      const data = events.filter((e) => e.type === "a2ui" && e.origin === "data");
+      expect(data).toHaveLength(1);
+      expect(valueOf(data[0]).value).toEqual(items(2).map((r) => ({ ...r, image: null })));
+    });
+
+    test("a search without image gets no image key and no lookup", async () => {
+      let looked = false;
+      const events = await collect(
+        request({ decision: false }),
+        deps({
+          llm: fakeLlm([`${CREATE}\n${ROOT}\n${SEARCH}\n{"caption":"x"}\n`]),
+          search: async () => found(2),
+          ogImages: async (u) => {
+            looked = true;
+            return u.map(() => PHOTO(0));
+          },
+        }),
+      );
+      expect(looked).toBe(false);
+      const data = events.filter((e) => e.type === "a2ui" && e.origin === "data");
+      expect(data).toHaveLength(1);
+      expect(valueOf(data[0]).value).toEqual(items(2));
+    });
+
+    test("a result still held for createSurface carries its images: one data message", async () => {
+      const llm: Llm = {
+        streamText() {
+          return {
+            async *[Symbol.asyncIterator]() {
+              yield `${SEARCH_IMG}\n`;
+              await new Promise((r) => setTimeout(r, 30));
+              yield `${CREATE}\n${ROOT}\n{"caption":"x"}\n`;
+            },
+            async result() {
+              return { usage, stopReason: "end_turn" };
+            },
+            abort() {},
+          };
+        },
+        async callTools() {
+          throw new Error("unused");
+        },
+      };
+      const events = await collect(request({ decision: false }), deps({ llm, search: async () => found(1), ogImages: async () => [PHOTO(7)] }));
+      const data = events.filter((e) => e.type === "a2ui" && e.origin === "data");
+      expect(data).toHaveLength(1);
+      expect(valueOf(data[0])).toEqual({ surfaceId: "s3", path: "/results", value: [{ ...items(1)[0], image: PHOTO(7) }] });
+    });
+
+    test("a failing lookup keeps the records and logs; the client leaving stops it", async () => {
+      const warnings: string[] = [];
+      const events = await collect(
+        request({ decision: false }),
+        deps({
+          llm: fakeLlm([`${CREATE}\n${ROOT}\n${SEARCH_IMG}\n{"caption":"x"}\n`]),
+          search: async () => found(1),
+          ogImages: async () => {
+            throw new Error("lookup broke");
+          },
+          warn: (m) => void warnings.push(m),
+        }),
+      );
+      expect(events.filter((e) => e.type === "a2ui" && e.origin === "data")).toHaveLength(1);
+      expect(warnings).toContainEqual(expect.stringContaining("image lookup failed (lookup broke)"));
+      expect(events.at(-1)).toEqual({ type: "done" });
+
+      const ctl = new AbortController();
+      let signalSeen: AbortSignal | null = null;
+      const pending = collect(
+        request({ decision: false }),
+        deps({
+          llm: fakeLlm([`${CREATE}\n${ROOT}\n${SEARCH_IMG}\n{"caption":"x"}\n`]),
+          search: async () => found(1),
+          ogImages: (u, signal) => {
+            signalSeen = signal;
+            setTimeout(() => ctl.abort(), 5);
+            return new Promise((resolve) => signal.addEventListener("abort", () => resolve(u.map(() => PHOTO(1)))));
+          },
+        }),
+        ctl.signal,
+      );
+      const after = await pending;
+      expect(signalSeen!.aborted).toBe(true);
+      // The photos answered after the client left: nothing more is sent.
+      expect(after.filter((e) => e.type === "a2ui" && e.origin === "data")).toHaveLength(1);
+    });
   });
 
   test("a search past its budget: [] then fetch ok:false, the request is cancelled, then done", async () => {
