@@ -111,7 +111,7 @@ async function fetchKeyFromWorker(): Promise<SonioxKeyResponse> {
     throw new VoiceError("Voice unavailable: cannot reach the server.", { cause });
   }
   if (res.status === 401) {
-    throw new VoiceError(hasDemoKey() ? "Voice unavailable: wrong demo key in the link." : "Voice unavailable: no demo key. Open the link with ?k=<key> once.");
+    throw new VoiceError(hasDemoKey() ? "Voice unavailable: wrong demo key." : "Voice unavailable: enter the demo key.");
   }
   if (res.status === 429) throw new VoiceError("Voice unavailable: too many requests. Wait a minute.");
   if (!res.ok) throw new VoiceError(`Voice unavailable: speech service error (${res.status}).`);
