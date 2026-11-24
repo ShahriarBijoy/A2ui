@@ -150,6 +150,8 @@ what they show; each counts toward the 7 visible blocks.
   Real-world facts in them come from a data line, as for a List: bind rows or items to its "into" path.
 - Image.url and Rating.value only from a data line's fields: request "image" or "rating" in its fields and
   bind {"@path":"image"} or {"@path":"rating"} in the template. Never write a URL or a rating yourself.
+- Alert and Badge only for a notice the person asked for or a fact a data line delivered (e.g. opening hours from search);
+  never on a confirm/summary step, never a claim about the booking, the airline, the venue or what happens next.
 
 DYNAMIC VALUES
   literal | {"@path":"/abs"} | {"@path":"relative"} inside a List template

@@ -308,6 +308,16 @@ export function dataOnlyViolations(surface: SurfaceState, delivered: ReadonlySet
   return [...bad];
 }
 
+/**
+ * A confirm tap gets a summary step (composer rule 8) that must not carry an Alert or Badge: there they state things
+ * no data line said ("You can pick a seat later", "Confirmed"). Ids of the Alerts / Badges drawn on such a step.
+ */
+export function summaryNotices(surface: SurfaceState, tappedAction: string | null): string[] {
+  if (!tappedAction?.startsWith("confirm_")) return [];
+  const ids = allNodes(surface).filter((n) => n.entry.status === "ok" && (typeOf(n.entry) === "Alert" || typeOf(n.entry) === "Badge")).map((n) => n.id);
+  return [...new Set(ids)];
+}
+
 /** First OptionCard or Button (render order) whose action name starts with the prefix. */
 function findTapTarget(surface: SurfaceState, prefix: string): { node: Node; action: Action } | null {
   for (const node of renderOrder(surface)) {
@@ -610,6 +620,9 @@ function evaluate(
       if (lost.length) notes.push(`not reachable from root: ${lost.join(", ")}`);
       const invented = dataOnlyViolations(surface, delivered);
       if (invented.length) reasons.push(`invented: ${invented.join(", ")}`);
+      const tapped = agent.retry.input.type === "action" ? agent.retry.input.action.name : null;
+      const notices = summaryNotices(surface, tapped);
+      if (notices.length) reasons.push(`notice on summary: ${notices.join(", ")}`);
       if (expect?.bricks || expect?.data) {
         const types = new Set<string>(Object.values(surface.components).flatMap((c) => (c.status === "ok" ? [c.def.component] : [])));
         const missing = (expect.bricks ?? []).filter((b) => !types.has(b));
@@ -984,7 +997,7 @@ async function main(): Promise<void> {
     `- Script tree: ${gitHead()}. Models reported by the Worker: ${models.join(", ") || "–"}.`,
     ...(opts.note ? [`- Note: ${opts.note}`] : []),
     `- a2ui: every scenario (all steps) and ${HELD_OUT.length} held-out lines, ${opts.runs}× each, decision model on. widgets and html: each scenario's opening line once, in the modes it lists.`,
-    "- Pass: at least one component rendered (widgets: a widget or text; html: a page); 0 refused and 0 validation errors in the real client processor; ≤ 7 visible blocks; no error; on a step that expects OptionCards, at least one OptionCard drawn by a List from data with a non-empty title (\"options N\" in the notes); every Image url and Rating value on screen was delivered by a data event in that session (\"invented: ids\" otherwise).",
+    "- Pass: at least one component rendered (widgets: a widget or text; html: a page); 0 refused and 0 validation errors in the real client processor; ≤ 7 visible blocks; no error; on a step that expects OptionCards, at least one OptionCard drawn by a List from data with a non-empty title (\"options N\" in the notes); every Image url and Rating value on screen was delivered by a data event in that session (\"invented: ids\" otherwise); no Alert or Badge on the summary step after a confirm_ tap (\"notice on summary: ids\").",
     ...(opts.strict ? ["- --strict: a step also fails when its expected bricks or data are missing."] : []),
     "- Patch step (\"We're six, and later.\"), judged by its result in the real processor: if the screen before it has a people count (Stepper/Slider) and a time control (ChoicePicker of HH:mm, time or date+time DateTimeInput) with a later time on the same date, the route must patch with no usage event, the count must be 6, one time control must move later on the same date, and no other data value may change. Otherwise the route must compose, and a patch fails (\"later dropped\"). Per-run values are under \"Patch checks\".",
     "- Visible block (controller ruling): a top-level visual unit inside the root container. The root is unwrapped through Cards, single-child Columns and the first tab; each child of the main Column counts once, whatever it holds (a label/value Row, a List, a nested Column or Card, a Button).",

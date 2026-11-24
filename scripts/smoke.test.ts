@@ -5,7 +5,7 @@ import { setAt } from "@shared/pointer";
 import type { SurfaceState } from "../src/client/state";
 import { FIXTURE_CATALOG_ID } from "../src/client/a2ui/fixtures";
 import { applyMessage } from "../src/client/a2ui/processor";
-import { PATCH_EXPECT, changedLeaves, checkPatchOutcome, countControl, dataLeaves, dataOnlyViolations, listedOptions, parseTime, planPatch, timeControls } from "./smoke";
+import { PATCH_EXPECT, changedLeaves, checkPatchOutcome, countControl, dataLeaves, dataOnlyViolations, listedOptions, parseTime, planPatch, summaryNotices, timeControls } from "./smoke";
 
 // The talk clock (DEV_NOW); date knobs list today..today+14 from it.
 const NOW = new Date(2026, 10, 25, 18, 45);
@@ -271,6 +271,24 @@ describe("dataOnlyViolations", () => {
       {},
     );
     expect(dataOnlyViolations(s, new Set())).toEqual(["deep"]);
+  });
+
+  test("summaryNotices: an Alert or Badge on the step after a confirm_ tap is flagged; other steps are not", () => {
+    const s = build(
+      [
+        { id: "root", component: "Card", child: "main" },
+        { id: "main", component: "Column", children: ["h", "done", "tag"] },
+        { id: "h", component: "Text", text: "## Booked" },
+        { id: "done", component: "Alert", variant: "success", text: "You can pick a seat later." },
+        { id: "tag", component: "Badge", text: "Confirmed" },
+      ],
+      {},
+    );
+    expect(summaryNotices(s, "confirm_flight")).toEqual(["done", "tag"]);
+    expect(summaryNotices(s, "pick_restaurant")).toEqual([]);
+    expect(summaryNotices(s, null)).toEqual([]);
+    const clean = build([{ id: "root", component: "Card", child: "h" }, { id: "h", component: "Text", text: "## Booked" }], {});
+    expect(summaryNotices(clean, "confirm_flight")).toEqual([]);
   });
 
   test("dataLeaves: strings trimmed, numbers as text, nested", () => {

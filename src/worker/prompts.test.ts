@@ -56,6 +56,8 @@ describe("composer prompt", () => {
     expect(flat).toContain("Never write a URL or a rating yourself.");
     expect(flat).toContain("Anything the person picks stays an OptionCard in a List; never put choices in a Table.");
     expect(flat).toContain("each counts toward the 7 visible blocks");
+    // Spec anti-goal: no notice states a fact nobody stated.
+    expect(flat).toContain("Alert and Badge only for a notice the person asked for or a fact a data line delivered (e.g. opening hours from search); never on a confirm/summary step, never a claim about the booking, the airline, the venue or what happens next.");
     expect(flat).toContain("rating, image (a photo, for an Image), carrier and route (trips)");
     // The 7-block design rule is still there.
     expect(flat).toContain("At most 7 visible blocks.");
