@@ -9,6 +9,7 @@ import {
   encodeEvent,
   fixChecks,
   fixIcons,
+  MAX_IMAGE_LOOKUPS,
   MAX_SEARCHES_PER_TURN,
   normalizeInputValue,
   parseTurnRequest,
@@ -640,6 +641,48 @@ describe("runTurn: live search data lines", () => {
       const data = events.filter((e) => e.type === "a2ui" && e.origin === "data");
       expect(data).toHaveLength(1);
       expect(valueOf(data[0])).toEqual({ surfaceId: "s3", path: "/results", value: [{ ...items(1)[0], image: PHOTO(7) }] });
+    });
+
+    test("lookups cover the first MAX_IMAGE_LOOKUPS records and get the turn's remaining budget (at most 1.5 s)", async () => {
+      let seenUrls: readonly (string | null)[] = [];
+      let seenMs = -1;
+      await collect(
+        request({ decision: false }),
+        deps({
+          llm: fakeLlm([`${CREATE}\n${ROOT}\n${SEARCH_IMG}\n{"caption":"x"}\n`]),
+          search: async () => found(6),
+          ogImages: async (u, _signal, timeoutMs) => {
+            seenUrls = u;
+            seenMs = timeoutMs;
+            return u.map(() => null);
+          },
+        }),
+      );
+      expect(MAX_IMAGE_LOOKUPS).toBe(4);
+      expect(seenUrls).toEqual([...items(4).map((r) => r.source), null, null]);
+      expect(seenMs).toBeGreaterThan(0);
+      expect(seenMs).toBeLessThanOrEqual(1500);
+    });
+
+    test("no lookup when the turn budget is nearly spent: the records stand, a warning says why", async () => {
+      const warnings: string[] = [];
+      let called = false;
+      const events = await collect(
+        request({ decision: false }),
+        deps({
+          llm: fakeLlm([`${CREATE}\n${ROOT}\n${SEARCH_IMG}\n{"caption":"x"}\n`]),
+          search: async () => found(2),
+          turnBudgetMs: 400,
+          ogImages: async (u) => {
+            called = true;
+            return u.map(() => PHOTO(1));
+          },
+          warn: (m) => void warnings.push(m),
+        }),
+      );
+      expect(called).toBe(false);
+      expect(warnings).toContainEqual(expect.stringContaining("image lookup skipped for /results"));
+      expect(events.filter((e) => e.type === "a2ui" && e.origin === "data")).toHaveLength(1);
     });
 
     test("a failing lookup keeps the records and logs; the client leaving stops it", async () => {

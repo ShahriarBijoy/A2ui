@@ -257,7 +257,9 @@ describe("new bricks", () => {
   test("Chart items must be a path or an array of {label, value}", () => {
     expect(one({ component: "Chart", items: { "@path": "/prices" }, unit: "€" })).toBe("ok");
     expect(one({ component: "Chart", type: "bar", items: [{ label: "A", value: 3 }, { label: "B", value: 0 }] })).toBe("ok");
-    expect(one({ component: "Chart", items: [{ label: "A", value: "3" }] })).toBe("refused");
+    // A numeric string is a number (as for path-bound items); text is not.
+    expect(one({ component: "Chart", items: [{ label: "A", value: "3" }] })).toBe("ok");
+    expect(one({ component: "Chart", items: [{ label: "A", value: "€3" }] })).toBe("refused");
     expect(one({ component: "Chart", items: [{ value: 3 }] })).toBe("refused");
     expect(one({ component: "Chart" })).toBe("refused");
     expect(one({ component: "Chart", type: "pie", items: [{ label: "A", value: 3 }] })).toBe("refused");

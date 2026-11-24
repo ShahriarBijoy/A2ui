@@ -396,6 +396,11 @@ function isItems(v: unknown, item: (x: { [key: string]: unknown }) => boolean): 
   return Array.isArray(v) && v.every((x) => isPlainObject(x) && item(x));
 }
 
+function isNumeric(v: unknown): boolean {
+  if (typeof v === "number") return Number.isFinite(v);
+  return typeof v === "string" && v.trim() !== "" && Number.isFinite(Number(v));
+}
+
 /** undefined (the default) or one of the listed strings. */
 function oneOf(v: unknown, allowed: readonly string[]): boolean {
   return v === undefined || (typeof v === "string" && allowed.includes(v));
@@ -455,7 +460,8 @@ function validateProps(type: BrickName, c: Raw): { prop: string; message: string
       break;
     case "Chart":
       if (!oneOf(c.type, ["bar"])) return bad("type", 'Chart type must be "bar"');
-      if (!isItems(c.items, (x) => typeof x.label === "string" && typeof x.value === "number" && Number.isFinite(x.value))) {
+      // A numeric string counts, as it does for items bound to a path (toNumber); "€12" does not.
+      if (!isItems(c.items, (x) => typeof x.label === "string" && isNumeric(x.value))) {
         return missing("items");
       }
       break;

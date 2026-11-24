@@ -73,7 +73,7 @@ app.post("/api/turn", async (c) => {
     context,
     search: (req, signal) => runSearch(req, webSearch, context, signal),
     // An arrow, not a bare fetch reference: workerd throws "Illegal invocation" on a detached fetch.
-    ogImages: (urls, signal) => fetchOgImages(urls, (input, init) => fetch(input, init), signal),
+    ogImages: (urls, signal, timeoutMs) => fetchOgImages(urls, (input, init) => fetch(input, init), signal, { timeoutMs }),
     now: () => performance.now(),
     composeTimeoutMs: LIMITS.composeTimeoutMs,
     routeGuardMs: LIMITS.routerTimeoutMs + 400,

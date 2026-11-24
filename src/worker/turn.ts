@@ -40,6 +40,7 @@ import {
   type ToolCall,
 } from "./claude";
 import { flightProps, flightQuery, flightSearch, recordsToFlights } from "./flights";
+import { OG_IMAGE_TIMEOUT_MS } from "./ogImage";
 import { COMPOSER_RETRY_NOTE, composerPrompt, composerUnreachableNote, htmlPrompt, widgetsPrompt, type PromptContext } from "./prompts";
 import { placeQuery, recordsToPlaces, restaurantProps, restaurantSearch } from "./restaurants";
 import { parseSearchArgs, SEARCH_TIMEOUT_MS, type SearchOutcome, type SearchRequest } from "./search";
@@ -68,8 +69,13 @@ export type TurnDeps = {
    * Photo URL per source page (og:image, see ogImage.ts) for searches that request "image". Without it
    * such records keep image: null. Must never reject; the signal ends with the client.
    */
-  ogImages?: (urls: readonly (string | null)[], signal: AbortSignal) => Promise<(string | null)[]>;
+  ogImages?: (urls: readonly (string | null)[], signal: AbortSignal, timeoutMs: number) => Promise<(string | null)[]>;
 };
+
+/** og:image lookups per search (the first records; the rest keep image null), and their share of the turn budget. */
+export const MAX_IMAGE_LOOKUPS = 4;
+const IMAGE_BUDGET_RESERVE_MS = 500;
+const MIN_IMAGE_LOOKUP_MS = 300;
 
 /** The client gives up after 25 s (CLIENT_TIMEOUT_MS); fetches end before that so their [] and error still arrive. */
 export const TURN_BUDGET_MS = 23_000;
@@ -331,6 +337,11 @@ class LiveFetches {
     return this.pending.size;
   }
 
+  /** Ms left before every live fetch must have delivered (the turn budget). */
+  remainingMs(): number {
+    return this.deadlineAt - this.now();
+  }
+
   /** The client went away: no fetch delivers any more. */
   get cancelled(): boolean {
     return this.signal.aborted;
@@ -468,15 +479,15 @@ async function composeA2ui(req: TurnRequest, deps: TurnDeps, send: Emit, signal:
   });
   /** `after` is the data line's fetch event; a copy carried into a retry has none (it was sent once). */
   const emitData = async (surfaceId: string, into: string, records: JsonValue, after: TurnEvent | null) => {
-    await emitA2ui(dataMsg(surfaceId, into, records), "data", false);
+    // Listed before the write: an image lookup finishing meanwhile must find these records (upgrade).
     delivered.push({ surfaceId, into, records });
+    await emitA2ui(dataMsg(surfaceId, into, records), "data", false);
     if (hasRecords(records)) filled.add(into);
     if (after) await send(after);
   };
+  /** One entry at a time: an entry waiting its turn stays in `pending`, where an image upgrade still finds it. */
   const flushPending = async (surfaceId: string) => {
-    const held = pending;
-    pending = [];
-    for (const p of held) await emitData(surfaceId, p.into, p.records, p.after);
+    for (let p = pending.shift(); p !== undefined; p = pending.shift()) await emitData(surfaceId, p.into, p.records, p.after);
   };
   const fallbackSurface = () => createdSurface ?? lastCreated ?? req.surface?.id ?? req.nextSurfaceId;
   /** Nothing shown yet: held search results fill a screen, they are not one. */
@@ -516,9 +527,17 @@ async function composeA2ui(req: TurnRequest, deps: TurnDeps, send: Emit, signal:
   const addImages = async (into: string, records: JsonObject[]) => {
     const lookup = deps.ogImages;
     if (!lookup || live.cancelled) return;
+    // Inside the turn budget with room for the update to reach the client before its 25 s timeout.
+    const budget = Math.min(OG_IMAGE_TIMEOUT_MS, live.remainingMs() - IMAGE_BUDGET_RESERVE_MS);
+    if (budget < MIN_IMAGE_LOOKUP_MS) {
+      warn(`image lookup skipped for ${into}: ${Math.round(live.remainingMs())} ms left in the turn`);
+      return;
+    }
     let images: (string | null)[];
     try {
-      images = await lookup(records.map((r) => (typeof r.source === "string" ? r.source : null)), live.signal);
+      // Only the first few records: fewer parallel subrequests (Workers caps them per invocation).
+      const urls = records.map((r, i) => (i < MAX_IMAGE_LOOKUPS && typeof r.source === "string" ? r.source : null));
+      images = await lookup(urls, live.signal, budget);
     } catch (err) {
       warn(`image lookup failed (${err instanceof Error ? err.message : String(err)}) for ${into}`);
       return;
