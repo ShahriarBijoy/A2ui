@@ -1,7 +1,8 @@
 import { useMemo, useState } from "react";
 import { BRICKS } from "@shared/catalog";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { formatTokens } from "@/format";
+import { COST_TITLE, formatTokens } from "@/format";
+import { formatUsd } from "@shared/pricing";
 import { cn } from "@/lib/utils";
 import { DataPanel } from "@/panels/Inspector";
 import type { SessionTotals } from "@/state";
@@ -124,7 +125,11 @@ function TurnData({ turnId }: { turnId: string | null }) {
 
 function Metrics({ totals }: { totals: SessionTotals }) {
   return (
-    <dl className="grid shrink-0 grid-cols-3 border-t" aria-label="Totals for this visit">
+    // Four values in a ~340-420 px panel: Cost ("$0.029") gets the widest share, Turns the narrowest.
+    <dl
+      className="grid shrink-0 grid-cols-[minmax(0,0.8fr)_minmax(0,1fr)_minmax(0,1fr)_minmax(0,1.25fr)] border-t"
+      aria-label="Totals for this visit"
+    >
       <Metric label="Turns" value={String(totals.turns)} />
       <Metric label="LLM calls avoided" value={String(totals.llmAvoided)} mark={totals.llmAvoided > 0} />
       <Metric
@@ -132,18 +137,19 @@ function Metrics({ totals }: { totals: SessionTotals }) {
         value={formatTokens(totals.inputTokens + totals.outputTokens)}
         title={`in ${formatTokens(totals.inputTokens)} / out ${formatTokens(totals.outputTokens)}`}
       />
+      <Metric label="Cost" value={formatUsd(totals.costUsd)} title={COST_TITLE} />
     </dl>
   );
 }
 
 function Metric({ label, value, mark, title }: { label: string; value: string; mark?: boolean; title?: string }) {
   return (
-    <div className="flex min-w-0 flex-col justify-between gap-1.5 px-4 py-3.5 not-first:border-l" title={title}>
+    <div className="flex min-w-0 flex-col justify-between gap-1.5 px-3 py-3.5 not-first:border-l" title={title}>
       <dt className="flex items-start gap-1.5 font-mono text-[0.65625rem] leading-tight tracking-[0.1em] text-muted-foreground uppercase">
         {mark && <span aria-hidden className="mt-[0.2em] size-1.5 shrink-0 rounded-full bg-highlight" />}
         {label}
       </dt>
-      <dd className={cn("font-mono text-[1.375rem] leading-none font-semibold tabular-nums")}>{value}</dd>
+      <dd className={cn("font-mono text-[1.25rem] leading-none font-semibold whitespace-nowrap tabular-nums")}>{value}</dd>
     </div>
   );
 }
