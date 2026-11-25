@@ -131,6 +131,7 @@ Stay calm. It's a live demo, and the room is on your side.
 | Wi-Fi or the API is down | Use F1–F6 for the whole story; they work offline | "The network left the party. Here's the recording of the real run." |
 | Someone asks for something odd | Let it build; a "Not available" card is a good answer too | "That's outside the box, and it tells you so." |
 | A list says "Nothing found" | Move on, or press the F-key | "The web had nothing for that one. It doesn't invent things." |
+| You used F-key replays | Replays never add to COST, and F1, F3, F5 show no cost: don't point at the cost | "A new screen costs one to three cents; a small edit, a tiny fraction of that." |
 
 **Replay keys** (work without Wi-Fi):
 | Key | Step |
