@@ -37,7 +37,7 @@ Generative UI has a cost: every new screen is a large-model call. Most turns in 
 
 - **Data, not code.** The catalog is `src/shared/catalog.ts`: 27 components ("bricks"), from Card and List to a seat map and a chart. The agent never writes HTML or JavaScript. An unknown component shows a "Not in the catalog" placeholder. A tap goes back to the app's own server as an action.
 - **The decision model.** [Jev](https://typesafe.ai) by TypeSafe answers fixed questions with a choice and a confidence. It does not write anything. While you speak, it guesses which bricks the request is about (the outlined tiles in the brick panel). When you stop, it decides: change or new? For a change, it picks the new values from the ones the screen allows.
-- **Live facts.** Places, events and fares come from a live web search (Claude Haiku 5.5). Weather comes from [Open-Meteo](https://open-meteo.com). The results go straight to the screen; the composer never reads them. If nothing is found, the list says so. Nothing is invented.
+- **Live facts.** Places, events and fares come from a live web search (Claude Haiku 5.5). Weather comes from [Open-Meteo](https://open-meteo.com). The results go straight to the screen. The composer sees a result only when you tap it: the tap sends that card's data back for the next step. If nothing is found, the list says so. Nothing is invented.
 - **Three modes to compare.** A2UI (bricks), Widgets (hand-built components) and HTML (the model writes the page, shown in a sandboxed frame).
 - **Cost meter.** Every turn shows what it cost: measured tokens × list price, plus the web search fee. The total for the visit is next to the turn counters.
 
