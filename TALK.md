@@ -1,216 +1,157 @@
-# The Future Is Generative UI: the talk
+# Generative UI Is the Future. A Decision Model Makes It Work.
 
 AI Tinkerers Bremen · Wed 25 Nov 2026 · JAAI, Überseestadt · 5 minutes
 
-**The story:** a concept exploration of generative UI, shown in a small playground, told as one evening, live. The meetup ends, you're hungry, friends change plans, tomorrow you fly. Every screen is built on the spot from a box of bricks. Then you show two other ways to build it, let the room ask for something, open the hood, and close.
+Published as an artifact: https://claude.ai/artifact/7hBKDMHow71z8f1jD1CjvK (keep the two in sync).
+Background (how A2UI works, what Jev does, why AI code is unsafe): https://claude.ai/artifact/MNhXViYWFLmG27T2Nc3eJh
 
-**The three claims** (from the plan, keep them):
-1. UI can be generated for the moment: the agent builds the screen you need right now.
-2. A small decision model makes it fast and cheap: most small steps need no big model.
-3. The experience decides: say it once, see it at once, change it in place.
+## The idea in one table
+
+This is what the room should remember.
+
+| | Who builds the screen | Can it show something new? | Safe? |
+|---|---|---|---|
+| **Hand-built widgets** | A designer or developer, months before | No. Only what someone planned | Yes |
+| **AI writes HTML or React** | The AI writes code | Yes | No. The browser runs its code |
+| **A2UI** (a box of bricks) | The AI orders bricks, the app draws them | Yes | Yes. The AI sends data, never code |
+
+**And the decision model makes it work:** the big model builds a screen once, and a small decision model handles the small changes after. That keeps it fast and cheap.
 
 **Before you go on stage**
-- Open the site on the stage laptop, enter the demo key once, allow the mic.
+- Open the site on the stage laptop, **hard-reload it (Ctrl+Shift+R)** so the cost meter shows, enter the demo key once, allow the mic.
 - Rail menu (⋯) → **Delete all sessions**, so no rehearsal titles show on the projector.
 - Mode **A2UI** (key 3), **Decision model** on.
-- Close other tabs. Wi-Fi on. Mic tested with one "hello".
+- Close other tabs. Wi-Fi on. Test the mic with one "hello".
 
 ---
 
 ## The script
 
-*Lines in quotes are what you say. [Brackets] are what you do. Times are rough marks, not a race. The pauses while a screen builds are yours: let the room watch it build.*
+*Plain paragraphs are what you say. [Brackets] are what you do. Lines marked **Say to the app** go to the mic: say them exactly like this. Times are rough marks.*
 
-### 0:00 · The hook
+## Part 1 · Why generative UI
+
+### 0:00 · Opening
 [Empty screen. Bricks panel open on the right.]
 
-"Hi, I'm Shahriar.
-Quick question. How many apps did you open today?
-Every one of them had screens that somebody designed months ago,
-for questions somebody guessed in advance.
+Hi, I'm Ali. I'm finishing my master's at Uni Bremen, and I play with AI tools every day, in my life and at work. Recently I came across A2UI, an open project that Google started, and I found it fascinating.
 
-Tonight I want to try something different.
-This playground has no screens.
-It has a box of bricks." [point at the bricks panel]
-"Twenty-seven of them. Cards, buttons, a seat map, a chart.
-And an agent that picks the bricks while I talk."
+These days anyone can build an app, and almost every app or platform has an AI or an agent inside it. So how do you keep users coming back? You make it as simple as possible for them. Even last year, an onboarding chatbot that asked you a few questions was amazing. You typed, it answered. Today that's not enough. People don't want to type, they want to tap. So now we build MCP apps and widgets to make the journey more engaging.
 
-### 0:30 · Dinner
-"So. This meetup ends in an hour, and I'm already hungry.
-Let me just ask."
+There are usually two ways to do that. One: the AI writes HTML or a React component, and you render it inline. Very flexible, but your browser runs code the AI wrote. Two: you design and build the widgets yourself, in advance. Safe, and it looks like your app, but it can only show what someone planned months ago.
 
-[Hold Space] **"I want dinner after this event. Pick a place nearby."** [release]
+The trend is shifting now. What if you didn't have to build every screen? What if the screen adapted to what the user needs, right now? That's generative UI. And Google started an open answer to it: A2UI.
 
-[While it builds, point at the bricks panel]
-"Watch the right side. The bricks it heard light up first…
-and now the ones it really used.
-And these places are real. It searched the web just now, from here, from Überseestadt."
+### 1:15 · How A2UI works
+[Point at the bricks panel.]
 
-### 0:55 · One decision at a time
-[Tap a place]
-"I tap one.
-And look, no big form. It asks one thing at a time: what time, how many people."
+Here's how A2UI works. My app has a fixed set of components. I call them bricks: cards, buttons, lists, a seat map, a chart. The AI doesn't write any code. It sends JSON. The JSON says which bricks to use, where they go, and what data goes in them. The app reads the JSON and draws the bricks with its own code. If the AI asks for a brick that isn't in the set, the app doesn't draw it. So the AI only sends data, never code.
 
-### 1:10 · We're six, and later
-"Then my friends text me. Of course they do."
+## Part 2 · What I tried
 
-[Hold Space] **"We're six, and later."** [release]
+### 1:45 · Dinner
+Let me try it. This meetup ends soon, and I'm hungry.
 
-[Point at the guests and the time]
-"Six people. One hour later. Same screen, it just changed in place.
-And look here." [point at the turn line: "decision model", "compose –"]
-"No language model was called for this. Zero generated tokens.
-A small decision model, Jev from TypeSafe, understood the sentence and turned two knobs.
-That took about this long." [point at the time on screen]
+[Hold Space] **Say to the app: "I want dinner after this event. Pick a place nearby."**
 
-"That's the second idea tonight.
-The big model builds the screen once.
-A small, fast model takes care of the little steps after."
+Watch the right side. While I speak, a small model guesses the bricks; those are the outlines. While the screen builds, the real picks fill in. And these places are real. It searched the web just now.
 
-### 1:45 · Tomorrow's flight
-"Okay. Dinner is sorted. Tomorrow I have to fly."
+[Tap a place] I tap one, and it asks only what it needs: what time, and how many people.
 
-[Click **New session**]
+### 2:20 · The decision model
+Now my friends text me.
 
-[Hold Space] **"I need to book a flight tomorrow."** [release]
+[Hold Space] **Say to the app: "We're six, and later."**
 
-"It already knows tomorrow's date, and that I'm in Bremen.
-It only asks for what it doesn't know."
+Six people, one hour later. Same screen, changed in place, in about 0.2 seconds.
 
-[Hold Space] **"To New York, give me options."** [release]
+[Point at the turn line: "decision model" and the cost at its end]
+No big AI model was called for that. Look at the cost: less than a tenth of a cent. The screen before it cost about one to three cents. Here's why it matters. The big model takes three to five seconds to build a screen, and every call costs money. But most of what we do in an app is small changes: one more person, a later time. So a small decision model answers one question first: is this a small change, or something new? A small change goes straight into the screen. Something new goes to the big model. In my tests, it sent 30 out of 30 sentences the right way.
 
-"Real fares, from the web.
-And it does not make up prices. If it can't find one, it shows nothing."
+### 3:05 · A screen nobody designed *(cut this part first if you're running long)*
+[Click **New session**] Tomorrow I fly.
 
-### 2:20 · A seat map nobody designed
-[Tap a flight]
-"And because flights have seats… it gives me a seat map.
-Nobody designed this screen. Ten seconds ago it didn't exist."
+[Hold Space] **Say to the app: "I need to book a flight tomorrow."**
 
-### 2:35 · Two other ways to build this
-"Now you could say: we've had chatbots for years.
-So let me show you two other ways to build exactly this."
+It already knows the date and that I'm in Bremen. It only asks what it doesn't know.
+
+[Hold Space] **Say to the app: "To New York, give me options."**
+
+[Tap a flight] Flights have seats, so it gives me a seat map. Nobody designed this screen.
+
+## Part 3 · The difference
+
+### 3:45 · Widgets, HTML, A2UI
+Now the two old ways, with the same requests.
 
 [Press **1**: Widgets]
-"Way one: widgets. This is how most assistants do it today.
-A developer built a flight widget in advance."
+[Hold Space] **Say to the app: "I need a flight from Bremen to New York tomorrow."**
 
-[Hold Space] **"I need a flight from Bremen to New York tomorrow."** [release]
+Looks good. Now a seat.
 
-"Looks fine. Now I want a seat."
+[Hold Space] **Say to the app: "Pick me a window seat."**
 
-[Hold Space] **"Pick me a window seat."** [release]
+Just text. Nobody built a seat map widget, so it can't show one. Safe, but stuck.
 
-"And we get… text. The widget simply has no seat map.
-Somebody has to write new code and ship it."
+[Press **2**: HTML] Now the AI writes the page itself.
 
-### 3:05 · HTML: open, but not safe
-[Press **2**: HTML]
-"Way two: let the model write the page itself. HTML. Anything goes."
+[Hold Space] **Say to the app: "Make the page pink and add a login box."**
 
-[Hold Space] **"Make the page pink and add a login box."** [release]
+It did it, from one sentence. The AI wrote code, and my browser ran it. I keep it in a sandbox here, but the code still runs. Now imagine a web page secretly tells the AI to do this. A fake login box could ask for your password and send it anywhere.
 
-"And… it does it. A login box. From one sentence.
-That's the problem. It's open, but it's not safe."
+[Press **3**: A2UI] Same sentence.
 
-### 3:30 · Back to the box
-[Press **3**: A2UI]
-"Back to the bricks. Same sentence."
+[Hold Space] **Say to the app: "Make the page pink and add a login box."**
 
-[Hold Space] **"Make the page pink and add a login box."** [release]
+Not available. It said no because I told it to. But even if it tried, no brick can change colors, nothing it sends can run, and a tap only comes back to my app.
 
-"Not available.
-The agent can only use what's in the box. No scripts, no login forms.
-It sends data, not code."
-
-### 3:45 · Your turn
-"Okay, your turn.
-Somebody shout something you'd want to see tonight."
-
-[Repeat the request out loud so the room hears it, then hold Space and say it.]
-
-[While it builds] "Nobody planned this one. Let's see what it builds."
-
-*If nobody speaks up within five seconds, use one of these:*
-- "Will it rain when we walk to dinner?"
-- "Split a hundred and twenty euros between four of us. Jonas only had drinks."
-- "Plan a Saturday in Hamburg for two of us, with times."
-
-### 4:15 · Under the hood
+### 4:30 · Advantages and close
 [Open **Under the hood → JSON stream**]
-"And this is everything the agent sent.
-Line by line. A column, a heading, a list of cards, a seat map.
-Data, not code.
-Any app that has the same bricks can draw it. That's A2UI, Google's open protocol for this."
 
-### 4:35 · Close
-"So, three things.
+This is everything the AI sent. Just data: a heading, a list, a seat map. Nothing in here can run.
 
-Widgets are safe, but closed.
-Generated HTML is open, but unsafe.
-Generative UI from a box of bricks is open, and safe.
+So what do you get? It looks like your app, because it uses your own components. It's safe by design, because the AI sends data, not code. It can build screens nobody designed. And it's not only for the web: A2UI has renderers for React, Flutter, Angular and SwiftUI. The one limit is that the AI can only use the bricks in the box. Ask for something outside it, and it says "not available." I think that's a feature, because the safety lives in the box.
 
-A big model writes the screen once. A decision model takes the small steps.
-Tonight that was **N** out of **M** turns, with no generated tokens." [read N and M from the counters at the bottom right: LLM CALLS AVOIDED and TURNS]
+One honest downside: every new screen costs money. [Point at COST in the counters at the bottom right.] That's tonight's total so far. One to three cents a screen sounds small. But at 10,000 users with 20 screens a day, that's about $3,000 a day. So you want the big model only when something is really new.
 
-"And none of this matters if it feels slow or jumpy.
-The experience is the product.
-Say it once. See it at once. Change it in place.
+And the decision model makes it fast and cheap. Tonight that was **N** out of **M** turns with no big AI call. [Read N and M from the counters at the bottom right: LLM CALLS AVOIDED and TURNS.]
 
-Thank you."
+Generative UI is the future. A decision model makes it work. Thank you.
 
 ---
 
 ## If something goes wrong
 
-Say it calmly, it's a live demo, the room is on your side.
+Stay calm. It's a live demo, and the room is on your side.
 
 | What happens | What you do | What you can say |
 |---|---|---|
 | The mic doesn't pick you up | Click "Or type a request", type the same line, Enter | "The mic is shy tonight, I'll type." |
-| A turn hangs for more than ~10 s | Press the F-key for that beat (table below) | "Let me show you the run from this afternoon. Same events, same timing." |
-| Wi-Fi or the API is down | Use F1–F6 for the whole story; they work offline | "The network left the party. Here's the recording, nothing is faked, it's the real event stream." |
-| The audience asks for something odd | Let it build; a "Not available" card is a good answer too | "That's outside the box, and it tells you so." |
+| A turn hangs for more than ~10 s | Press the F-key for that step (table below) | "Here's the run from this afternoon. Same events, same timing." |
+| Wi-Fi or the API is down | Use F1–F6 for the whole story; they work offline | "The network left the party. Here's the recording of the real run." |
+| Someone asks for something odd | Let it build; a "Not available" card is a good answer too | "That's outside the box, and it tells you so." |
 | A list says "Nothing found" | Move on, or press the F-key | "The web had nothing for that one. It doesn't invent things." |
 
-**Replay keys (F-keys), work without Wi-Fi:**
-| Key | Beat |
+**Replay keys** (work without Wi-Fi):
+| Key | Step |
 |---|---|
 | F1 | "I want dinner after this event…" (opens a fresh session by itself) |
 | F2 | Tap a place → time + guests |
-| F3 | "We're six, and later." (the decision-model edit) |
+| F3 | "We're six, and later." (the decision model) |
 | F4 | "I need to book a flight tomorrow." (opens a fresh session by itself) |
 | F5 | "To New York, give me options." |
 | F6 | Tap a flight → seat map |
 
-Replays don't change the turn counters, so the closing N of M stays honest. If you replayed most of the demo, say "tonight's live turns" or skip the numbers.
+Replays don't change the turn counters or the Cost total, so N of M and the cost stay honest. If you replayed most of the demo, say "tonight's live turns" or skip the numbers.
 
----
-
-## Other use cases (for the audience moment, Q&A or a different story)
-
-| Say | What it builds | Ready? |
-|---|---|---|
-| "I want dinner after this event, pick a place nearby." | Live places as cards, then time + guests | Tested many times (talk clock and live) |
-| "We're six, and later." | Same screen edited in place, no LLM | Tested |
-| "I need to book a flight tomorrow." → "To New York, give me options." → tap | Form, live fares, seat map | Tested |
-| "Concerts in Hamburg this weekend." | Live events as cards | Worked live on 24 Nov |
-| "Split a 120 euro bill between four, Jonas only had drinks." | Numbers, totals per person | Worked in earlier tests; rehearse once |
-| "Packing list for New York in November." | A checklist (no web search needed) | Worked in earlier tests; rehearse once |
-| "Compare the three cheapest mobile phone plans in Germany." | A comparison table (new brick) | In the test set; rehearse once |
-| "Plan a Saturday in Hamburg for two of us, with times." | A timeline (new brick) | In the test set; rehearse once |
-| "Show me a nice café near the venue with a photo and its rating." | Cards with photo and rating (new bricks) | Photos not yet seen live; rehearse before using |
-| "Will it rain when we walk to dinner?" / "What's the weather in Bremen today?" | Current weather, hourly chart, 7-day list | Being built now; only use after it's live and rehearsed |
-
-**Two other stories you could tell instead** (same structure, swap the beats):
-- **A weekend in Hamburg:** "Plan a Saturday in Hamburg for two" (timeline) → "Any concerts?" (live events) → "Will it rain?" (weather) → "We'll take the train, show me options." Good if you want to avoid the flight.
-- **The bill after dinner:** "We were six, split 180 euros, two of us only had drinks." (numbers) → "Actually Jonas paid the wine, 40 euros." (changes in place) Short and funny, but rehearse it first.
+**Cost meter:** each turn line ends with what that turn cost: measured tokens × list price, plus $0.01 per web search. A decision-model edit shows **<$0.001**. COST in the counters is the total for this visit. Not counted: speech to text and the brick guesses. On the live site a new screen cost $0.008–0.029 (cheaper once the prompt is cached).
 
 ---
 
 ## Rehearsal checklist
-1. Run the full script twice with the mic, out loud, with a timer. Aim for 4:40 so you have room.
-2. Say each line exactly as written; the shorter the sentence, the better the mic and the agent handle it.
-3. Practice the three key moments: pointing at the bricks lighting up, pointing at "decision model · compose –", and reading N of M.
+1. Run the script twice out loud with the mic and a timer. Aim for 5:00. If you're over, cut "A screen nobody designed" first.
+2. Say the "Say to the app" lines exactly as written. Short sentences work best for the mic and the AI.
+3. Practise the key moments: the bricks outlined while you speak and filled while it builds, pointing at "decision model" on the turn line, and the login box in HTML vs A2UI.
 4. Try F1–F6 once with Wi-Fi off.
 5. Before going on: Delete all sessions, A2UI mode, decision model on.
+6. Weather ("Will it rain?") is merged but use it on stage only after it's deployed and you've tried it once.
