@@ -30,8 +30,8 @@ const FIELD_NAME = /^[A-Za-z][A-Za-z0-9_]{0,31}$/;
 export type SearchRequest = { query: string; fields: string[]; max: number; images?: boolean };
 
 export type SearchOutcome =
-  | { ok: true; records: JsonObject[]; dropped: number; searches: number; inputTokens: number; outputTokens: number }
-  | { ok: false; error: string; searches?: number; inputTokens?: number; outputTokens?: number };
+  | { ok: true; records: JsonObject[]; dropped: number; searches: number; inputTokens: number; outputTokens: number; model?: string }
+  | { ok: false; error: string; searches?: number; inputTokens?: number; outputTokens?: number; model?: string };
 
 // ── Args ──────────────────────────────────────────────────────────────────────
 

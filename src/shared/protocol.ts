@@ -124,7 +124,17 @@ export type WidgetName = "RestaurantWidget" | "FlightSearchWidget";
 
 /** One JSON object per SSE `data:` line. */
 export type TurnEvent =
-  | { type: "route"; kind: RouteKind; decision: "patch" | "compose"; ms: number; engine: string; reason: string; patches: number }
+  | {
+      type: "route";
+      kind: RouteKind;
+      decision: "patch" | "compose";
+      ms: number;
+      engine: string;
+      reason: string;
+      patches: number;
+      /** Jev input tokens, when the router reached Jev (cost meter). Recordings made before this field have none. */
+      input_tokens?: number;
+    }
   | { type: "a2ui"; msg: A2uiMessage; origin: A2uiOrigin }
   | { type: "caption"; text: string }
   | { type: "widget"; name: WidgetName; props: JsonObject }
@@ -156,6 +166,8 @@ export type TurnEvent =
       searches?: number;
       input_tokens?: number;
       output_tokens?: number;
+      /** The model that ran the search (cost meter). Recordings made before this field have none. */
+      model?: string;
       error?: string;
     }
   | { type: "error"; message: string }

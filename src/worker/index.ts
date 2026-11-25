@@ -5,7 +5,7 @@
 import { Hono } from "hono";
 import { CATALOG_PATH, catalogJson } from "@shared/catalog";
 import { LIMITS } from "@shared/protocol";
-import { anthropicLlm, anthropicWebSearch, composerRefusalFallbackFor, composerThinkingFor } from "./claude";
+import { anthropicLlm, anthropicWebSearch, composerRefusalFallbackFor, composerThinkingFor, DEFAULT_MODEL } from "./claude";
 import { fetchOgImages } from "./ogImage";
 import { predictBricks } from "./predict";
 import { promptContext } from "./prompts";
@@ -72,7 +72,8 @@ app.post("/api/turn", async (c) => {
         }
       : {}),
     context,
-    search: (req, signal) => runSearch(req, webSearch, context, signal),
+    // The model name rides along for the cost meter; anthropicWebSearch picks it the same way.
+    search: async (req, signal) => ({ ...(await runSearch(req, webSearch, context, signal)), model: env.LLM_MODEL || DEFAULT_MODEL }),
     // An arrow, not a bare fetch reference: workerd throws "Illegal invocation" on a detached fetch.
     ogImages: (urls, signal, timeoutMs) => fetchOgImages(urls, (input, init) => fetch(input, init), signal, { timeoutMs }),
     weather: (req, signal) => fetchWeather(req, (input, init) => fetch(input, init), signal),

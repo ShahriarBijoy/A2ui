@@ -282,7 +282,17 @@ export async function runTurn(req: TurnRequest, deps: TurnDeps, emit: Emit, clie
     if (ctl.signal.aborted) return;
     if (shouldRoute(req)) {
       const r = await guardedRoute(req, deps, ctl.signal);
-      await send({ type: "route", kind: r.kind, decision: r.decision, ms: r.ms, engine: r.engine, reason: r.reason, patches: r.patches.length });
+      await send({
+        type: "route",
+        kind: r.kind,
+        decision: r.decision,
+        ms: r.ms,
+        engine: r.engine,
+        reason: r.reason,
+        patches: r.patches.length,
+        // Always present on live turns (0 when Jev was not reached), so a recording without it reads as "unknown".
+        input_tokens: r.inputTokens ?? 0,
+      });
       if (r.decision === "patch" && r.patches.length > 0 && req.surface) {
         for (const p of r.patches) {
           const msg: A2uiMessage = { version: A2UI_VERSION, updateDataModel: { surfaceId: req.surface.id, path: p.path, value: p.value } };
@@ -830,6 +840,7 @@ function fetchEvent(source: DataSource, query: string, outcome: SearchOutcome, m
   if (outcome.searches !== undefined) ev.searches = outcome.searches;
   if (outcome.inputTokens !== undefined) ev.input_tokens = outcome.inputTokens;
   if (outcome.outputTokens !== undefined) ev.output_tokens = outcome.outputTokens;
+  if (outcome.model !== undefined) ev.model = outcome.model;
   if (!outcome.ok) ev.error = outcome.error;
   return ev;
 }

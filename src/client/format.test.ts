@@ -111,7 +111,8 @@ describe("chipParts: measured values only", () => {
   });
   test("decision off: no route, no invented numbers", () => {
     const item = agent({}, { usage: { ...usage, first_ui_ms: null }, llmCalled: true });
-    expect(texts(item)).toEqual(["route –", "compose 1.8 s", "312 tok", "claude-haiku-5-5"]);
+    // 4100 in × $0.10 + 312 out × $0.50 per MTok = $0.00057: below a tenth of a cent.
+    expect(texts(item)).toEqual(["route –", "compose 1.8 s", "312 tok", "claude-haiku-5-5", "<$0.001"]);
   });
   test("in flight: ellipses, never zeros", () => {
     expect(texts(agent({ status: "pending" }))).toEqual(["route …", "compose …"]);
@@ -135,6 +136,36 @@ describe("chipParts: measured values only", () => {
   });
   test("failed turn after an LLM call shows no compose number", () => {
     expect(texts(agent({ status: "error" }, { llmCalled: true }))).toEqual(["route –"]);
+  });
+});
+
+describe("chipParts: cost", () => {
+  const cost = (item: AgentItem) => chipParts(item).find((p) => p.key === "cost");
+  test("a live patch turn: the decision model's share, highlighted, never an exact figure", () => {
+    const item = agent({}, { route: { ...route("patch", 2), input_tokens: 1800 } });
+    expect(cost(item)).toMatchObject({ text: "<$0.001", tone: "highlight" });
+  });
+  test("a recorded patch turn (no token count) shows no cost, not $0", () => {
+    expect(cost(agent({}, { route: route("patch", 2) }))).toBeUndefined();
+  });
+  test("a compose turn with a search: composer + search tokens + the search fee (replay F1's numbers)", () => {
+    const item = agent(
+      {},
+      {
+        route: { ...route("compose"), input_tokens: 0 },
+        usage: { ...usage, model: "claude-sonnet-5-5", input_tokens: 239, output_tokens: 576, cache_read_tokens: 6038 },
+        fetches: [{ source: "search", query: "q", ok: true, records: 3, ms: 4738, searches: 1, input_tokens: 15353, output_tokens: 867, model: "claude-haiku-5-5" }],
+        llmCalled: true,
+      },
+    );
+    expect(cost(item)?.text).toBe("$0.019");
+  });
+  test("one unpriced part hides the whole figure", () => {
+    const item = agent({}, { usage: { ...usage, model: "claude-mystery-9" }, llmCalled: true });
+    expect(cost(item)).toBeUndefined();
+  });
+  test("no cost while the turn is still running", () => {
+    expect(cost(agent({ status: "streaming" }, { usage, llmCalled: true }))).toBeUndefined();
   });
 });
 

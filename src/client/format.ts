@@ -3,6 +3,7 @@
  * Everything that turns metrics into text lives here: the turn chip must never print a number
  * that did not arrive in a measured event.
  */
+import { fetchCost, formatUsd, routeCost, usageCost } from "@shared/pricing";
 import type { AgentItem, FetchMetrics, SurfaceState, ThreadItem, UserItem, WireEntry } from "./state";
 
 // ── Numbers ──────────────────────────────────────────────────────────────────
@@ -116,8 +117,47 @@ export function chipParts(item: AgentItem): ChipPart[] {
     parts.push({ key: "model", text: usage.model, tone: "muted" });
   }
   if (route) parts.push({ key: "engine", text: route.engine, tone: "muted" });
+  const cost = finished ? turnCost(item) : null;
+  if (cost !== null) {
+    parts.push({
+      key: "cost",
+      text: formatUsd(cost),
+      tone: route?.decision === "patch" ? "highlight" : "muted",
+      title: COST_TITLE,
+    });
+  }
   if (refused > 0) parts.push({ key: "refused", text: `${refused} refused`, tone: "strong" });
   return parts;
+}
+
+export const COST_TITLE =
+  "Measured tokens × list price (Claude, $10 per 1,000 web searches, decision model est.). Not counted: speech to text, brick guesses.";
+
+/**
+ * What one finished turn cost, or null when any part has no price (an unknown model, or a recording made
+ * before the meter: those lack the model and token fields). Never a partial sum shown as the whole.
+ */
+export function turnCost(item: AgentItem): number | null {
+  const { route, usage, fetches } = item.metrics;
+  let total = 0;
+  if (route) {
+    // Live route events always carry input_tokens (0 when Jev was not reached); a recording without it is unknown.
+    const r = routeCost(route);
+    if (r === null) return null;
+    total += r;
+  }
+  if (usage) {
+    const u = usageCost(usage);
+    if (u === null) return null;
+    total += u;
+  }
+  for (const f of fetches ?? []) {
+    const c = fetchCost(f);
+    if (c === null) return null;
+    total += c;
+  }
+  if (!route && !usage && !(fetches ?? []).length) return null;
+  return total;
 }
 
 function finiteCount(n: number | undefined): number {

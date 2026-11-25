@@ -180,7 +180,16 @@ describe("runTurn: patch path", () => {
     const llm = fakeLlm(['{"caption":"should not run"}\n']);
     const events = await collect(request(), deps({ route: async () => patchRoute(), llm }));
     expect(events.map((e) => e.type)).toEqual(["route", "a2ui", "a2ui", "caption", "done"]);
-    expect(events[0]).toEqual({ type: "route", kind: "edit", decision: "patch", ms: 180, engine: "jev-1.14.0", reason: "edit", patches: 2 });
+    expect(events[0]).toEqual({
+      type: "route",
+      kind: "edit",
+      decision: "patch",
+      ms: 180,
+      engine: "jev-1.14.0",
+      reason: "edit",
+      patches: 2,
+      input_tokens: expect.any(Number),
+    });
     expect(events[1]).toEqual({
       type: "a2ui",
       origin: "knob",

@@ -9,6 +9,7 @@ import { A2UI_MESSAGE_KINDS, A2UI_VERSION, isPlainObject } from "@shared/a2ui";
 import type { BrickName } from "@shared/catalog";
 import { deriveKnobs } from "@shared/knobs";
 import { setAt } from "@shared/pointer";
+import { fetchCost, routeCost, usageCost } from "@shared/pricing";
 import type { A2uiOrigin, Knob, SurfaceSnapshot, ThreadEntry, TurnInput, TurnRequest } from "@shared/protocol";
 import { LIMITS } from "@shared/protocol";
 import { resolveActionContext } from "@/a2ui/evaluate";
@@ -42,7 +43,7 @@ export function initialState(session: SessionMeta = EMPTY_SESSION): AppState {
     activeTurnId: null,
     wire: [],
     pool: { predicted: [], used: [], counts: {} },
-    totals: { turns: 0, llmCalls: 0, llmAvoided: 0, inputTokens: 0, outputTokens: 0, refusals: 0 },
+    totals: { turns: 0, llmCalls: 0, llmAvoided: 0, inputTokens: 0, outputTokens: 0, refusals: 0, costUsd: 0 },
     transcript: { final: "", interim: "", listening: false },
     replaying: false,
     recordings: {},
@@ -587,6 +588,7 @@ export function createStore(opts: StoreOptions = {}): StoreApi {
         case "route":
           a = { ...a, metrics: { ...a.metrics, route: omitType(ev) } };
           if (ev.decision === "patch") s = { ...s, totals: { ...s.totals, llmAvoided: s.totals.llmAvoided + 1 } };
+          s = { ...s, totals: { ...s.totals, costUsd: s.totals.costUsd + (routeCost(ev) ?? 0) } };
           break;
         case "a2ui": {
           const before = s.surfaces;
@@ -644,6 +646,7 @@ export function createStore(opts: StoreOptions = {}): StoreApi {
               llmCalls: s.totals.llmCalls + 1,
               inputTokens: s.totals.inputTokens + finite(ev.input_tokens),
               outputTokens: s.totals.outputTokens + finite(ev.output_tokens),
+              costUsd: s.totals.costUsd + (usageCost(ev) ?? 0),
             },
           };
           break;
@@ -666,6 +669,7 @@ export function createStore(opts: StoreOptions = {}): StoreApi {
               llmCalls: s.totals.llmCalls + (search ? 1 : 0),
               inputTokens: s.totals.inputTokens + finite(ev.input_tokens),
               outputTokens: s.totals.outputTokens + finite(ev.output_tokens),
+              costUsd: s.totals.costUsd + (fetchCost(ev) ?? 0),
             },
           };
           // Status untouched: a late fetch never turns a done or failed turn back into streaming.

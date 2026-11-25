@@ -4,7 +4,8 @@ import { Input } from "@/components/ui/input";
 import { Kbd } from "@/components/ui/kbd";
 import { Switch } from "@/components/ui/switch";
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
-import { formatTokens, tailText } from "@/format";
+import { COST_TITLE, formatTokens, tailText } from "@/format";
+import { formatUsd } from "@shared/pricing";
 import { VoiceGlow } from "@/fx/VoiceGlow";
 import type { GlowPhase } from "@/fx/voiceSweep";
 import { MODE_KEYS } from "@/keyboard";
@@ -171,13 +172,14 @@ function Totals({ totals }: { totals: SessionTotals }) {
         label="Tokens in / out"
         value={`${formatTokens(totals.inputTokens)} / ${formatTokens(totals.outputTokens)}`}
       />
+      <Stat label="Cost" value={formatUsd(totals.costUsd)} title={COST_TITLE} />
     </dl>
   );
 }
 
-function Stat({ label, value, mark }: { label: string; value: string; mark?: boolean }) {
+function Stat({ label, value, mark, title }: { label: string; value: string; mark?: boolean; title?: string }) {
   return (
-    <div className="flex flex-col items-end gap-0.5">
+    <div className="flex flex-col items-end gap-0.5" title={title}>
       <dt className="flex items-center gap-1.5 font-mono text-[0.625rem] uppercase tracking-[0.14em] text-muted-foreground">
         {mark && <span aria-hidden className="size-1.5 rounded-full bg-highlight" />}
         {label}

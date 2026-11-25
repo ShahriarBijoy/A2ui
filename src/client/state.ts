@@ -115,6 +115,8 @@ export type SessionTotals = {
   inputTokens: number;
   outputTokens: number;
   refusals: number;
+  /** Measured tokens × list prices (shared/pricing.ts), USD. Calls with no known price add nothing. */
+  costUsd: number;
 };
 
 export type Transcript = { final: string; interim: string; listening: boolean; error?: string };
